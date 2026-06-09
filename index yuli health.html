@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yuli · Health Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f4f0;--surface:#fff;--surface2:#f0ede8;--border:rgba(0,0,0,.08);--border-med:rgba(0,0,0,.14);
+  --text:#1a1917;--text2:#6b6860;--text3:#a09d98;
+  --teal:#0f7b5f;--teal-l:#e0f4ed;--teal-m:#1D9E75;
+  --purple:#4a42b0;--purple-l:#eeedf8;
+  --amber:#a05f0a;--amber-l:#fdf3e3;
+  --red:#c0392b;--red-l:#fdf0ee;
+  --pink:#993556;--pink-l:#fbeaf0;
+  --blue:#185FA5;--blue-l:#e6f1fb;
+  --r:12px;--rs:8px;--sh:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04)
+}
+body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5}
+.shell{max-width:980px;margin:0 auto;padding:24px 20px 80px}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.header h1{font-size:20px;font-weight:600;letter-spacing:-.3px}
+.header .sub{font-size:13px;color:var(--text2);margin-top:2px}
+.header-right{display:flex;gap:8px;align-items:center}
+.cycle-pill{font-size:11px;font-weight:500;padding:5px 12px;border-radius:20px;cursor:pointer;border:none;font-family:inherit}
+.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);overflow-x:auto}
+.tb{font-family:inherit;font-size:13px;font-weight:500;color:var(--text2);background:none;border:none;cursor:pointer;padding:8px 14px;border-radius:var(--rs) var(--rs) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color .15s}
+.tb:hover{color:var(--text)}.tb.active{color:var(--text);border-bottom-color:var(--text)}
+.tp{display:none}.tp.active{display:block}
+.card{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);padding:16px 18px;box-shadow:var(--sh)}
+.ct{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
+.mg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+@media(max-width:600px){.mg{grid-template-columns:repeat(2,1fr)}}
+.mc{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);padding:14px 16px;box-shadow:var(--sh)}
+.ml{font-size:11px;color:var(--text2);margin-bottom:4px}
+.mv{font-size:22px;font-weight:600;letter-spacing:-.5px;line-height:1.1}
+.ms{font-size:11px;margin-top:3px}
+.good{color:var(--teal-m)}.warn{color:var(--amber)}.bad{color:var(--red)}.muted{color:var(--text3)}
+.ai-card{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);border-left:3px solid var(--purple);padding:16px 18px;margin-bottom:14px;box-shadow:var(--sh)}
+.ai-lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--purple);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.ai-dot{width:6px;height:6px;border-radius:50%;background:var(--purple);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ai-txt{font-size:13px;color:var(--text);line-height:1.65}
+.tc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.trc{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+@media(max-width:640px){.tc,.trc{grid-template-columns:1fr}}
+.mb14{margin-bottom:14px}.mt10{margin-top:10px}
+.sr{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px}
+.sd{width:22px;color:var(--text3);flex-shrink:0}
+.sbw{flex:1;height:8px;border-radius:4px;background:var(--surface2);overflow:hidden;display:flex}
+.sdur{width:38px;text-align:right;color:var(--text2)}
+.sde{background:#3C3489}.sre{background:#7F77DD}.sl{background:#AFA9EC}.saw{background:#D3D1C7}
+.wi{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:.5px solid var(--border);font-size:12px}
+.wi:last-child{border:none}
+.wb{font-size:10px;font-weight:500;padding:2px 8px;border-radius:20px}
+.by{background:var(--purple-l);color:var(--purple)}.bw{background:var(--teal-l);color:var(--teal)}.bg{background:var(--amber-l);color:var(--amber)}.bo{background:var(--surface2);color:var(--text2)}
+.pb{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;margin:5px 0 3px}
+.pf{height:100%;border-radius:3px;transition:width .4s}
+.pl{display:flex;justify-content:space-between;font-size:10px;color:var(--text3)}
+.sbs{display:flex;align-items:flex-end;gap:4px;height:60px;padding-top:8px}
+.sbc{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.sbi{width:100%;border-radius:3px 3px 0 0;background:var(--teal-m);min-height:3px}
+.sbl{font-size:9px;color:var(--text3)}
+.ii{display:flex;gap:10px;padding:10px 0;border-bottom:.5px solid var(--border);font-size:12px;line-height:1.5}
+.ii:last-child{border:none}
+.id{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.cw{position:relative;width:100%}
+.fir{display:flex;gap:8px;margin-bottom:14px}
+.fb{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--surface);border:1.5px dashed var(--border-med);border-radius:var(--r);cursor:pointer;font-family:inherit;font-size:13px;color:var(--text2);transition:all .15s}
+.fb:hover{border-color:var(--teal-m);color:var(--teal);background:var(--teal-l)}
+.fb svg{width:18px;height:18px;flex-shrink:0}
+.fe{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);margin-bottom:6px}
+.fel{flex:1}.fen{font-size:13px;font-weight:500}.fed{font-size:11px;color:var(--text2);margin-top:1px}
+.fem{display:flex;gap:8px;font-size:11px;flex-shrink:0}
+.mp{padding:2px 7px;border-radius:20px;font-weight:500}
+.mpp{background:var(--teal-l);color:var(--teal)}.mpc{background:var(--amber-l);color:var(--amber)}.mpf{background:var(--purple-l);color:var(--purple)}
+.fed-del{background:none;border:none;color:var(--text3);cursor:pointer;padding:4px;margin-left:8px;font-size:16px;line-height:1}
+.fed-del:hover{color:var(--red)}
+.ms2{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.mb2{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:10px 12px;text-align:center}
+.mb2v{font-size:18px;font-weight:600}.mb2l{font-size:10px;color:var(--text3);margin-top:2px}
+.je{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:12px 14px;margin-bottom:8px}
+.jeh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+.jt{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px}
+.t-pain{background:var(--red-l);color:var(--red)}.t-medical{background:var(--blue-l);color:var(--blue)}
+.t-feedback{background:var(--teal-l);color:var(--teal)}.t-mood{background:var(--amber-l);color:var(--amber)}
+.t-life{background:var(--purple-l);color:var(--purple)}.t-sleep{background:#f1efe8;color:var(--text2)}
+.t-correction{background:var(--pink-l);color:var(--pink)}
+.jd{font-size:10px;color:var(--text3)}.jtxt{font-size:12px;line-height:1.6;color:var(--text)}
+.jdel{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px}
+.jdel:hover{color:var(--red)}
+.ts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.to{font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;cursor:pointer;border:1.5px solid transparent;transition:all .12s;opacity:.55}
+.to.sel{opacity:1;border-color:currentColor}
+.to.t-pain{background:var(--red-l);color:var(--red)}.to.t-medical{background:var(--blue-l);color:var(--blue)}
+.to.t-feedback{background:var(--teal-l);color:var(--teal)}.to.t-mood{background:var(--amber-l);color:var(--amber)}
+.to.t-life{background:var(--purple-l);color:var(--purple)}.to.t-sleep{background:#f1efe8;color:var(--text2)}
+.to.t-correction{background:var(--pink-l);color:var(--pink)}
+.cp{border-radius:var(--r);padding:16px 18px;border:.5px solid var(--border);margin-bottom:14px}
+.cpn{font-size:18px;font-weight:600;margin-bottom:4px}.cpd{font-size:12px;line-height:1.6;margin-top:6px}
+.cdg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.cdc{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:10px 12px}
+.cdl{font-size:10px;color:var(--text3);margin-bottom:3px}.cdv{font-size:13px;font-weight:500}
+.chi{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:.5px solid var(--border);font-size:12px}
+.chi:last-child{border:none}
+.cb{font-size:10px;padding:2px 8px;border-radius:20px;border:none;cursor:pointer;font-family:inherit;font-weight:500}
+.c-conf{background:var(--teal-l);color:var(--teal)}.c-pred{background:var(--amber-l);color:var(--amber);cursor:pointer}
+.mo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center}
+.mo.open{display:flex}
+.modal{background:var(--surface);border-radius:var(--r);padding:24px;width:400px;max-width:92vw}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:6px}
+.modal p{font-size:13px;color:var(--text2);margin-bottom:16px}
+.ma{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.btn{font-family:inherit;font-size:13px;font-weight:500;padding:8px 18px;border-radius:var(--rs);cursor:pointer;transition:all .15s}
+.btn-p{background:var(--text);color:#fff;border:none}.btn-p:hover{background:#333}
+.btn-s{background:var(--surface);color:var(--text2);border:.5px solid var(--border-med)}.btn-s:hover{background:var(--surface2)}
+.btn-sm{padding:5px 12px;font-size:12px}
+.mic{width:64px;height:64px;border-radius:50%;background:var(--teal-l);border:2px solid var(--teal-m);cursor:pointer;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;transition:all .15s}
+.mic.rec{background:var(--red-l);border-color:var(--red);animation:pr 1s infinite}
+@keyframes pr{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.3)}50%{box-shadow:0 0 0 10px rgba(192,57,43,0)}}
+.mic svg{width:26px;height:26px}
+.vt{min-height:44px;background:var(--surface2);border-radius:var(--rs);padding:10px 14px;font-size:13px;color:var(--text);margin-bottom:12px}
+.pd{border:2px dashed var(--border-med);border-radius:var(--r);padding:20px;text-align:center;cursor:pointer;margin-bottom:12px;transition:all .15s}
+.pd:hover{border-color:var(--teal-m);background:var(--teal-l)}
+.pp{width:100%;border-radius:var(--rs);margin-bottom:10px;max-height:180px;object-fit:cover}
+.sf label{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px}
+.sf input,.sf select{width:100%;padding:8px 12px;border:.5px solid var(--border-med);border-radius:var(--rs);font-family:inherit;font-size:13px;background:var(--surface2);color:var(--text);margin-bottom:12px}
+.sf input[type=password]{font-family:'DM Mono',monospace;font-size:12px}
+.sn{font-size:11px;color:var(--text3);margin-top:-8px;margin-bottom:12px}
+.sp{width:16px;height:16px;border:2px solid var(--border-med);border-top-color:var(--purple);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fb2{display:flex;justify-content:space-between;align-items:center}
+.empty{text-align:center;padding:24px 16px;color:var(--text3);font-size:13px}
+.empty strong{display:block;font-size:14px;color:var(--text2);margin-bottom:4px}
+.div{border:none;border-top:.5px solid var(--border);margin:12px 0}
+input[type=date],input[type=number],input[type=text],input[type=password],textarea{outline:none}
+input[type=date]:focus,input[type=number]:focus,input[type=text]:focus,input[type=password]:focus,textarea:focus{box-shadow:0 0 0 2px var(--purple)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<div class="header">
+  <div>
+    <h1 id="hname">Yuli's health dashboard</h1>
+    <div class="sub" id="hdate"></div>
+  </div>
+  <div class="header-right">
+    <button class="cycle-pill" id="cpill" onclick="goTab('cycle')" style="background:var(--pink-l);color:var(--pink);">— cycle</button>
+    <button class="btn btn-s btn-sm" onclick="openSettings()">⚙ Settings</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tb active" onclick="goTab('today',this)">Today</button>
+  <button class="tb" onclick="goTab('week',this)">This week</button>
+  <button class="tb" onclick="goTab('trends',this)">Trends</button>
+  <button class="tb" onclick="goTab('food',this)">Food log</button>
+  <button class="tb" onclick="goTab('cycle',this)">Cycle</button>
+  <button class="tb" onclick="goTab('journal',this)">Health journal</button>
+</div>
+
+<!-- TODAY -->
+<div id="tp-today" class="tp active">
+  <div class="mg">
+    <div class="mc"><div class="ml">Steps today</div><div class="mv">588</div><div class="ms muted">early — keep moving</div></div>
+    <div class="mc"><div class="ml">Sleep last night</div><div class="mv">7h 56m</div><div class="ms good">128m deep · best this week</div></div>
+    <div class="mc"><div class="ml">Protein today</div><div class="mv" id="t-prot">0g</div><div class="ms warn" id="t-prot-s">log first meal</div></div>
+    <div class="mc"><div class="ml">Cycle phase</div><div class="mv" id="t-phase" style="font-size:15px;">—</div><div class="ms muted" id="t-cday">add dates in Cycle tab</div></div>
+  </div>
+  <div class="ai-card">
+    <div class="ai-lbl"><span class="ai-dot"></span>AI coach · today</div>
+    <div class="ai-txt" id="ai-today"><span class="sp"></span><span style="color:var(--text3);font-style:italic;">Generating your daily briefing…</span></div>
+  </div>
+  <div class="tc">
+    <div class="card">
+      <div class="ct">Last night’s sleep</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div><div style="font-size:22px;font-weight:600;letter-spacing:-.5px;">7h 56m</div><div style="font-size:11px;color:var(--text3);">bedtime ~00:10</div></div>
+        <div style="font-size:12px;display:flex;flex-direction:column;gap:4px;padding-top:2px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:#3C3489;font-weight:500;">Deep</span><span>2h 8m</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:#7F77DD;font-weight:500;">REM</span><span>1h 58m</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:#AFA9EC;font-weight:500;">Light</span><span>3h 50m</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="muted">Awake</span><span>7m</span></div>
+        </div>
+      </div>
+      <div class="sbw" style="height:10px;border-radius:5px;"><div class="sde" style="width:27%;"></div><div class="sre" style="width:25%;"></div><div class="sl" style="width:47%;"></div><div class="saw" style="width:1%;"></div></div>
+    </div>
+    <div class="card">
+      <div class="ct">Protein goal</div>
+      <div class="fb2" style="margin-bottom:4px;"><span style="font-size:13px;font-weight:500;" id="p-lbl">0g logged</span><span style="font-size:12px;color:var(--text2);" id="p-tgt">100g target</span></div>
+      <div class="pb"><div class="pf" id="p-bar" style="width:0%;background:var(--teal-m);"></div></div>
+      <div class="pl"><span id="p-pct">0%</span><span id="p-rem">100g remaining</span></div>
+      <div class="div"></div>
+      <div class="ct" style="margin-bottom:8px;">Recent journal flags</div>
+      <div id="t-jflags" style="font-size:12px;color:var(--text3);">No active health notes</div>
+    </div>
+  </div>
+</div>
+
+<!-- WEEK -->
+<div id="tp-week" class="tp">
+  <div class="mg">
+    <div class="mc"><div class="ml">Total steps</div><div class="mv">44,946</div><div class="ms good">~29km walked</div></div>
+    <div class="mc"><div class="ml">Workouts</div><div class="mv">3</div><div class="ms warn">2 gym sessions missed</div></div>
+    <div class="mc"><div class="ml">Avg sleep</div><div class="mv">7h 33m</div><div class="ms good">good quality</div></div>
+    <div class="mc"><div class="ml">Avg protein</div><div class="mv" id="w-prot">—</div><div class="ms muted">log meals to track</div></div>
+  </div>
+  <div class="ai-card">
+    <div class="ai-lbl"><span class="ai-dot"></span>AI coach · weekly review</div>
+    <div class="ai-txt" id="ai-week"><span class="sp"></span><span style="color:var(--text3);font-style:italic;">Generating weekly review…</span></div>
+  </div>
+  <div class="tc">
+    <div class="card"><div class="ct">Daily steps</div><div class="sbs" id="step-bars"></div></div>
+    <div class="card"><div class="ct">Sleep this week</div><div id="sleep-week"></div></div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">Workouts this week</div>
+    <div class="wi"><div><span class="wb bw">Walk</span><span style="margin-left:8px;font-weight:500;">Sunday 8 Jun</span></div><div style="font-size:12px;color:var(--text2);">60 min · 3.14km · 99bpm · 31 AZM</div></div>
+    <div class="wi"><div><span class="wb bo">Workout</span><span style="margin-left:8px;font-weight:500;">Sunday 8 Jun</span></div><div style="font-size:12px;color:var(--text2);">25 min · 68bpm · light zone</div></div>
+    <div class="wi"><div><span class="wb by">Yoga</span><span style="margin-left:8px;font-weight:500;">Saturday 7 Jun</span></div><div style="font-size:12px;color:var(--text2);">60 min · 101bpm · 31 AZM</div></div>
+    <div class="wi"><div><span class="wb by">Yoga ★</span><span style="margin-left:8px;font-weight:500;">Thursday 5 Jun</span></div><div style="font-size:12px;color:var(--text2);">96 min · 104bpm · 55 AZM · best session</div></div>
+  </div>
+  <div class="card">
+    <div class="ct">Weekly insights</div>
+    <div class="ii"><div class="id" style="background:var(--teal-m);"></div><div>Sunday’s 12k steps is your highest day — great cardio contribution even without a labelled cardio session.</div></div>
+    <div class="ii"><div class="id" style="background:var(--purple);"></div><div>Thursday’s 96-min yoga was your most intense session (55 active zone min). Aim to match or exceed this weekly.</div></div>
+    <div class="ii"><div class="id" style="background:var(--amber);"></div><div>Friday sleep short at 6h 3m — jet lag still resolving. Bedtimes are trending earlier, which is good.</div></div>
+    <div class="ii"><div class="id" style="background:var(--red);"></div><div>0 gym sessions this week. As jet lag resolves, adding 1–2 gym sessions is the highest-leverage next step.</div></div>
+  </div>
+</div>
+
+<!-- TRENDS -->
+<div id="tp-trends" class="tp">
+  <div style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:13px;font-weight:500;">Daily steps — last 7 days</div><div style="font-size:11px;color:var(--text3);">3–9 Jun 2026</div></div>
+    <div class="card" style="padding:16px;"><div class="cw" style="height:180px;"><canvas id="stepsChart" role="img" aria-label="Daily steps chart"></canvas></div></div>
+  </div>
+  <div style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:13px;font-weight:500;">Sleep stages — last 7 nights</div><div style="font-size:11px;color:var(--text3);">3–9 Jun 2026</div></div>
+    <div class="card" style="padding:16px;">
+      <div style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;font-size:11px;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#3C3489;border-radius:2px;display:inline-block;"></span>Deep</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#7F77DD;border-radius:2px;display:inline-block;"></span>REM</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#AFA9EC;border-radius:2px;display:inline-block;"></span>Light</span>
+      </div>
+      <div class="cw" style="height:200px;"><canvas id="sleepChart" role="img" aria-label="Sleep stages chart"></canvas></div>
+    </div>
+  </div>
+  <div style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:13px;font-weight:500;">Workout intensity — this week</div><div style="font-size:11px;color:var(--text3);">active zone minutes</div></div>
+    <div class="card" style="padding:16px;"><div class="cw" style="height:160px;"><canvas id="workoutChart" role="img" aria-label="Workout chart"></canvas></div></div>
+  </div>
+</div>
+
+<!-- FOOD -->
+<div id="tp-food" class="tp">
+  <div class="ms2">
+    <div class="mb2"><div class="mb2v" id="f-cal">0</div><div class="mb2l">kcal</div></div>
+    <div class="mb2"><div class="mb2v" id="f-prot" style="color:var(--teal);">0g</div><div class="mb2l">protein</div></div>
+    <div class="mb2"><div class="mb2v" id="f-carb" style="color:var(--amber);">0g</div><div class="mb2l">carbs</div></div>
+    <div class="mb2"><div class="mb2v" id="f-fat" style="color:var(--purple);">0g</div><div class="mb2l">fat</div></div>
+  </div>
+  <div class="card mb14">
+    <div class="fb2" style="margin-bottom:4px;"><span style="font-size:13px;font-weight:500;">Daily protein goal</span><span style="font-size:12px;color:var(--text2);"><span id="fp-logged">0</span>g / <span id="fp-tgt">100</span>g</span></div>
+    <div class="pb"><div class="pf" id="fp-bar" style="width:0%;background:var(--teal-m);"></div></div>
+    <div class="pl"><span id="fp-pct">0%</span><span id="fp-left">100g to go</span></div>
+  </div>
+  <div class="fir">
+    <button class="fb" onclick="openPhotoModal('food')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Photo</button>
+    <button class="fb" onclick="openVoiceModal('food')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Voice</button>
+    <button class="fb" onclick="openTextModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="9" y2="18"/></svg>Type</button>
+  </div>
+  <div id="food-ai" class="ai-card" style="display:none;"><div class="ai-lbl"><span class="ai-dot"></span>Analysing meal…</div><div class="ai-txt" id="food-ai-txt"><span class="sp"></span>Identifying food…</div></div>
+  <div id="food-entries"><div class="empty" id="food-empty"><strong>No meals logged today</strong>Tap Photo, Voice, or Type to log your first meal.</div></div>
+</div>
+
+<!-- CYCLE -->
+<div id="tp-cycle" class="tp">
+  <div class="cp" id="cycle-banner" style="background:var(--pink-l);border-color:rgba(153,53,86,.2);">
+    <div class="ct">Current phase</div>
+    <div class="cpn" id="c-phase-name" style="color:var(--pink);">Add your cycle dates to get started</div>
+    <div class="cpd" id="c-phase-desc" style="color:var(--text2);">Enter your last period start date below. Add previous dates for better predictions.</div>
+  </div>
+  <div class="cdg" id="c-dates-grid" style="display:none;">
+    <div class="cdc"><div class="cdl">Last period</div><div class="cdv" id="c-last">—</div></div>
+    <div class="cdc"><div class="cdl">Next predicted</div><div class="cdv" id="c-next">—</div></div>
+    <div class="cdc"><div class="cdl">Avg cycle length</div><div class="cdv" id="c-avg">—</div></div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">Cycle history</div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">Add past period start dates. More dates = better predictions. Tap a predicted date to confirm.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input type="date" id="c-input" style="flex:1;padding:8px 12px;border:.5px solid var(--border-med);border-radius:var(--rs);font-family:inherit;font-size:13px;background:var(--surface2);color:var(--text);">
+      <button class="btn btn-p btn-sm" onclick="addCycleDate()">Add date</button>
+    </div>
+    <div id="c-list"><div class="empty" style="padding:12px 0;"><strong>No dates added yet</strong>Add your most recent period start date above.</div></div>
+  </div>
+  <div class="ai-card"><div class="ai-lbl"><span class="ai-dot"></span>Cycle-aware coaching</div><div class="ai-txt" id="ai-cycle" style="font-size:13px;">Add cycle dates above to get phase-specific training and nutrition guidance.</div></div>
+  <div class="card">
+    <div class="ct">Phase guide</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div style="padding:10px;background:var(--red-l);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px;">MENSTRUAL · Days 1–5</div><div style="font-size:11px;color:var(--text2);line-height:1.5;">Lower intensity. Gentle yoga, walking. Prioritise iron-rich foods. Rest is productive training.</div></div>
+      <div style="padding:10px;background:var(--teal-l);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--teal);margin-bottom:4px;">FOLLICULAR · Days 6–13</div><div style="font-size:11px;color:var(--text2);line-height:1.5;">Rising energy. Best window for new training challenges and heavier strength work.</div></div>
+      <div style="padding:10px;background:var(--amber-l);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--amber);margin-bottom:4px;">OVULATORY · Days 14–16</div><div style="font-size:11px;color:var(--text2);line-height:1.5;">Peak strength and coordination. Ideal for gym sessions. High protein supports performance.</div></div>
+      <div style="padding:10px;background:var(--purple-l);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--purple);margin-bottom:4px;">LUTEAL · Days 17–28</div><div style="font-size:11px;color:var(--text2);line-height:1.5;">Fatigue rises late luteal. Higher protein + magnesium needs. Scale back from day 22.</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- JOURNAL -->
+<div id="tp-journal" class="tp">
+  <div class="ai-card">
+    <div class="ai-lbl"><span class="ai-dot"></span>How the AI coach uses this log</div>
+    <div class="ai-txt" style="font-size:12px;">Every entry here is read before generating recommendations. Log pain, medical updates, physio notes, energy levels, mood, travel, sleep context, or corrections to AI assumptions. The coach flags conflicts and tracks patterns over time.</div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">Add entry</div>
+    <div class="ct" style="margin-bottom:6px;">Category</div>
+    <div class="ts" id="j-tags">
+      <div class="to t-pain sel" data-tag="pain" onclick="selTag(this)">Pain / discomfort</div>
+      <div class="to t-medical" data-tag="medical" onclick="selTag(this)">Medical update</div>
+      <div class="to t-feedback" data-tag="feedback" onclick="selTag(this)">Exercise feedback</div>
+      <div class="to t-mood" data-tag="mood" onclick="selTag(this)">Energy / mood</div>
+      <div class="to t-life" data-tag="life" onclick="selTag(this)">Life context</div>
+      <div class="to t-sleep" data-tag="sleep" onclick="selTag(this)">Sleep note</div>
+      <div class="to t-correction" data-tag="correction" onclick="selTag(this)">Correct AI</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openVoiceModal('journal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Voice</button>
+      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openPhotoModal('journal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Photo / doc</button>
+    </div>
+    <textarea id="j-input" placeholder="Be specific — e.g. 'Left glute pain during downward dog, achy 3/10, went away after 10 min' or 'Physio cleared hip hinges today' or 'Feeling exhausted, poor sleep last night, travelling'" style="width:100%;padding:10px 12px;border:.5px solid var(--border-med);border-radius:var(--rs);font-family:inherit;font-size:13px;resize:vertical;min-height:72px;background:var(--surface2);color:var(--text);margin-bottom:10px;"></textarea>
+    <button class="btn btn-p" onclick="addJournalEntry()">Save entry</button>
+  </div>
+  <div id="j-entries"><div class="empty"><strong>No entries yet</strong>Start logging to build your health history. The AI coach reads every entry before giving recommendations.</div></div>
+</div>
+
+</div><!-- /shell -->
+
+<!-- VOICE MODAL -->
+<div class="mo" id="mo-voice">
+  <div class="modal" style="text-align:center;">
+    <h3 id="v-title">Describe what you ate</h3>
+    <p id="v-desc">Tap the mic and speak</p>
+    <button class="mic" id="mic-btn" onclick="toggleRec()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
+    <div class="vt" id="v-txt">Tap the mic to start…</div>
+    <div class="ma"><button class="btn btn-s" onclick="closeVoice()">Cancel</button><button class="btn btn-p" id="v-sub" onclick="submitVoice()" disabled>Use this →</button></div>
+  </div>
+</div>
+
+<!-- PHOTO MODAL -->
+<div class="mo" id="mo-photo">
+  <div class="modal">
+    <h3 id="ph-title">Photo your meal</h3>
+    <p>Take a photo or upload from your camera roll.</p>
+    <div class="pd" onclick="document.getElementById('ph-input').click()">
+      <img id="ph-prev" class="pp" style="display:none;" alt="Preview">
+      <div id="ph-txt"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 6px;display:block;opacity:.3;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><div style="font-size:13px;color:var(--text3);">Tap to open camera or choose photo</div></div>
+    </div>
+    <input type="file" id="ph-input" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(event)">
+    <div class="ma"><button class="btn btn-s" onclick="closePhoto()">Cancel</button><button class="btn btn-p" id="ph-sub" onclick="submitPhoto()" disabled>Analyse →</button></div>
+  </div>
+</div>
+
+<!-- TEXT MODAL -->
+<div class="mo" id="mo-text">
+  <div class="modal">
+    <h3>Describe your meal</h3>
+    <p>Type what you ate and roughly how much.</p>
+    <textarea id="tx-input" placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style="width:100%;padding:10px 12px;border:.5px solid var(--border-med);border-radius:var(--rs);font-family:inherit;font-size:13px;resize:vertical;min-height:72px;background:var(--surface2);color:var(--text);"></textarea>
+    <div class="ma"><button class="btn btn-s" onclick="closeText()">Cancel</button><button class="btn btn-p" onclick="submitText()">Analyse →</button></div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="mo" id="mo-settings">
+  <div class="modal" style="width:440px;">
+    <h3 style="margin-bottom:16px;">Settings</h3>
+    <div class="sf">
+      <label>Anthropic API key</label>
+      <input type="password" id="s-key" placeholder="sk-ant-api03-…" autocomplete="off">
+      <p class="sn">Stored in your browser only. Never uploaded anywhere.</p>
+      <label>Daily protein target (g)</label>
+      <input type="number" id="s-prot" value="100" min="50" max="200">
+      <label>Your name</label>
+      <input type="text" id="s-name" value="Yuli">
+    </div>
+    <div class="ma"><button class="btn btn-s" onclick="closeSett()">Cancel</button><button class="btn btn-p" onclick="saveSett()">Save</button></div>
+  </div>
+</div>
+
+<script>
+// DATA
+const WS=[{d:'Tue',s:5473},{d:'Wed',s:5912},{d:'Thu',s:6964},{d:'Fri',s:6676},{d:'Sat',s:7361},{d:'Sun',s:11972},{d:'Mon',s:588,t:true}];
+const WSL=[{d:'Tue',t:473,de:100,r:109,l:240,a:7},{d:'Wed',t:479,de:110,r:118,l:251,a:10},{d:'Thu',t:440,de:101,r:114,l:225,a:78},{d:'Fri',t:358,de:97,r:74,l:240,a:23},{d:'Sat',t:461,de:121,r:100,l:240,a:24},{d:'Sun',t:476,de:128,r:118,l:230,a:7}];
+const PHASES={menstrual:{n:'Menstrual phase',days:'Days 1–5',c:'var(--red)',bg:'var(--red-l)'},follicular:{n:'Follicular phase',days:'Days 6–13',c:'var(--teal)',bg:'var(--teal-l)'},ovulatory:{n:'Ovulatory phase',days:'Days 14–16',c:'var(--amber)',bg:'var(--amber-l)'},luteal:{n:'Luteal phase',days:'Days 17–28',c:'var(--purple)',bg:'var(--purple-l)'}};
+const TLBLS={pain:'Pain',medical:'Medical',feedback:'Feedback',mood:'Mood',life:'Life',sleep:'Sleep',correction:'Correction'};
+
+// STATE
+function tkey(){return new Date().toISOString().slice(0,10);}
+let food=JSON.parse(localStorage.getItem('yf_'+tkey())||'[]');
+let journal=JSON.parse(localStorage.getItem('yj')||'[]');
+let cycle=JSON.parse(localStorage.getItem('yc')||'[]');
+let sett=JSON.parse(localStorage.getItem('ys')||'{}');
+let apiKey=sett.apiKey||'';
+let protTgt=parseInt(sett.proteinTarget)||100;
+let vTarget='food',phTarget='food',phB64=null,isRec=false,recog=null,selTag2='pain';
+
+// INIT
+document.addEventListener('DOMContentLoaded',()=>{
+  setEl('hdate',new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'}));
+  loadSett();renderBars();renderSleepW();renderCharts();updateFood();renderJournal();renderCycle();
+  generateAI('today');generateAI('week');
+  document.querySelectorAll('.mo').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+});
+
+function goTab(n,btn){
+  document.querySelectorAll('.tp').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tp-'+n).classList.add('active');
+  if(btn) btn.classList.add('active');
+  else document.querySelectorAll('.tb').forEach(b=>{if(b.textContent.toLowerCase().includes(n.slice(0,4)))b.classList.add('active');});
+}
+function setEl(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+
+// CYCLE
+function phaseFromDay(d){return d<=5?'menstrual':d<=13?'follicular':d<=16?'ovulatory':'luteal';}
+function avgLen(){
+  const c=cycle.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>a-b);
+  if(c.length<2)return 28;
+  const diffs=[];for(let i=1;i<c.length;i++)diffs.push((c[i]-c[i-1])/(864e5));
+  return Math.round(diffs.reduce((a,b)=>a+b,0)/diffs.length);
+}
+function cycleInfo(){
+  const c=cycle.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>b-a);
+  if(!c.length)return null;
+  const last=c[0],now=new Date();now.setHours(0,0,0,0);
+  const day=Math.floor((now-last)/(864e5))+1;
+  const avg=avgLen();
+  return{day:((day-1)%avg)+1,phase:phaseFromDay(((day-1)%avg)+1),last,next:new Date(last.getTime()+(avg*864e5)),avg};
+}
+function genPredicted(){
+  const c=cycle.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>a-b);
+  if(!c.length)return;
+  const avg=avgLen(),now=new Date();now.setHours(0,0,0,0);
+  const ex=new Set(cycle.map(x=>x.d));
+  let cur=new Date(c[c.length-1].getTime()+(avg*864e5));
+  for(let i=0;i<6;i++){
+    const k=cur.toISOString().slice(0,10);
+    if(!ex.has(k)&&cur>=now){cycle.push({d:k,ok:false});ex.add(k);}
+    cur=new Date(cur.getTime()+(avg*864e5));
+  }
+  saveCyc();
+}
+function addCycleDate(){
+  const v=document.getElementById('c-input').value;if(!v)return;
+  const ex=cycle.find(x=>x.d===v);
+  if(ex)ex.ok=true;else cycle.push({d:v,ok:true});
+  cycle.sort((a,b)=>new Date(a.d)-new Date(b.d));
+  genPredicted();saveCyc();renderCycle();
+  document.getElementById('c-input').value='';
+  if(apiKey)generateAI('cycle');
+}
+function confirmCyc(d){const e=cycle.find(x=>x.d===d);if(e)e.ok=true;saveCyc();renderCycle();}
+function delCyc(d){cycle=cycle.filter(x=>x.d!==d);saveCyc();renderCycle();}
+function saveCyc(){localStorage.setItem('yc',JSON.stringify(cycle));}
+function renderCycle(){
+  const info=cycleInfo();
+  const pill=document.getElementById('cpill');
+  if(info){
+    const p=PHASES[info.phase];
+    pill.textContent='Day '+info.day+' · '+info.phase;
+    pill.style.background=p.bg;pill.style.color=p.c;
+    setEl('t-phase',p.n.split(' ')[0]);setEl('t-cday','Day '+info.day+' of cycle');
+    const b=document.getElementById('cycle-banner');b.style.background=p.bg;
+    document.getElementById('c-phase-name').textContent=p.n+' · '+p.days;
+    document.getElementById('c-phase-name').style.color=p.c;
+    setEl('c-phase-desc',PHASES[info.phase].n+' — see phase guide below for training recommendations.');
+    document.getElementById('c-dates-grid').style.display='grid';
+    setEl('c-last',info.last.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}));
+    setEl('c-next',info.next.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}));
+    setEl('c-avg',info.avg+' days');
+  } else {pill.textContent='— cycle';pill.style.background='var(--pink-l)';pill.style.color='var(--pink)';}
+  const sorted=[...cycle].sort((a,b)=>new Date(b.d)-new Date(a.d));
+  const list=document.getElementById('c-list');
+  if(!sorted.length){list.innerHTML='<div class="empty" style="padding:12px 0;"><strong>No dates added yet</strong>Add your most recent period start date above.</div>';return;}
+  list.innerHTML=sorted.map(e=>{
+    const lbl=new Date(e.d).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+    const badge=e.ok?'<span class="cb c-conf">Confirmed</span>':`<button class="cb c-pred" onclick="confirmCyc('${e.d}')">Predicted — confirm?</button>`;
+    return `<div class="chi"><div><strong style="font-size:12px;">${lbl}</strong></div><div style="display:flex;align-items:center;gap:8px;">${badge}<button class="jdel" onclick="delCyc('${e.d}')">×</button></div></div>`;
+  }).join('');
+}
+
+// JOURNAL
+function selTag(el){document.querySelectorAll('.to').forEach(t=>t.classList.remove('sel'));el.classList.add('sel');selTag2=el.dataset.tag;}
+function addJournalEntry(text){
+  const t=text||document.getElementById('j-input').value.trim();if(!t)return;
+  journal.unshift({id:Date.now(),dt:new Date().toISOString(),tag:selTag2,txt:t});
+  localStorage.setItem('yj',JSON.stringify(journal));
+  document.getElementById('j-input').value='';
+  renderJournal();updateJFlags();
+  if(apiKey){generateAI('today');generateAI('week');}
+}
+function delJournal(id){journal=journal.filter(e=>e.id!==id);localStorage.setItem('yj',JSON.stringify(journal));renderJournal();updateJFlags();}
+function renderJournal(){
+  const c=document.getElementById('j-entries');
+  if(!journal.length){c.innerHTML='<div class="empty"><strong>No entries yet</strong>Start logging to build your health history.</div>';return;}
+  c.innerHTML=journal.map(e=>{
+    const d=new Date(e.dt);
+    const ds=d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="je"><div class="jeh"><div style="display:flex;align-items:center;gap:8px;"><span class="jt t-${e.tag}">${TLBLS[e.tag]||e.tag}</span><span class="jd">${ds}</span></div><button class="jdel" onclick="delJournal(${e.id})">×</button></div><div class="jtxt">${e.txt}</div></div>`;
+  }).join('');
+}
+function updateJFlags(){
+  const el=document.getElementById('t-jflags');if(!el)return;
+  if(!journal.length){el.textContent='No active health notes';el.style.color='var(--text3)';return;}
+  el.innerHTML=journal.slice(0,4).map(e=>`<div style="margin-bottom:4px;"><span class="jt t-${e.tag}" style="font-size:10px;padding:1px 6px;">${TLBLS[e.tag]}</span> <span style="font-size:11px;color:var(--text2);">${e.txt.slice(0,65)}${e.txt.length>65?'…':''}</span></div>`).join('');
+}
+
+// FOOD
+function updateFood(){
+  const tp=food.reduce((s,e)=>s+(e.p||0),0),tc=food.reduce((s,e)=>s+(e.c||0),0),tf=food.reduce((s,e)=>s+(e.f||0),0),tk=food.reduce((s,e)=>s+(e.k||0),0);
+  setEl('f-cal',Math.round(tk));setEl('f-prot',Math.round(tp)+'g');setEl('f-carb',Math.round(tc)+'g');setEl('f-fat',Math.round(tf)+'g');
+  const pct=Math.min(100,Math.round((tp/protTgt)*100));
+  setEl('fp-logged',Math.round(tp));setEl('fp-pct',pct+'%');setEl('fp-tgt',protTgt);setEl('fp-left',Math.max(0,Math.round(protTgt-tp))+'g to go');
+  const fpb=document.getElementById('fp-bar');if(fpb){fpb.style.width=pct+'%';fpb.style.background=pct>=90?'var(--teal)':pct>=60?'var(--teal-m)':'var(--amber)';}
+  setEl('t-prot',Math.round(tp)+'g');
+  const ts=document.getElementById('t-prot-s');if(ts){const r=Math.max(0,Math.round(protTgt-tp));ts.textContent=r>0?r+'g to target':'Goal reached!';ts.className='ms '+(r>0?'warn':'good');}
+  const pb=document.getElementById('p-bar');if(pb)pb.style.width=pct+'%';
+  setEl('p-lbl',Math.round(tp)+'g logged');setEl('p-pct',pct+'%');setEl('p-rem',Math.max(0,Math.round(protTgt-tp))+'g remaining');setEl('p-tgt',protTgt+'g target');
+  const c=document.getElementById('food-entries'),em=document.getElementById('food-empty');
+  if(!food.length){if(em)em.style.display='block';return;}
+  if(em)em.style.display='none';
+  c.innerHTML=food.map((e,i)=>`<div class="fe"><div class="fel"><div class="fen">${e.n}</div><div class="fed">${e.det||''}</div></div><div class="fem"><span class="mp mpp">${Math.round(e.p||0)}g P</span><span class="mp mpc">${Math.round(e.c||0)}g C</span><span class="mp mpf">${Math.round(e.f||0)}g F</span></div><button class="fed-del" onclick="delFood(${i})">×</button></div>`).join('');
+  localStorage.setItem('yf_'+tkey(),JSON.stringify(food));
+}
+function delFood(i){food.splice(i,1);updateFood();}
+
+// VOICE
+function openVoiceModal(t){
+  vTarget=t;
+  setEl('v-title',t==='food'?'Describe what you ate':'Log a health note');
+  setEl('v-desc',t==='food'?'Tap mic and say what you had':'Tap mic and describe what you want to log');
+  document.getElementById('v-txt').textContent='Tap the mic to start…';
+  document.getElementById('v-sub').disabled=true;
+  document.getElementById('mo-voice').classList.add('open');
+}
+function closeVoice(){if(isRec)stopRec();document.getElementById('mo-voice').classList.remove('open');}
+function toggleRec(){
+  if(isRec){stopRec();return;}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){setEl('v-txt','Speech recognition not supported. Try Chrome or Safari.');return;}
+  recog=new SR();recog.continuous=false;recog.interimResults=true;recog.lang='en-US';
+  recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join('');document.getElementById('v-txt').textContent=t;if(e.results[e.results.length-1].isFinal)document.getElementById('v-sub').disabled=false;};
+  recog.onend=()=>{isRec=false;document.getElementById('mic-btn').classList.remove('rec');};
+  recog.start();isRec=true;document.getElementById('mic-btn').classList.add('rec');
+}
+function stopRec(){if(recog)recog.stop();isRec=false;document.getElementById('mic-btn').classList.remove('rec');}
+async function submitVoice(){
+  const t=document.getElementById('v-txt').textContent;
+  if(!t||t==='Tap the mic to start…')return;
+  closeVoice();
+  if(vTarget==='food')await analyseFood({type:'text',v:t});
+  else addJournalEntry(t);
+}
+
+// PHOTO
+function openPhotoModal(t){
+  phTarget=t;phB64=null;
+  setEl('ph-title',t==='food'?'Photo your meal':'Attach document or photo');
+  document.getElementById('ph-prev').style.display='none';document.getElementById('ph-txt').style.display='block';
+  document.getElementById('ph-sub').disabled=true;
+  document.getElementById('mo-photo').classList.add('open');
+}
+function closePhoto(){document.getElementById('mo-photo').classList.remove('open');}
+function handlePhoto(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();r.onload=ev=>{const u=ev.target.result;phB64=u.split(',')[1];const p=document.getElementById('ph-prev');p.src=u;p.style.display='block';document.getElementById('ph-txt').style.display='none';document.getElementById('ph-sub').disabled=false;};r.readAsDataURL(f);
+}
+async function submitPhoto(){
+  if(!phB64)return;closePhoto();
+  if(phTarget==='food')await analyseFood({type:'image',v:phB64});
+  else await analyseJPhoto(phB64);
+}
+async function analyseJPhoto(b64){
+  if(!apiKey){addJournalEntry('[Photo attached — add API key in Settings to auto-describe]');return;}
+  try{
+    const r=await callAI([{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},{type:'text',text:'This is a health document or medical photo for a health journal. Describe key findings in 2-3 sentences. Be factual and concise.'}]}],null,300);
+    addJournalEntry('[Photo] '+r);
+  }catch{addJournalEntry('[Photo attached]');}
+}
+
+// TEXT
+function openTextModal(){document.getElementById('mo-text').classList.add('open');}
+function closeText(){document.getElementById('mo-text').classList.remove('open');}
+async function submitText(){
+  const t=document.getElementById('tx-input').value.trim();if(!t)return;
+  document.getElementById('tx-input').value='';closeText();
+  await analyseFood({type:'text',v:t});
+}
+
+// AI FOOD
+async function analyseFood(inp){
+  if(!apiKey){alert('Add your Anthropic API key in Settings first.');openSettings();return;}
+  goTab('food');
+  const ac=document.getElementById('food-ai'),at=document.getElementById('food-ai-txt');
+  ac.style.display='block';at.innerHTML='<span class="sp"></span>Identifying food…';
+  const sys='You are a nutrition expert. Return ONLY valid JSON, no other text:\n{"n":"Short name","det":"Brief description","p":25,"c":30,"f":12,"k":330,"conf":"high|medium|low","note":"Optional"}\nAll numbers are integers.';
+  const msgs=inp.type==='image'?[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:inp.v}},{type:'text',text:'Analyse this meal, return JSON.'}]}]:[{role:'user',content:'Analyse: "'+inp.v+'". Return JSON.'}];
+  try{
+    const raw=await callAI(msgs,sys,300);
+    const e=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    at.innerHTML=`<strong>${e.n}</strong> — ${e.det}<br><span style="font-size:11px;color:var(--text3);margin-top:3px;display:block;">Confidence: ${e.conf}${e.note?' · '+e.note:''}</span>`;
+    setTimeout(()=>{ac.style.display='none';},3500);
+    food.push({n:e.n,det:e.det,p:e.p,c:e.c,f:e.f,k:e.k});updateFood();
+  }catch(err){at.textContent='Could not analyse. Check API key in Settings. '+err.message;}
+}
+
+// AI COACHING
+function buildCtx(){
+  const tp=food.reduce((s,e)=>s+(e.p||0),0);
+  const j=journal.slice(0,12).map(e=>'['+TLBLS[e.tag]+'] '+e.txt).join('\n');
+  const ci=cycleInfo();
+  const cc=ci?'Cycle: Day '+ci.day+' of ~'+ci.avg+'-day cycle. Phase: '+ci.phase+' ('+PHASES[ci.phase].days+').':'Cycle: not yet set up.';
+  return 'USER: Yuli, 41F. Post thoracic spinal surgery T9-T10 decompression ~3 months ago + L4-L5 disc herniation history. Fully cleared for exercise. Goals: glute/leg muscle mass, upper body strength, cardio. Recovering from 4.5-month LATAM trip jet lag.\n\nFITNESS THIS WEEK (Jun 3-9):\nSteps: Tue 5473/Wed 5912/Thu 6964/Fri 6676/Sat 7361/Sun 11972/Mon 588\nWorkouts: Thu yoga 96min/104bpm/55 AZM, Sat yoga 60min/101bpm/31 AZM, Sun workout 25min/68bpm, Sun walk 60min/99bpm/3.14km\nSleep avg 7h33m. Deep avg 109min. Fri 6h3m (short). Sun best 7h56m/128m deep.\nProtein today: '+Math.round(tp)+'g (target '+protTgt+'g)\n\n'+cc+'\n\nHEALTH JOURNAL (recent entries):\n'+(j||'No entries yet.')+'\n\nSUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin.';
+}
+const APROMPTS={
+  today:'Personalised coaching briefing for TODAY (Mon Jun 9). 3-4 sentences. Specific: activity recommendation, protein priority, anything from the health journal that affects today. If journal mentions pain or injuries, acknowledge and adjust. Consider cycle phase.',
+  week:'Weekly review. 3-5 sentences. What went well, what was missed, one specific smart adjustment (e.g. "skip the aerobic session this week since your step count covers it"). Note cycle-aligned training if phase is set. Reference key journal entries that should shape next week.',
+  cycle:"3-4 sentences of specific cycle-phase advice for training intensity, exercise selection, nutrition, and recovery. Be practical and specific to Yulis goals and medical history."
+};
+async function generateAI(t){
+  const el=document.getElementById('ai-'+t);if(!el)return;
+  if(!apiKey){el.innerHTML='<span style="color:var(--text3);">Add your API key in Settings to enable AI coaching.</span>';return;}
+  el.innerHTML='<span class="sp"></span><span style="color:var(--text3);font-style:italic;">Generating…</span>';
+  try{
+    const txt=await callAI([{role:'user',content:buildCtx()+'\n\n'+APROMPTS[t]}],null,300);
+    el.textContent=txt;
+  }catch(err){el.textContent='Could not generate. Check API key. '+err.message;}
+}
+
+async function callAI(msgs,sys,maxT){
+  const body={model:'claude-sonnet-4-6',max_tokens:maxT||300,messages:msgs};
+  if(sys)body.system=sys;
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});
+  const d=await r.json();if(d.error)throw new Error(d.error.message);
+  return d.content[0].text.trim();
+}
+
+// CHARTS
+function renderBars(){
+  const c=document.getElementById('step-bars');if(!c)return;
+  const mx=Math.max(...WS.map(d=>d.s));
+  c.innerHTML=WS.map(d=>`<div class="sbc"><div class="sbi" style="height:${Math.round((d.s/mx)*100)}%;background:${d.t?'#9FE1CB':d.s>=10000?'#0F6E56':'#1D9E75'};"></div><div class="sbl">${d.d}</div></div>`).join('');
+}
+function renderSleepW(){
+  const c=document.getElementById('sleep-week');if(!c)return;
+  c.innerHTML=WSL.map(d=>{const tot=d.de+d.r+d.l+d.a;return`<div class="sr"><span class="sd">${d.d}</span><div class="sbw"><div class="sde" style="width:${(d.de/tot*100).toFixed(1)}%;"></div><div class="sre" style="width:${(d.r/tot*100).toFixed(1)}%;"></div><div class="sl" style="width:${(d.l/tot*100).toFixed(1)}%;"></div><div class="saw" style="width:${(d.a/tot*100).toFixed(1)}%;"></div></div><span class="sdur" style="color:${d.t<360?'var(--red)':'var(--text2)'}">${Math.floor(d.t/60)}h${d.t%60}m</span></div>`}).join('');
+}
+function renderCharts(){
+  const sc=document.getElementById('stepsChart');
+  if(sc)new Chart(sc,{type:'bar',data:{labels:WS.map(d=>d.d),datasets:[{data:WS.map(d=>d.s),backgroundColor:WS.map(d=>d.t?'#9FE1CB':d.s>=10000?'#0F6E56':'#1D9E75'),borderRadius:4},{type:'line',data:Array(7).fill(10000),borderColor:'#D3D1C7',borderWidth:1,borderDash:[5,4],pointRadius:0,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y.toLocaleString()+' steps'}}},scales:{x:{grid:{display:false},ticks:{font:{size:11}}},y:{beginAtZero:true,ticks:{callback:v=>(v/1000).toFixed(0)+'k',font:{size:11}},grid:{color:'rgba(0,0,0,.05)'}}}}});
+  const slc=document.getElementById('sleepChart');
+  if(slc)new Chart(slc,{type:'bar',data:{labels:WSL.map(d=>d.d),datasets:[{label:'Deep',data:WSL.map(d=>d.de),backgroundColor:'#3C3489',borderRadius:0},{label:'REM',data:WSL.map(d=>d.r),backgroundColor:'#7F77DD',borderRadius:0},{label:'Light',data:WSL.map(d=>d.l),backgroundColor:'#AFA9EC',borderRadius:0},{label:'Awake',data:WSL.map(d=>d.a),backgroundColor:'#D3D1C7',borderRadius:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const m=ctx.parsed.y;return ctx.dataset.label+': '+Math.floor(m/60)+'h '+(m%60)+'m';}}}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{size:11}}},y:{stacked:true,ticks:{callback:v=>Math.round(v/60)+'h',font:{size:11}},grid:{color:'rgba(0,0,0,.05)'}}}}});
+  const wc=document.getElementById('workoutChart');
+  if(wc)new Chart(wc,{type:'bar',data:{labels:['Walk (Sun)','Workout (Sun)','Yoga (Sat)','Yoga ★ (Thu)'],datasets:[{data:[31,0,31,55],backgroundColor:['#1D9E75','#B4B2A9','#7F77DD','#534AB7'],borderRadius:4}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.x+' active zone min'}}},scales:{x:{beginAtZero:true,ticks:{font:{size:11}},grid:{color:'rgba(0,0,0,.05)'}},y:{grid:{display:false},ticks:{font:{size:11}}}}}});
+}
+
+// SETTINGS
+function openSettings(){document.getElementById('mo-settings').classList.add('open');}
+function closeSett(){document.getElementById('mo-settings').classList.remove('open');}
+function loadSett(){
+  const s=JSON.parse(localStorage.getItem('ys')||'{}');
+  apiKey=s.apiKey||'';protTgt=parseInt(s.proteinTarget)||100;
+  if(s.apiKey)document.getElementById('s-key').value=s.apiKey;
+  if(s.proteinTarget)document.getElementById('s-prot').value=s.proteinTarget;
+  if(s.name){document.getElementById('s-name').value=s.name;setEl('hname',s.name+"'s health dashboard");}
+  updateJFlags();
+}
+function saveSett(){
+  const k=document.getElementById('s-key').value.trim(),pt=parseInt(document.getElementById('s-prot').value)||100,nm=document.getElementById('s-name').value.trim()||'Yuli';
+  localStorage.setItem('ys',JSON.stringify({apiKey:k,proteinTarget:pt,name:nm}));
+  apiKey=k;protTgt=pt;setEl('hname',nm+"'s health dashboard");setEl('fp-tgt',pt);setEl('p-tgt',pt+'g target');
+  closeSett();updateFood();
+  if(k){generateAI('today');generateAI('week');}
+}
+</script>
+</body>
+</html>
