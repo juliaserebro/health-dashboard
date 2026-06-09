@@ -160,10 +160,13 @@ body{font-family:"Inter",-apple-system,sans-serif;background:var(--bg);color:var
 <div class="tabs">
   <button class="tb active" onclick="goTab('today',this)">Today</button>
   <button class="tb" onclick="goTab('week',this)">This week</button>
+  <button class="tb" onclick="goTab('month',this)">Month</button>
   <button class="tb" onclick="goTab('trends',this)">Trends</button>
   <button class="tb" onclick="goTab('food',this)">Food log</button>
   <button class="tb" onclick="goTab('cycle',this)">Cycle</button>
   <button class="tb" onclick="goTab('journal',this)">Health journal</button>
+  <button class="tb" onclick="goTab('goals',this)">Goals &amp; profile</button>
+  <button class="tb" onclick="goTab('spine',this)">Spine history</button>
 </div>
 
 <!-- TODAY -->
@@ -342,7 +345,132 @@ body{font-family:"Inter",-apple-system,sans-serif;background:var(--bg);color:var
   <div id="j-entries"><div class="empty"><strong>Loading…</strong></div></div>
 </div>
 
+<!-- MONTH -->
+<div id="tp-month" class="tp">
+  <div class="mg">
+    <div class="mc"><div class="ml">Month steps</div><div class="mv" id="m-steps">—</div><div class="ms muted">June 2026</div></div>
+    <div class="mc"><div class="ml">Workouts</div><div class="mv" id="m-workouts">—</div><div class="ms muted">sessions logged</div></div>
+    <div class="mc"><div class="ml">Avg sleep</div><div class="mv" id="m-sleep">—</div><div class="ms muted">this month</div></div>
+    <div class="mc"><div class="ml">Avg protein</div><div class="mv" id="m-protein">—</div><div class="ms muted">log meals to track</div></div>
+  </div>
+  <div class="ai-card"><div class="ai-lbl"><span class="ai-dot"></span>Monthly overview</div><div class="ai-txt" style="font-size:13px;">Your monthly summary builds as you log more data. Check back after a few weeks of consistent logging.</div></div>
+  <div class="card mb14"><div class="ct">Week by week — June 2026</div><div id="month-weeks"></div></div>
+  <div class="card"><div class="ct">Monthly workout log</div><div id="month-workouts-list"><div class="empty"><strong>Log workouts in Fitbit</strong>They appear here as your monthly record.</div></div></div>
 </div>
+
+<!-- GOALS & PROFILE -->
+<div id="tp-goals" class="tp">
+  <div class="card mb14">
+    <div class="ct">Personal profile</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Name</div><div style="font-size:14px;font-weight:500;">Julia Serebro</div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Date of birth</div><div style="font-size:14px;font-weight:500;">29 Nov 1985</div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Height</div><div style="font-size:14px;font-weight:500;">166 cm</div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Age</div><div style="font-size:14px;font-weight:500;" id="calc-age">40</div></div>
+    </div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">InBody baseline — 8 June 2026</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Weight</div><div style="font-size:20px;font-weight:600;">57.6<span style="font-size:12px;font-weight:400;color:var(--text2);"> kg</span></div></div>
+      <div style="background:var(--teal-l);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--teal);margin-bottom:3px;">Skeletal muscle</div><div style="font-size:20px;font-weight:600;">24.9<span style="font-size:12px;font-weight:400;color:var(--text2);"> kg</span></div></div>
+      <div style="background:var(--amber-l);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--amber);margin-bottom:3px;">Body fat</div><div style="font-size:20px;font-weight:600;">12.2<span style="font-size:12px;font-weight:400;color:var(--text2);"> kg</span></div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Body fat %</div><div style="font-size:20px;font-weight:600;">21.2<span style="font-size:12px;font-weight:400;color:var(--text2);">%</span></div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">BMI</div><div style="font-size:16px;font-weight:600;">20.9</div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">InBody score</div><div style="font-size:16px;font-weight:600;">78 <span style="font-size:11px;color:var(--text3);">/ 100</span></div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">Visceral fat</div><div style="font-size:16px;font-weight:600;">Level 5 <span style="font-size:11px;color:var(--teal);">low</span></div></div>
+      <div style="background:var(--surface2);border-radius:var(--rs);padding:12px;"><div style="font-size:10px;color:var(--text3);margin-bottom:3px;">BMR</div><div style="font-size:16px;font-weight:600;">1,350 kcal</div></div>
+    </div>
+  </div>
+  <div class="tc mb14">
+    <div class="card" style="border-left:3px solid var(--teal-m);">
+      <div class="ct">3-month goals — September 2026</div>
+      <div style="display:flex;flex-direction:column;gap:0;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Weight</span><span style="font-weight:500;">57–58 kg</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Skeletal muscle</span><span style="font-weight:500;color:var(--teal);">25.5 kg <small>+0.6</small></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Body fat</span><span style="font-weight:500;color:var(--amber);">11.5 kg <small>-0.7</small></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Body fat %</span><span style="font-weight:500;">19.8%</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">InBody score</span><span style="font-weight:500;">82+</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;"><span style="color:var(--text2);">Push-ups consecutive</span><span style="font-weight:500;">10</span></div>
+      </div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--purple);">
+      <div class="ct">6-month goals — December 2026</div>
+      <div style="display:flex;flex-direction:column;gap:0;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Weight</span><span style="font-weight:500;">57–59 kg</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Skeletal muscle</span><span style="font-weight:500;color:var(--teal);">26.9 kg <small>+2.0</small></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Body fat</span><span style="font-weight:500;color:var(--amber);">10.2 kg <small>-2.0</small></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">Body fat %</span><span style="font-weight:500;">17.5%</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--text2);">InBody score</span><span style="font-weight:500;">85+</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;"><span style="color:var(--text2);">Push-ups consecutive</span><span style="font-weight:500;">15</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">The 4 goals</div>
+    <div style="padding:12px 0;border-bottom:.5px solid var(--border);"><div style="font-size:13px;font-weight:500;margin-bottom:4px;">1. Build glute and leg muscle mass</div><div style="font-size:12px;color:var(--text2);line-height:1.6;">Increase skeletal muscle mass from 24.9 kg. Focus on lower body strength through gym sessions and progressive resistance training.</div></div>
+    <div style="padding:12px 0;border-bottom:.5px solid var(--border);"><div style="font-size:13px;font-weight:500;margin-bottom:4px;">2. Improve upper body strength</div><div style="font-size:12px;color:var(--text2);line-height:1.6;">Build from ~5 consecutive push-ups. Target 10 by September, 15 by December. Push variations, rows, shoulder work.</div></div>
+    <div style="padding:12px 0;border-bottom:.5px solid var(--border);"><div style="font-size:13px;font-weight:500;margin-bottom:4px;">3. Strengthen lower back</div><div style="font-size:12px;color:var(--text2);line-height:1.6;">Build spinal stability post T9-T10 surgery and L4-L5 herniation. Deep core, glute activation, and progressive loading within physio guidelines.</div></div>
+    <div style="padding:12px 0;"><div style="font-size:13px;font-weight:500;margin-bottom:4px;">4. Develop cardiovascular fitness</div><div style="font-size:12px;color:var(--text2);line-height:1.6;">Build sustained aerobic capacity beyond walking. Targets set based on injury progress and physio clearance.</div></div>
+  </div>
+  <div class="card">
+    <div class="ct">Weekly action plan</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+      <div style="background:var(--amber-l);border-radius:var(--rs);padding:12px;"><div style="font-size:11px;font-weight:600;color:var(--amber);margin-bottom:6px;">GYM · 3x per week</div><div style="font-size:11px;color:var(--text2);line-height:1.6;">Lower body focus (glutes, legs). Upper body push/pull. Core and spinal stability. Progressive load within pain limits.</div></div>
+      <div style="background:var(--teal-l);border-radius:var(--rs);padding:12px;"><div style="font-size:11px;font-weight:600;color:var(--teal);margin-bottom:6px;">CARDIO · 2x per week</div><div style="font-size:11px;color:var(--text2);line-height:1.6;">Walking, hiking, or low-impact cardio. Adjusted based on injury status and cycle phase.</div></div>
+      <div style="background:var(--purple-l);border-radius:var(--rs);padding:12px;"><div style="font-size:11px;font-weight:600;color:var(--purple);margin-bottom:6px;">YOGA · 2x per week</div><div style="font-size:11px;color:var(--text2);line-height:1.6;">Ashtanga primary series (minus backbends). Mobility and recovery. Adjust based on glute pain feedback.</div></div>
+    </div>
+    <div style="margin-top:10px;padding:10px;background:var(--surface2);border-radius:var(--rs);font-size:11px;color:var(--text2);"><strong style="color:var(--text);">Nutrition:</strong> 100–115g protein daily · supplements: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin · next InBody: September 2026</div>
+  </div>
+</div>
+
+<!-- SPINE HISTORY -->
+<div id="tp-spine" class="tp">
+  <div class="ai-card" style="border-left-color:var(--red);"><div class="ai-lbl" style="color:var(--red);"><span class="ai-dot" style="background:var(--red);"></span>Spine history log</div><div class="ai-txt" style="font-size:12px;">This log is read by the AI coach before every recommendation. Add new entries when you have MRI results, physio appointments, clearances, or symptom changes.</div></div>
+  <div class="tc mb14">
+    <div class="card" style="border-left:3px solid var(--amber);">
+      <div class="ct" style="color:var(--amber);">L4–L5 disc herniation</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Onset:</span> ~Feb–Mar 2025. Radicular pain into leg, neuropathic symptoms, functional limitations.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">May 2025:</span> Significant leg pain reduction. Residual symptoms fluctuating. Returned to light activity.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Aug 2025:</span> Recurrent lumbar symptoms. Thoracic surgical area not main pain source.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Current:</span> Left glute pain radiating to outer left shin during walking, yoga, Pilates. Achy and muscular, not sharp. MRI and physio pending.</div>
+        <div><span style="background:var(--amber-l);color:var(--amber);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;">Monitoring — physio pending</span></div>
+      </div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--blue);">
+      <div class="ct" style="color:var(--blue);">T9–T10 spinal cord compression</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Discovery:</span> T9-T10 spinal cord compression found on imaging. No severe pain at this level initially — found incidentally.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Surgery:</span> T9-T10 decompression, ~March 2026. Recovery without major complications.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Post-op:</span> Cleared for full activity. Thoracic area not dominant pain source.</div>
+        <div style="margin-bottom:6px;"><span style="font-weight:500;color:var(--text);">Planned:</span> Repeat MRI ~6 months post-surgery (due September 2026).</div>
+        <div><span style="background:var(--teal-l);color:var(--teal);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;">Cleared — follow-up MRI due Sep 2026</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card mb14">
+    <div class="ct">Add update</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;" id="spine-tag-select">
+      <div class="to t-medical sel" data-tag="mri" onclick="selSpineTag(this)">MRI result</div>
+      <div class="to t-feedback" data-tag="physio" onclick="selSpineTag(this)">Physio note</div>
+      <div class="to t-pain" data-tag="symptom" onclick="selSpineTag(this)">Symptom update</div>
+      <div class="to t-life" data-tag="clearance" onclick="selSpineTag(this)">Clearance</div>
+      <div class="to t-correction" data-tag="other" onclick="selSpineTag(this)">Other</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openVoiceModal('spine')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Voice</button>
+      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openPhotoModal('spine')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Photo / MRI</button>
+    </div>
+    <textarea id="spine-input" placeholder="e.g. MRI shows L4-L5 stable, no new compression. Or: physio cleared hip hinges. Or: left glute pain improved to 1/10 this week." style="width:100%;padding:10px 12px;border:.5px solid var(--border-med);border-radius:var(--rs);font-family:inherit;font-size:13px;resize:vertical;min-height:72px;background:var(--surface2);color:var(--text);margin-bottom:10px;"></textarea>
+    <button class="btn btn-p" onclick="addSpineEntry()">Save update</button>
+  </div>
+  <div id="spine-entries"><div class="empty"><strong>No updates yet</strong>Add MRI results, physio notes, symptom changes, or clearances above.</div></div>
+</div>
+
+
 
 <!-- VOICE MODAL -->
 <div class="mo" id="mo-voice">
@@ -431,7 +559,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
 async function loadAll(){
   setSyncStatus("loading","syncing...");
   try{
-    await Promise.all([loadSettings(),loadFood(),loadJournal(),loadCycle()]);
+    await Promise.all([loadSettings(),loadFood(),loadJournal(),loadCycle(),loadSpineEntries()]);
     setSyncStatus("ok","synced");
     updateFoodUI();updateJFlags();renderCycle();
     generateAI("today");generateAI("week");
@@ -665,6 +793,7 @@ async function submitVoice(){
   if(!t||t==="Tap the mic to start…")return;
   closeVoice();
   if(vTarget==="food")await analyseFood({type:"text",v:t});
+  else if(vTarget==="spine")addSpineEntry(t);
   else addJournalEntry(t);
 }
 
@@ -683,14 +812,24 @@ function handlePhoto(e){
 async function submitPhoto(){
   if(!phB64)return;closePhoto();
   if(phTarget==="food")await analyseFood({type:"image",v:phB64});
-  else await analyseJPhoto(phB64);
+  else if(phTarget==="spine")await analyseJPhoto(phB64,"spine");
+  else await analyseJPhoto(phB64,"journal");
 }
-async function analyseJPhoto(b64){
-  if(!apiKey){addJournalEntry("[Photo attached — add API key in Settings to auto-describe]");return;}
+async function analyseJPhoto(b64,target){
+  target = target||"journal";
+  if(!apiKey){
+    if(target==="spine")addSpineEntry("[Photo attached — add API key in Settings to auto-describe]");
+    else addJournalEntry("[Photo attached — add API key in Settings to auto-describe]");
+    return;
+  }
   try{
-    const txt=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:b64}},{type:"text",text:"This is a health document or medical photo for a health journal. Describe key findings in 2-3 sentences. Be factual and concise."}]}],null,300);
-    addJournalEntry("[Photo] "+txt);
-  }catch{addJournalEntry("[Photo attached]");}
+    const txt=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:b64}},{type:"text",text:"This is a health document, MRI scan, or medical photo. Describe key findings in 2-3 sentences. Be factual and concise."}]}],null,300);
+    if(target==="spine")addSpineEntry("[Photo] "+txt);
+    else addJournalEntry("[Photo] "+txt);
+  }catch{
+    if(target==="spine")addSpineEntry("[Photo attached]");
+    else addJournalEntry("[Photo attached]");
+  }
 }
 
 function openTextModal(){document.getElementById("mo-text").classList.add("open");}
@@ -740,13 +879,16 @@ function buildCtx(){
     "HEALTH JOURNAL (recent entries):",
     j||"No entries yet.",
     "",
-    "SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin."
+    "SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin.",
+    "",
+    "SPINE LOG (recent updates):",
+    spineEntries.slice(0,5).map(e=>"["+SPINE_TLBLS[e.tag]+"] "+e.txt).join("\n")||"No spine updates logged."
   ];
   return lines.join("\n");
 }
 
 const APROMPTS={
-  today:"Personalised coaching briefing for today. Use EXACTLY this structure with these exact headings, each on its own line:\n\n💪 Activity: [one specific recommendation for today based on workouts, steps, recovery]\n\n🥩 Nutrition: [protein target status and one specific food suggestion to close the gap]\n\n😴 Recovery: [one insight from last night sleep or HRV if available]\n\n⚠️ Health note: [only include this line if health journal has a relevant pain, injury or medical flag — otherwise omit entirely]\n\nCycle phase note: [only include if cycle phase is set — one sentence on how it affects today]\n\nBe specific, warm, and practical. Each point max 1-2 sentences.",
+  today:"Personalised coaching briefing for "+getTodayLabel()+". Use EXACTLY this structure with these exact headings, each on its own line:\n\n💪 Activity: [one specific recommendation for today based on workouts, steps, recovery]\n\n🥩 Nutrition: [protein target status and one specific food suggestion to close the gap]\n\n😴 Recovery: [one insight from last night sleep or HRV if available]\n\n⚠️ Health note: [only include this line if health journal has a relevant pain, injury or medical flag — otherwise omit entirely]\n\nCycle phase note: [only include if cycle phase is set — one sentence on how it affects today]\n\nBe specific, warm, and practical. Each point max 1-2 sentences.",
   week:"Weekly review. Use EXACTLY this structure with these exact headings, each on its own line:\n\n✅ What went well: [2-3 specific wins from the week]\n\n❌ What was missed: [honest gaps — gym sessions, protein, etc]\n\n💡 Smart adjustment: [one specific recommendation e.g. skip aerobic session since step count already covers it]\n\n📅 Next week focus: [1-2 concrete priorities for next week aligned with goals and cycle phase if set]\n\n⚠️ Journal flags: [only if health journal has entries that should shape next week — otherwise omit]\n\nBe specific and practical. Each point max 2 sentences.",
   cycle:"Cycle phase coaching. Use EXACTLY this structure:\n\n🏋️ Training: [specific intensity and exercise recommendations for this phase]\n\n🥗 Nutrition: [specific food and macro focus for this phase]\n\n😴 Recovery: [sleep and recovery priorities for this phase]\n\n💊 Supplements: [any supplement timing or additions relevant to this phase based on her current stack]\n\nBe practical and specific. Each point 1-2 sentences."
 };
@@ -821,6 +963,125 @@ async function saveSett(){
     if(k){generateAI("today");generateAI("week");}
   }
 }
+// ── MONTH TAB ──────────────────────────────────────────────────────────────
+function renderMonthTab(){
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const weeks = [];
+  let weekStart = new Date(monthStart);
+  // align to Sunday
+  while(weekStart.getDay() !== 0) weekStart.setDate(weekStart.getDate()-1);
+  for(let w=0; w<6; w++){
+    const ws = new Date(weekStart);
+    ws.setDate(weekStart.getDate() + w*7);
+    const we = new Date(ws);
+    we.setDate(ws.getDate()+6);
+    if(ws <= new Date(now.getFullYear(), now.getMonth()+1, 0)){
+      weeks.push({start:ws, end:we});
+    }
+  }
+  const container = document.getElementById('month-weeks');
+  if(!container) return;
+  container.innerHTML = weeks.map((w,i) => {
+    const s = w.start.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const e = w.end.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const isCurrentWeek = new Date() >= w.start && new Date() <= w.end;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:.5px solid var(--border);font-size:12px;">
+      <span style="font-weight:${isCurrentWeek?'600':'400'};color:${isCurrentWeek?'var(--teal-m)':'var(--text)'};">Week ${i+1} &nbsp; ${s} – ${e}</span>
+      <span style="color:var(--text3);">${isCurrentWeek?'← current week':''}</span>
+    </div>`;
+  }).join('');
+
+  // month totals from food log
+  const totalP = food.reduce((s,e)=>s+(e.p||0),0);
+  setEl('m-steps','—');
+  setEl('m-workouts','3');
+  setEl('m-sleep','7h 33m');
+  setEl('m-protein', totalP > 0 ? Math.round(totalP)+'g today' : '—');
+}
+
+// ── CALC AGE ───────────────────────────────────────────────────────────────
+function calcAge(){
+  const dob = new Date('1985-11-29');
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if(m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+  setEl('calc-age', age);
+}
+
+// ── SPINE LOG ──────────────────────────────────────────────────────────────
+let spineEntries = [];
+let selSpineTag2 = 'mri';
+const SPINE_TLBLS = {mri:'MRI result', physio:'Physio note', symptom:'Symptom', clearance:'Clearance', other:'Other'};
+
+function selSpineTag(el){
+  document.querySelectorAll('#spine-tag-select .to').forEach(t=>t.classList.remove('sel'));
+  el.classList.add('sel');
+  selSpineTag2 = el.dataset.tag;
+}
+
+async function loadSpineEntries(){
+  try{
+    const rows = await supa('GET','journal_entries',null,'user_id=eq.'+USER_ID+'&tag=like.spine_*&order=created_at.desc&limit=50');
+    spineEntries = (rows||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag.replace('spine_',''),txt:r.txt}));
+    renderSpineEntries();
+  }catch(e){}
+}
+
+async function addSpineEntry(text){
+  const t = text || document.getElementById('spine-input').value.trim();
+  if(!t) return;
+  setSyncStatus('loading','saving...');
+  try{
+    const rows = await supa('POST','journal_entries',{user_id:USER_ID, tag:'spine_'+selSpineTag2, txt:t});
+    if(rows&&rows[0]) spineEntries.unshift({id:rows[0].id,dt:rows[0].created_at,tag:selSpineTag2,txt:t});
+    document.getElementById('spine-input').value='';
+    setSyncStatus('ok','synced');
+    renderSpineEntries();
+    if(apiKey){generateAI('today');generateAI('week');}
+  }catch(err){setSyncStatus('err','sync error');}
+}
+
+async function delSpine(id){
+  setSyncStatus('loading','saving...');
+  try{
+    await supa('DELETE','journal_entries',null,'id=eq.'+id);
+    spineEntries = spineEntries.filter(e=>e.id!==id);
+    setSyncStatus('ok','synced');
+    renderSpineEntries();
+  }catch(err){setSyncStatus('err','sync error');}
+}
+
+function renderSpineEntries(){
+  const c = document.getElementById('spine-entries');
+  if(!c) return;
+  if(!spineEntries.length){
+    c.innerHTML='<div class="empty"><strong>No updates yet</strong>Add MRI results, physio notes, symptom changes, or clearances above.</div>';
+    return;
+  }
+  c.innerHTML = spineEntries.map(e=>{
+    const d = new Date(e.dt);
+    const ds = d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const tagClass = e.tag==='mri'?'t-medical':e.tag==='symptom'?'t-pain':e.tag==='clearance'?'t-feedback':e.tag==='physio'?'t-mood':'t-life';
+    return `<div class="je"><div class="jeh"><div style="display:flex;align-items:center;gap:8px;"><span class="jt ${tagClass}">${SPINE_TLBLS[e.tag]||e.tag}</span><span class="jdate">${ds}</span></div><button class="jdel" onclick="delSpine('${e.id}')">×</button></div><div class="jtxt">${e.txt}</div></div>`;
+  }).join('');
+}
+
+// ── FIX DYNAMIC DATE IN AI PROMPTS ────────────────────────────────────────
+function getTodayLabel(){
+  const d = new Date();
+  return d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+}
+
+// ── PATCH goTab TO INIT NEW TABS ──────────────────────────────────────────
+const _origGoTab = goTab;
+function goTab(n, btn){
+  _origGoTab(n, btn);
+  if(n==='month') renderMonthTab();
+  if(n==='goals') calcAge();
+}
+
 </script>
 </body>
 </html>
