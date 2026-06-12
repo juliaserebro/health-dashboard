@@ -240,7 +240,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
   </div>
 
   <div class="ai-card">
-    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; today</div>
+    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; today<button onclick="generateAI('today')" style="margin-left:auto;font-size:10px;background:var(--pl);color:var(--pu);border:none;border-radius:20px;padding:2px 8px;cursor:pointer;font-family:inherit;">refresh</button></div>
     <div id="ai-today"><span class="sp"></span><span style="color:var(--t3);font-style:italic;">Generating briefing...</span></div>
   </div>
 
@@ -276,12 +276,13 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
     <div class="mc"><div class="ml">Total steps</div><div class="mv">55,978</div>
         <div class="ms good">Sun&ndash;Fri so far</div></div>
     <div class="mc"><div class="ml">Workouts</div><div class="mv">3</div><div class="ms warn">0 gym sessions yet</div></div>
-    <div class="mc"><div class="ml">Avg sleep</div><div class="mv">7h 19m</div><div class="ms muted">4 nights synced</div></div>
+    <div class="mc"><div class="ml">Avg sleep</div><div class="mv">7h 20m</div>
+        <div class="ms muted">4 nights synced</div></div>
     <div class="mc"><div class="ml">Protein avg</div><div class="mv" id="w-prot">&#8212;</div><div class="ms muted">log meals to track</div></div>
   </div>
 
   <div class="ai-card">
-    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; weekly review</div>
+    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; weekly review<button onclick="generateAI('week')" style="margin-left:auto;font-size:10px;background:var(--pl);color:var(--pu);border:none;border-radius:20px;padding:2px 8px;cursor:pointer;font-family:inherit;">refresh</button></div>
     <div id="ai-week"><span class="sp"></span><span style="color:var(--t3);font-style:italic;">Generating weekly review...</span></div>
   </div>
 
@@ -674,21 +675,24 @@ async function loadSupps(){
 }
 
 async function loadSettings(){
-  // Always load from localStorage first so app works immediately
+  // Step 1: always load localStorage immediately - this is the primary source
   apiKey=localStorage.getItem("jkey")||"";
   protTgt=parseInt(localStorage.getItem("jprot")||"100");
-  // Then try Supabase to sync
+  // Step 2: try Supabase to get latest (may override localStorage)
   try{
     const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
     if(rows&&rows.length){
-      if(rows[0].anthropic_key) apiKey=rows[0].anthropic_key;
-      if(rows[0].protein_target) protTgt=rows[0].protein_target;
-      // Keep localStorage in sync
+      const supaKey=rows[0].anthropic_key||"";
+      const supaProt=rows[0].protein_target||100;
+      // Use whichever has the key - prefer Supabase if it has one
+      if(supaKey) apiKey=supaKey;
+      protTgt=supaProt;
+      // Always keep localStorage in sync with Supabase
       if(apiKey) localStorage.setItem("jkey",apiKey);
       localStorage.setItem("jprot",String(protTgt));
     }
   }catch(e){
-    // Supabase unreachable - localStorage fallback already set above
+    // Supabase unreachable - fine, using localStorage values set in Step 1
   }
   const sk=document.getElementById("s-key");if(sk&&apiKey)sk.value=apiKey;
   const sp=document.getElementById("s-prot");if(sp)sp.value=protTgt;
@@ -700,8 +704,7 @@ const STEPS = [
   {d:"Thu",s:13717},{d:"Fri",s:3694,today:true},{d:"Sat",s:0,future:true}
 ];
 const SLEEP_WEEK = [
-  {d:"Sat 6",total:363,de:97,r:74,l:187,a:5},
-  {d:"Mon 8",total:483,de:128,r:118,l:230,a:7},
+  {d:"Sun 8",total:483,de:128,r:118,l:230,a:7},
   {d:"Tue 9",total:439,de:118,r:116,l:200,a:5},
   {d:"Wed 10",total:430,de:89,r:120,l:221,a:4},
   {d:"Thu 11",total:408,de:102,r:93,l:203,a:9}
@@ -1000,7 +1003,7 @@ function buildCtx(){
   const cc=ci?"Cycle Day "+ci.day+" of ~"+ci.avg+"-day cycle, phase: "+ci.phase+" ("+PHASES[ci.phase].days+")":"Cycle not tracked";
   const now=new Date();
   const todayStr=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  return "USER: Julia Serebro, 41F (DOB 29 Nov 1985). 166cm, 57.6kg. Post T9-T10 spinal decompression surgery March 2026. L4-L5 disc herniation history. Cleared for full activity. Goals: build glute/leg muscle, upper body strength (baseline ~5 push-ups), strengthen lower back, develop cardio. Current symptom: left glute pain to outer shin during walking/yoga/Pilates, achy not sharp, physio pending. SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin. TODAY: "+todayStr+". Steps today: 3694. Today workout: Yoga 11:20-12:51 (91min/99bpm/23AZM). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Readiness: 67/100. Protein today: "+Math.round(tp)+"g (target "+protTgt+"g). THIS WEEK Sun 7-Sat 13 Jun: Steps Sun 7361, Mon 11972, Tue 8461, Wed 10033, Thu 13717, Fri 3694. Workouts: Fri yoga 91min/99bpm, Thu run 23min/119bpm/913m, Thu gym 38min/94bpm, Thu elliptical 24min/109bpm, Mon gym 25min/68bpm, Mon walk 60min/99bpm, Sun yoga 60min/101bpm. Sleep: Sat 6h3m, Mon 8h3m (deep 128 rem 118), Tue 7h19m, Wed 7h10m (deep 89 rem 120), Thu 6h48m (deep 102 rem 93). "+cc+". HEALTH LOG: "+(j||"No entries");
+  return "USER: Julia Serebro, 41F (DOB 29 Nov 1985). 166cm, 57.6kg. Post T9-T10 spinal decompression surgery March 2026. L4-L5 disc herniation history. Cleared for full activity. Goals: build glute/leg muscle, upper body strength (baseline ~5 push-ups), strengthen lower back, develop cardio. Current symptom: left glute pain to outer shin during walking/yoga/Pilates, achy not sharp, physio pending. SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin. TODAY: "+todayStr+". Steps today: 3694. Today workout: Yoga 11:20-12:51 (91min/99bpm/23AZM). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Readiness: 67/100. Protein today: "+Math.round(tp)+"g (target "+protTgt+"g). THIS WEEK Sun 7-Sat 13 Jun: Steps Sun 7361, Mon 11972, Tue 8461, Wed 10033, Thu 13717, Fri 3694. Workouts: Fri yoga 91min/99bpm, Thu run 23min/119bpm/913m, Thu gym 38min/94bpm, Thu elliptical 24min/109bpm, Mon gym 25min/68bpm, Mon walk 60min/99bpm, Sun yoga 60min/101bpm. Sleep (this week): Sun 8 Jun 8h3m (deep 128 rem 118), Tue 9 Jun 7h19m (deep 118 rem 116), Wed 10 Jun 7h10m (deep 89 rem 120), Thu 11 Jun 6h48m (deep 102 rem 93). "+cc+". HEALTH LOG: "+(j||"No entries");
 }
 
 function formatAI(txt){
@@ -1030,7 +1033,7 @@ async function generateAI(t){
   try{
     const txt=await callAI([{role:"user",content:buildCtx()+"\n\n"+prompt}],null,400);
     el.innerHTML=formatAI(txt);
-  }catch(err){el.textContent="Could not generate. Check API key in Settings.";}
+  }catch(err){el.innerHTML="<span style='color:var(--red);font-size:12px;'>Error: "+err.message+"</span><br><span style='font-size:11px;color:var(--t3);'>(Check API key in Settings)</span>";}
 }
 
 async function callAI(msgs,sys,maxT){
