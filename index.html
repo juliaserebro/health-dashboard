@@ -275,7 +275,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
   <div class="mg">
     <div class="mc"><div class="ml">Total steps</div><div class="mv">55,978</div>
         <div class="ms good">Sun&ndash;Fri so far</div></div>
-    <div class="mc"><div class="ml">Workouts</div><div class="mv">3</div><div class="ms warn">0 gym sessions yet</div></div>
+    <div class="mc"><div class="ml">Workouts</div><div class="mv">7</div><div class="ms good">2 gym &middot; 2 yoga &middot; 1 run &middot; 1 walk &middot; 1 elliptical</div></div>
     <div class="mc"><div class="ml">Avg sleep</div><div class="mv">7h 20m</div>
         <div class="ms muted">4 nights synced</div></div>
     <div class="mc"><div class="ml">Protein avg</div><div class="mv" id="w-prot">&#8212;</div><div class="ms muted">log meals to track</div></div>
@@ -1043,6 +1043,24 @@ async function callAI(msgs,sys,maxT){
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
   const d=await r.json();if(d.error)throw new Error(d.error.message);
   return d.content[0].text.trim();
+}
+
+async function addFoodEntry(entry){
+  if(!allFood[foodDate]) allFood[foodDate]=[];
+  allFood[foodDate].push(entry);
+  updateFood();
+  // Save to Supabase
+  try{
+    const rows=await supa("POST","food_log",{
+      user_id:UID, log_date:foodDate,
+      meal_time:entry.time||null, name:entry.n, detail:entry.det||null,
+      protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+    });
+    if(rows&&rows[0]) allFood[foodDate][allFood[foodDate].length-1].dbid=rows[0].id;
+    syncStatus("ok");
+  }catch(e){
+    syncStatus("err");
+  }
 }
 
 async function analyseFood(inp){
