@@ -189,7 +189,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
 
 <div class="hdr">
   <div>
-    <h1>Julia's health dashboard</h1>
+    <h1>Health Coach</h1>
     <div class="sub" id="hdate"></div>
   </div>
   <div class="hdr-r">
@@ -201,10 +201,10 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
 
 <div class="tabs">
   <button class="tb active" onclick="gTab('dash',this)">Dashboard</button>
-  <button class="tb" onclick="gTab('food',this)">Food log</button>
+  <button class="tb" onclick="gTab('food',this)">Food</button>
   <button class="tb" onclick="gTab('cycle',this)">Cycle</button>
-  <button class="tb" onclick="gTab('log',this)">My log</button>
-  <button class="tb" onclick="gTab('profile',this)">My profile</button>
+  <button class="tb" onclick="gTab('log',this)">Log</button>
+  <button class="tb" onclick="gTab('profile',this)">Profile</button>
 </div>
 
 <!-- DASHBOARD -->
@@ -234,7 +234,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
 
   <div class="mg">
     <div class="mc"><div class="ml">Steps today</div><div class="mv" id="d-steps">1,792</div><div class="ms muted">early &mdash; keep moving</div></div>
-    <div class="mc"><div class="ml">Sleep last night</div><div class="mv">7h 56m</div><div class="ms good">89m deep &middot; 120m REM</div></div>
+    <div class="mc"><div class="ml">Sleep last night</div><div class="mv">6h 48m</div><div class="ms good">102m deep &middot; 93m REM</div></div>
     <div class="mc"><div class="ml">Protein today</div><div class="mv" id="d-prot">0g</div><div class="ms warn" id="d-prot-s">log first meal</div></div>
     <div class="mc"><div class="ml">Cycle phase</div><div class="mv" id="d-phase" style="font-size:15px;">&#8212;</div><div class="ms muted" id="d-cday">add in Cycle tab</div></div>
   </div>
@@ -248,7 +248,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
     <div class="card">
       <div class="ct">Last night &mdash; Thu 11 Jun</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-        <div><div style="font-size:22px;font-weight:600;letter-spacing:-.5px;">7h 56m</div><div style="font-size:11px;color:var(--t3);">bedtime 00:10</div></div>
+        <div><div style="font-size:22px;font-weight:600;letter-spacing:-.5px;">6h 48m</div><div style="font-size:11px;color:var(--t3);">bedtime 01:27</div></div>
         <div style="font-size:12px;display:flex;flex-direction:column;gap:3px;padding-top:2px;">
           <div style="display:flex;justify-content:space-between;"><span style="color:#3C3489;font-weight:500;">Deep</span><span>102m (26%)</span></div>
           <div style="display:flex;justify-content:space-between;"><span style="color:#7F77DD;font-weight:500;">REM</span><span>93m (23%)</span></div>
@@ -256,7 +256,7 @@ textarea:focus{box-shadow:0 0 0 2px var(--pu)}
           <div style="display:flex;justify-content:space-between;"><span class="muted">Awake</span><span>9m</span></div>
         </div>
       </div>
-      <div class="sbw" style="height:10px;border-radius:5px;"><div class="sde" style="width:27%;"></div><div class="sre" style="width:25%;"></div><div class="sli" style="width:47%;"></div><div class="saw" style="width:1%;"></div></div>
+      <div class="sbw" style="height:10px;border-radius:5px;"><div class="sde" style="width:26%;"></div><div class="sre" style="width:23%;"></div><div class="sli" style="width:47%;"></div><div class="saw" style="width:1%;"></div></div>
     </div>
     <div class="card">
       <div class="ct">Protein goal today</div>
@@ -664,8 +664,8 @@ const STEPS = [
   {d:"Mon",s:11972},
   {d:"Tue",s:8461},
   {d:"Wed",s:10033},
-  {d:"Thu",s:4677,today:true},
-  {d:"Fri",s:0,future:true},
+  {d:"Thu",s:13717},
+  {d:"Fri",s:1792,today:true},
   {d:"Sat",s:0,future:true}
 ];
 const SLEEP_WEEK = [
@@ -726,7 +726,7 @@ function gTab(n,btn){
   const panel=document.getElementById("tp-"+n); if(panel)panel.classList.add("active");
   if(btn)btn.classList.add("active");
   else document.querySelectorAll(".tb").forEach(b=>{
-    const map={dash:"Dashboard",food:"Food log",cycle:"Cycle",log:"My log",profile:"My profile"};
+    const map={dash:"Dashboard",food:"Food",cycle:"Cycle",log:"Log",profile:"Profile"};
     if(b.textContent.trim()===(map[n]||n))b.classList.add("active");
   });
 }
@@ -932,9 +932,32 @@ function updateFood(){
   setEl("p-lbl",Math.round(tp)+"g logged");setEl("p-pct",pct+"%");setEl("p-rem",Math.max(0,Math.round(protTgt-tp))+"g remaining");
   const c=document.getElementById("food-entries");
   if(!food.length){c.innerHTML="<div class='empty'><strong>No meals logged today</strong>Tap Photo, Voice, or Type to log your first meal.</div>";return;}
-  c.innerHTML=food.map((e,i)=>"<div class='fe'><div class='fel'><div class='fen'>"+e.n+"</div><div class='fed'>"+(e.det||"")+"</div>"+(e.time?"<div style='font-size:10px;color:var(--t3);margin-top:2px;'>"+e.time+"</div>":"")+"</div><div class='fem'><span class='mp mpp'>"+Math.round(e.p||0)+"g P</span><span class='mp mpc'>"+Math.round(e.c||0)+"g C</span><span class='mp mpf'>"+Math.round(e.f||0)+"g F</span></div><button class='fdel' onclick=\"delFood('"+foodDate+"',"+i+")\">&times;</button></div>").join("");
+  c.innerHTML=food.map((e,i)=>{
+    const timeStr=e.time?"<div style=\'font-size:10px;color:var(--t3);margin-top:2px;\'>"+e.time+"</div>":"";
+    const confStr=e.conf&&e.conf!=="high"?"<span style=\'font-size:10px;color:var(--am);margin-left:6px;\'>"+e.conf+" confidence</span>":"";
+    return "<div class=\'fe\'><div class=\'fel\'><div class=\'fen\'>"+e.n+"</div><div class=\'fed\'>"+(e.det||"")+confStr+"</div>"+timeStr+"</div><div class=\'fem\'><span class=\'mp mpp\'>"+Math.round(e.p||0)+"g P</span><span class=\'mp mpc\'>"+Math.round(e.c||0)+"g C</span><span class=\'mp mpf\'>"+Math.round(e.f||0)+"g F</span></div><button class=\'fdel\' onclick=\'editFood(\""+foodDate+'\",'+i+")\" style=\'color:var(--t2);font-size:11px;margin-right:2px;\'>edit</button><button class=\'fdel\' onclick=\'delFood(\""+foodDate+'\",'+i+")\'>&times;</button></div>";}).join("");;
   // food saved to Supabase on add
 }
+
+function editFood(date,i){
+  if(!allFood[date]) return;
+  const entry=allFood[date][i];
+  const newName=prompt("Edit food name:",entry.n);
+  if(newName===null) return;
+  const newP=prompt("Protein (g):",Math.round(entry.p||0));
+  if(newP===null) return;
+  const newC=prompt("Carbs (g):",Math.round(entry.c||0));
+  if(newC===null) return;
+  const newF=prompt("Fat (g):",Math.round(entry.f||0));
+  if(newF===null) return;
+  allFood[date][i]={...entry,n:newName,p:parseFloat(newP)||0,c:parseFloat(newC)||0,f:parseFloat(newF)||0,k:parseFloat(newP)*4+parseFloat(newC)*4+parseFloat(newF)*9};
+  // Update in Supabase if we have a dbid
+  if(entry.dbid){
+    supa("PATCH","food_log",{name:newName,protein:parseFloat(newP)||0,carbs:parseFloat(newC)||0,fat:parseFloat(newF)||0,kcal:allFood[date][i].k},"id=eq."+entry.dbid).catch(()=>{});
+  }
+  updateFood();
+}
+
 async function delFood(date,i){if(!allFood[date])return;const entry=allFood[date][i];if(entry&&entry.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}allFood[date].splice(i,1);updateFood();}
 
 function buildCtx(){
@@ -945,7 +968,7 @@ function buildCtx(){
   const cc=ci?"Cycle Day "+ci.day+" of ~"+ci.avg+"-day cycle, phase: "+ci.phase+" ("+PHASES[ci.phase].days+")":"Cycle not tracked";
   const now=new Date();
   const todayStr=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  return "USER: Julia Serebro, 41F (DOB 29 Nov 1985). 166cm, 57.6kg. Post T9-T10 spinal decompression surgery March 2026. L4-L5 disc herniation history. Cleared for full activity. Goals: build glute/leg muscle, upper body strength (baseline ~5 push-ups), strengthen lower back, develop cardio. Current symptom: left glute pain to outer shin during walking/yoga/Pilates, achy not sharp, physio pending. SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin. TODAY: "+todayStr+". Steps today: 38 (just past midnight, very early). Last night sleep Mon 8 Jun: 7h 56m, 128min deep, 118min REM, 230min light. Protein today: "+Math.round(tp)+"g (target "+protTgt+"g). THIS WEEK Sun 7 - Sat 13 Jun: Steps Sun 7361, Mon 11972, Tue 8461, Wed 38. Workouts: Sun yoga 60min 101bpm 31AZM, Mon gym session 25min 68bpm, Mon walk 60min 99bpm 31AZM. Sleep: Sat 6h3m (deep 97 rem 74), Sun 7h56m (deep 128 rem 118). "+cc+". HEALTH LOG: "+(j||"No entries");
+  return "USER: Julia Serebro, 41F (DOB 29 Nov 1985). 166cm, 57.6kg. Post T9-T10 spinal decompression surgery March 2026. L4-L5 disc herniation history. Cleared for full activity. Goals: build glute/leg muscle, upper body strength (baseline ~5 push-ups), strengthen lower back, develop cardio. Current symptom: left glute pain to outer shin during walking/yoga/Pilates, achy not sharp, physio pending. SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin. TODAY: "+todayStr+". Steps today: 38 (just past midnight, very early). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Protein today: "+Math.round(tp)+"g (target "+protTgt+"g). THIS WEEK Sun 7 - Sat 13 Jun: Steps Sun 7361, Mon 11972, Tue 8461, Wed 38. Workouts: Sun yoga 60min 101bpm 31AZM, Mon gym session 25min 68bpm, Mon walk 60min 99bpm 31AZM. Sleep: Sat 6h3m (deep 97 rem 74), Sun 7h56m (deep 128 rem 118). "+cc+". HEALTH LOG: "+(j||"No entries");
 }
 
 function formatAI(txt){
@@ -998,8 +1021,10 @@ async function analyseFood(inp){
     const e=JSON.parse(raw.replace(/```json|```/g,"").trim());
     at.innerHTML="<strong>"+e.n+"</strong> - "+e.det+" <span style='font-size:11px;color:var(--t3);'>Confidence: "+e.conf+"</span>";
     setTimeout(()=>{ac.style.display="none";},3500);
-    food.push({n:e.n,det:e.det,p:e.p,c:e.c,f:e.f,k:e.k});
-    updateFood();
+    const mti=document.getElementById("meal-time-input");
+    const nowT=new Date();
+    const mealTime=mti?mti.value+" (logged "+nowT.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+")":nowT.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    await addFoodEntry({n:e.n,det:e.det,p:e.p,c:e.c,f:e.f,k:e.k,time:mealTime,conf:e.conf});
   }catch(err){at.textContent="Could not analyse. "+err.message;}
 }
 
