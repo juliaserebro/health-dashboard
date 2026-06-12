@@ -996,7 +996,8 @@ function editFood(date,i){
 async function delFood(date,i){if(!allFood[date])return;const entry=allFood[date][i];if(entry&&entry.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}allFood[date].splice(i,1);updateFood();}
 
 function buildCtx(){
-  const tp=food.reduce((s,e)=>s+(e.p||0),0);
+  const todayFood=allFood[tkey()]||[];
+  const tp=todayFood.reduce((s,e)=>s+(e.p||0),0);
   const jArr=logEntries.slice(0,12).map(e=>"["+TLBLS[e.tag]+"] "+e.txt);
   const j=jArr.join(" | ");
   const ci=cycleInfo();
