@@ -55,16 +55,6 @@ const C = {
 };
 
 // ── SUPABASE ──────────────────────────────────────────────────────────────
-async function supa(method, table, body, query) {
-  const url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
-  const hdrs = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
-  if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
-  const res = await fetch(url,{method,headers:hdrs,body:body?JSON.stringify(body):undefined});
-  if (!res.ok) { const e=await res.text(); throw new Error(table+": "+e); }
-  if (res.status===204||method==="DELETE") return null;
-  return res.json();
-}
-
 function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
 
 // ── STYLES ────────────────────────────────────────────────────────────────
@@ -118,7 +108,28 @@ function Spinner() {
   return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
 }
 
+function CyclePhaseMetric({cycleDates}) {
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  if(!conf.length) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
+  const last = new Date(conf[0].d);
+  const now = new Date(); now.setHours(0,0,0,0);
+  const day = Math.floor((now-last)/864e5)+1;
+  const cd = ((day-1)%28)+1;
+  const ph = cd<=5?"Menstrual":cd<=13?"Follicular":cd<=16?"Ovulatory":"Luteal";
+  const col = cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
+  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:col}}>{ph}</div><div style={{...s.ms,color:col}}>Day {cd} of cycle</div></div>;
+}
+
 // ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
+function ProteinAvgMetric({allFood, protTgt}) {
+  const entries = Object.entries(allFood).filter(([,meals])=>meals.length>0);
+  if(!entries.length) return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>log meals to track</div></div>;
+  const totals = entries.map(([,meals])=>meals.reduce((s,e)=>s+(e.p||0),0));
+  const avg = Math.round(totals.reduce((a,b)=>a+b,0)/totals.length);
+  const col = avg>=protTgt?C.tm:avg>=protTgt*.75?C.am:C.red;
+  return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
+}
+
 function ProteinDaysMetric({allFood, protTgt}) {
   const daysHit = Object.entries(allFood).filter(([date, meals]) => {
     const total = meals.reduce((s,e)=>s+(e.p||0),0);
@@ -146,8 +157,22 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
   const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
 
   function buildCtx() {
+    const now = new Date();
+    const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+    const todayKey = now.toISOString().slice(0,10);
+    const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+    const todayFood = allFood[todayKey]||[];
+    const liveProt = Math.round(todayFood.reduce((s,e)=>s+(e.p||0),0));
+    const liveKcal = Math.round(todayFood.reduce((s,e)=>s+(e.k||0),0));
+    const liveCarbs = Math.round(todayFood.reduce((s,e)=>s+(e.c||0),0));
+    const liveFat = Math.round(todayFood.reduce((s,e)=>s+(e.f||0),0));
+    const mealNames = todayFood.map(e=>e.n).join(", ")||"nothing logged yet";
+    const yAlcohol = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
+    const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+    let cycleCtx = "Cycle not tracked";
+    if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
     const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
-    return `USER: Julia Serebro, 41F, 166cm, 57.6kg. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. TODAY: Friday 12 June 2026. Steps: 3719. Yoga session 11:20-12:51 (91min/99bpm). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Readiness: 67/100. Protein today: ${Math.round(tp)}g (target ${protTgt}g). THIS WEEK: Steps Sun 7361, Mon 11972, Tue 8461, Wed 10033, Thu 13717, Fri 3719. Workouts: Fri yoga 91min, Thu run 23min/119bpm, Thu gym 38min, Thu elliptical 24min, Mon gym 25min, Mon walk 60min, Sun yoga 60min. Sleep: Sun 8 8h3m (deep128 rem118), Tue 9 7h19m, Wed 10 7h10m, Thu 11 6h48m. HEALTH LOG: ${jArr.join(" | ")||"No entries"}`;
+    return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain to shin (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TODAY: ${todayStr}. Fitbit last synced Sat 13Jun: steps 1102 early morning, last night Fri12 sleep 7h deep105min(25%) REM104min(25%) bedtime01:15, readiness 89/100 Great. Week: Fri yoga91min/99bpm, Thu run23min/119bpm+gym38min+elliptical24min, Mon gym25min+walk60min, Sun yoga60min, ~57k steps. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
   }
 
   async function callAI(prompt) {
@@ -161,22 +186,45 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
     return d.content[0].text.trim();
   }
 
+  function renderBold(text) {
+    const parts = text.split(/\*\*([^*]+)\*\*/g);
+    return parts.map((p,i)=>i%2===1?<strong key={i}>{p}</strong>:p);
+  }
   function formatAI(txt) {
-    return txt.split("\n").filter(l=>l.trim()).map((line,i)=>{
+    const lines = txt.split("\n").filter(l=>l.trim());
+    const result = [];
+    let i = 0;
+    while(i < lines.length) {
+      const line = lines[i];
       const m = line.match(/^([^\w\s]{0,3}\s*)([A-Z][A-Z\s\-]{2,}[A-Z]):\s*(.*)/);
-      if (m && m[2].trim().length>=3) {
-        return <div key={i} style={{marginBottom:8}}><div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:2}}>{m[1].trim()} {m[2].trim()}</div><div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingLeft:4}}>{m[3]}</div></div>;
+      if(m && m[2].trim().length>=3) {
+        const label = m[1].trim()+" "+m[2].trim();
+        const actionLine = m[3];
+        // Next line is context if it doesn't start a new section
+        const nextLine = lines[i+1];
+        const isNextSection = nextLine && nextLine.match(/^[^\w\s]{0,3}\s*[A-Z][A-Z\s\-]{2,}[A-Z]:/);
+        const contextLine = (!isNextSection && nextLine) ? lines[++i] : null;
+        result.push(
+          <div key={i} style={{marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:600,letterSpacing:".06em",color:C.pu,marginBottom:3}}>{label}</div>
+            {actionLine&&<div style={{fontSize:13,color:C.tx,lineHeight:1.5,marginBottom:contextLine?2:0}}>{renderBold(actionLine)}</div>}
+            {contextLine&&<div style={{fontSize:12,color:C.t2,lineHeight:1.5}}>{renderBold(contextLine)}</div>}
+          </div>
+        );
+      } else {
+        result.push(<div key={i} style={{fontSize:12,color:C.t2,lineHeight:1.5,marginBottom:3}}>{renderBold(line)}</div>);
       }
-      return <div key={i} style={{fontSize:12,color:C.t2,lineHeight:1.6,marginBottom:4}}>{line}</div>;
-    });
+      i++;
+    }
+    return result;
   }
 
   async function genAI(type) {
     if (!apiKey) return;
     setLoading(l=>({...l,[type]:true}));
     const p = type==="today"
-      ? "Give a personalised coaching briefing. Format: emoji CAPS LABEL: text, each on new line. Sections: ACTIVITY (already did yoga+steps today), NUTRITION (protein gap), RECOVERY (sleep insight), FLAG (only if health log has pain). Max 2 sentences each."
-      : "Weekly review. Format: emoji CAPS LABEL: text. Sections: WELL DONE, MISSED, SMART SWAP, NEXT WEEK, FLAG (if relevant). Max 2 sentences each.";
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}. Rules: (1) Each section starts with emoji + CAPS LABEL on its own line. (2) First line of each section = the ACTION in bold using **text**. (3) Second line = brief why/context. (4) Sections: ACTIVITY, NUTRITION, RECOVERY, and FLAG only if health log has pain/injury. (5) Be specific to today's actual data - reference real numbers. (6) Max 2 lines per section. No filler phrases.`
+      : `Weekly coaching review. Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = the ACTION or KEY INSIGHT in bold using **text**. (3) One sentence of context. (4) Sections: WELL DONE, MISSED, NEXT WEEK PRIORITY, FLAG (only if relevant). (5) Tight and actionable - no padding. Max 2 lines per section.`;
     try {
       const txt = await callAI(p);
       if (type==="today") setAiToday(txt);
@@ -196,7 +244,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
     <div>
       {/* READINESS */}
       <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — Saturday 13 June</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
         <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
           <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.tm}}>89</div>
           <div style={{flex:1}}>
@@ -211,8 +259,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
             ["REM sleep (104min, 25%)","10/10",C.tm],
             ["Training load (yoga day Fri)","18/20",C.tm],
             ["Bedtime 01:15 (late)","5/10",C.am],
-            ["Alcohol (none logged)","+0",C.t3],
-            ["Protein (100g hit yesterday)","+8",C.tm],
+            ["Protein hit yesterday","+8",C.tm],
           ].map(([label,pts,col],i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
               <span style={{color:C.t2}}>{label}</span>
@@ -224,16 +271,16 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
             <span style={{fontWeight:600,color:C.teal}}>+3</span>
           </div>
         </div>
-        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Excellent night — deep sleep hit 25% and REM 25%, both optimal. Yoga yesterday was perfect active recovery. Only the late bedtime (01:15) cost you points. You're in great shape for today.</div>
+        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Excellent night — deep 25% and REM 25%, both optimal. Late bedtime (01:15) cost 5 pts. Great shape today.</div>
       </Card>
 
-      <SecLabel>Today — Saturday 13 June</SecLabel>
+      <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Steps today" value="1,102" sub="early morning" subColor={C.t3}/>
+        <Metric label="Steps today" value="3,753" sub="and growing" subColor={C.t3}/>
         <Metric label="Sleep last night" value="7h 0m" sub="105m deep · 104m REM" subColor={C.tm}/>
         <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={tp>=protTgt?C.tm:C.am}/>
-        <Metric label="Cycle phase" value="—" sub="add in Cycle tab" subColor={C.t3}/>
+        <CyclePhaseMetric cycleDates={cycleDates}/>
       </div>
 
       {/* AI TODAY */}
@@ -253,10 +300,10 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
         <Card style={{marginBottom:0}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Last night — Fri 12 Jun</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            <div><div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>6h 48m</div><div style={{fontSize:11,color:C.t3}}>bedtime 01:27</div></div>
+            <div><div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>7h 0m</div><div style={{fontSize:11,color:C.t3}}>bedtime 01:15</div></div>
             <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>102m (26%)</span></div>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>93m (23%)</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>105m (25%)</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>104m (25%)</span></div>
               <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#AFA9EC",fontWeight:500}}>Light</span><span>203m</span></div>
               <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>9m</span></div>
             </div>
@@ -291,7 +338,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
         <Metric label="Total steps" value="57,080" sub="Sun–Fri so far" subColor={C.tm}/>
         <Metric label="Workouts" value="7" sub="2 gym · 2 yoga · 1 run · 1 walk · 1 elliptical" subColor={C.tm}/>
         <Metric label="Avg sleep" value="7h 16m" sub="5 nights synced" subColor={C.t3}/>
-        <Metric label="Protein avg" value="—" sub="log meals to track" subColor={C.t3}/>
+        <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
       {/* AI WEEK */}
@@ -463,7 +510,7 @@ function TabFood({allFood, setAllFood, protTgt, apiKey}) {
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:300,messages:[{role:"user",content:'Return ONLY valid JSON: {"n":"name","det":"brief desc","p":25,"c":30,"f":12,"k":330}. Analyse: '+txtInput}]})
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:300,messages:[{role:"user",content:`Return ONLY valid JSON, no other text: {"n":"food name in English","det":"brief description with quantity","p":25,"c":30,"f":12,"k":330}. All numbers integers. Preserve exact quantity (e.g. 5 spoons, 150g). Translate non-English to English. Input: ${txtInput}`}]})
       });
       const d=await res.json();
       if(d.error) throw new Error(d.error.message);
@@ -841,6 +888,24 @@ function TabProfile({suppState, setSupp}) {
       </div>
 
       <SecLabel>Goals</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>The 4 main goals</div>
+        {[
+          ["1. Build glute and leg muscle mass","Increase skeletal muscle from 24.9 kg baseline through progressive lower body resistance training."],
+          ["2. Improve upper body strength","Build from ~5 consecutive push-ups to 10 by September, 15 by December."],
+          ["3. Strengthen lower back","Spinal stability post T9-T10 surgery and L4-L5 herniation. Deep core, glute activation, progressive loading within physio guidelines."],
+          ["4. Develop cardiovascular fitness","Build sustained aerobic capacity. Targets set progressively based on injury progress and physio clearance."],
+        ].map(([title,desc])=>(
+          <div key={title} style={{paddingBottom:10,marginBottom:10,borderBottom:`.5px solid ${C.bd}`}}>
+            <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{title}</div>
+            <div style={{fontSize:12,color:C.t2,lineHeight:1.6}}>{desc}</div>
+          </div>
+        ))}
+        <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingBottom:0}}>
+          <strong style={{color:C.tx}}>Next InBody scan:</strong> September 2026 — 3-month check-in against targets below.
+        </div>
+      </Card>
+      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Measurable targets</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
         {[
           {title:"3 months — September 2026",color:C.tm,items:[["Weight","57-58 kg"],["Skeletal muscle","25.5 kg (+0.6)"],["Body fat","11.5 kg (-0.7)"],["Body fat %","19.8%"],["InBody score","82+"],["Push-ups","10 consecutive"]]},
@@ -857,7 +922,9 @@ function TabProfile({suppState, setSupp}) {
         ))}
       </div>
 
-      <SecLabel>Supplements — daily checklist</SecLabel>
+      <SecLabel>Nutrition &amp; Supplements</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplement checklist</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
         {SUPPS.map(sup=>{
           const checked=!!suppState[sup.id];
@@ -872,6 +939,7 @@ function TabProfile({suppState, setSupp}) {
       <div style={{fontSize:11,color:C.t3,marginBottom:14}}>
         {done===0?"Tap each supplement when you take it. Resets daily.":done===SUPPS.length?"All supplements taken today ✅":`${done} of ${SUPPS.length} taken today`}
       </div>
+      </Card>
 
       <SecLabel>Workout plan</SecLabel>
       <Card>
@@ -904,6 +972,20 @@ function TabProfile({suppState, setSupp}) {
       </Card>
     </div>
   );
+}
+
+function CycleHeaderPill({cycleDates, onPress}) {
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  let label="cycle", bg=C.pil, col=C.pi;
+  if(conf.length){
+    const last=new Date(conf[0].d);const now=new Date();now.setHours(0,0,0,0);
+    const cd=((Math.floor((now-last)/864e5))%28)+1;
+    const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";
+    label=`Day ${cd} · ${ph}`;
+    bg=cd<=5?C.rl:cd<=13?C.tl:cd<=16?C.al:C.pl;
+    col=cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
+  }
+  return <button onClick={onPress} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:col,border:"none",cursor:"pointer",fontFamily:"inherit"}}>{label}</button>;
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────
@@ -1001,7 +1083,7 @@ function App() {
     setChatLoading(false);
   }
 
-  const TABS=[{id:"dash",label:"Dashboard"},{id:"food",label:"Food"},{id:"cycle",label:"Cycle"},{id:"log",label:"Log"},{id:"profile",label:"Profile"}];
+  const TABS=[{id:"dash",label:"Dashboard"},{id:"food",label:"Food"},{id:"log",label:"Log"},{id:"profile",label:"Profile"},{id:"cycle",label:"Cycle"}];
 
   return (
     <div style={s.shell}>
@@ -1014,7 +1096,7 @@ function App() {
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
-          <button onClick={()=>setTab("cycle")} style={{...s.pill(C.pil,C.pi),border:"none",cursor:"pointer",fontFamily:"inherit"}}>cycle</button>
+          <CycleHeaderPill cycleDates={cycleDates} onPress={()=>setTab("cycle")}/>
           <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
           <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
