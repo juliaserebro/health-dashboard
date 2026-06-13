@@ -29,16 +29,17 @@ const UID = "julia";
 
 const STEPS = [
   {d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},
-  {d:"Thu",s:13717},{d:"Fri",s:3719,today:true},{d:"Sat",s:0,future:true}
+  {d:"Thu",s:13717},{d:"Fri",s:3719},{d:"Sat",s:1102,today:true}
 ];
 const SLEEP_WEEK = [
   {d:"Sun 8",total:483,de:128,r:118,l:230,a:7},
   {d:"Tue 9",total:439,de:118,r:116,l:200,a:5},
   {d:"Wed 10",total:430,de:89,r:120,l:221,a:4},
-  {d:"Thu 11",total:408,de:102,r:93,l:203,a:9}
+  {d:"Thu 11",total:408,de:102,r:93,l:203,a:9},
+  {d:"Fri 12",total:420,de:105,r:104,l:211,a:9}
 ];
 const JUNE_WORKOUTS = {5:["yoga"],7:["yoga"],8:["gym","walk"],11:["gym","elliptical","run","walk"],12:["yoga"]};
-const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719};
+const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719,13:1102};
 
 // ── COLORS ────────────────────────────────────────────────────────────────
 const C = {
@@ -117,6 +118,24 @@ function Spinner() {
   return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
 }
 
+// ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
+function ProteinDaysMetric({allFood, protTgt}) {
+  const daysHit = Object.entries(allFood).filter(([date, meals]) => {
+    const total = meals.reduce((s,e)=>s+(e.p||0),0);
+    return total >= protTgt;
+  }).length;
+  const totalDaysLogged = Object.keys(allFood).length;
+  return (
+    <div style={s.mc}>
+      <div style={s.ml}>Protein days hit</div>
+      <div style={{...s.mv,color:daysHit>0?C.tm:C.t3}}>{daysHit>0?daysHit:"—"}</div>
+      <div style={{...s.ms,color:daysHit>0?C.tm:C.t3}}>
+        {daysHit>0?`of ${totalDaysLogged} days logged`:"log meals to track"}
+      </div>
+    </div>
+  );
+}
+
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
 function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
   const [aiToday, setAiToday] = useState(null);
@@ -177,23 +196,23 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
     <div>
       {/* READINESS */}
       <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — Friday 12 June</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — Saturday 13 June</div>
         <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
-          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.am}}>67</div>
+          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.tm}}>89</div>
           <div style={{flex:1}}>
-            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"67%",height:"100%",background:C.am,borderRadius:4}}/></div>
-            <div style={{fontSize:12,fontWeight:500,color:C.am}}>Good</div>
+            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"89%",height:"100%",background:C.tm,borderRadius:4}}/></div>
+            <div style={{fontSize:12,fontWeight:500,color:C.tm}}>Great</div>
           </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
           {[
-            ["Sleep duration (6h 48m)","18/30",C.am],
-            ["Deep sleep (102min, 26%)","20/20",C.tm],
-            ["REM sleep (93min, 23%)","10/10",C.tm],
-            ["Training load (big day Thu)","12/20",C.am],
-            ["Bedtime 01:27 (late)","4/10",C.red],
+            ["Sleep duration (7h)","25/30",C.tm],
+            ["Deep sleep (105min, 25%)","20/20",C.tm],
+            ["REM sleep (104min, 25%)","10/10",C.tm],
+            ["Training load (yoga day Fri)","18/20",C.tm],
+            ["Bedtime 01:15 (late)","5/10",C.am],
             ["Alcohol (none logged)","+0",C.t3],
-            ["Protein (not yet logged)","+0",C.t3],
+            ["Protein (100g hit yesterday)","+8",C.tm],
           ].map(([label,pts,col],i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
               <span style={{color:C.t2}}>{label}</span>
@@ -205,14 +224,14 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
             <span style={{fontWeight:600,color:C.teal}}>+3</span>
           </div>
         </div>
-        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Short sleep + big day Thursday are the main factors. Deep sleep quality (26%) was excellent — your body made the most of the time it had.</div>
+        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Excellent night — deep sleep hit 25% and REM 25%, both optimal. Yoga yesterday was perfect active recovery. Only the late bedtime (01:15) cost you points. You're in great shape for today.</div>
       </Card>
 
-      <SecLabel>Today — Friday 12 June</SecLabel>
+      <SecLabel>Today — Saturday 13 June</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Steps today" value="3,719" sub="growing — yoga done" subColor={C.t3}/>
-        <Metric label="Sleep last night" value="6h 48m" sub="102m deep · 93m REM" subColor={C.tm}/>
+        <Metric label="Steps today" value="1,102" sub="early morning" subColor={C.t3}/>
+        <Metric label="Sleep last night" value="7h 0m" sub="105m deep · 104m REM" subColor={C.tm}/>
         <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={tp>=protTgt?C.tm:C.am}/>
         <Metric label="Cycle phase" value="—" sub="add in Cycle tab" subColor={C.t3}/>
       </div>
@@ -232,7 +251,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
         {/* SLEEP LAST NIGHT */}
         <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Last night — Thu 11 Jun</div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Last night — Fri 12 Jun</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
             <div><div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>6h 48m</div><div style={{fontSize:11,color:C.t3}}>bedtime 01:27</div></div>
             <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
@@ -243,9 +262,9 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
             </div>
           </div>
           <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
-            <div style={{width:"26%",background:"#3C3489"}}/>
-            <div style={{width:"23%",background:"#7F77DD"}}/>
-            <div style={{width:"49%",background:"#AFA9EC"}}/>
+            <div style={{width:"25%",background:"#3C3489"}}/>
+            <div style={{width:"25%",background:"#7F77DD"}}/>
+            <div style={{width:"48%",background:"#AFA9EC"}}/>
             <div style={{width:"2%",background:"#D3D1C7"}}/>
           </div>
         </Card>
@@ -269,9 +288,9 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
       <SecLabel>This week — Sun 7 Jun – Sat 13 Jun</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Total steps" value="55,978" sub="Sun–Fri so far" subColor={C.tm}/>
+        <Metric label="Total steps" value="57,080" sub="Sun–Fri so far" subColor={C.tm}/>
         <Metric label="Workouts" value="7" sub="2 gym · 2 yoga · 1 run · 1 walk · 1 elliptical" subColor={C.tm}/>
-        <Metric label="Avg sleep" value="7h 20m" sub="4 nights synced" subColor={C.t3}/>
+        <Metric label="Avg sleep" value="7h 16m" sub="5 nights synced" subColor={C.t3}/>
         <Metric label="Protein avg" value="—" sub="log meals to track" subColor={C.t3}/>
       </div>
 
@@ -348,19 +367,20 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
         <Metric label="Active days" value="7" sub="target: 20/month" subColor={C.tm}/>
         <Metric label="Gym sessions" value="2" sub="target: 12/month" subColor={C.t3}/>
         <Metric label="Movement sessions" value="3" sub="yoga & movement · target: 5" subColor={C.tm}/>
-        <Metric label="Protein days hit" value="—" sub="log meals to track" subColor={C.t3}/>
+        <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
       {/* HEATMAP */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
-        <HeatmapGrid/>
+        <HeatmapGrid allFood={allFood} protTgt={protTgt}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
           <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
           <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
+          <span><span style={{fontWeight:700,color:C.tm,fontSize:9}}>P✓</span> protein goal hit</span>
         </div>
       </Card>
 
@@ -383,7 +403,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
   );
 }
 
-function HeatmapGrid() {
+function HeatmapGrid({allFood={}, protTgt=100}) {
   const today = new Date().getDate();
   const firstDay = new Date(2026,5,1).getDay(); // June 2026 starts on Monday=1
   const days = ["S","M","T","W","T","F","S"];
@@ -401,6 +421,7 @@ function HeatmapGrid() {
     cells.push(
       <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===today?{outline:`2px solid ${C.tx}`}:{})}}>
         {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
+        {(()=>{const dateStr=`2026-06-${String(d).padStart(2,"0")}`;const dayMeals=allFood[dateStr]||[];const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);return dayProt>=protTgt?<span style={{fontSize:7,fontWeight:700,color:C.tm,position:"absolute",top:2,left:2}}>P✓</span>:null;})()}
         {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
         {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
         {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{w.includes("run")?"run":"cardio"}</div>}
@@ -698,7 +719,11 @@ function TabLog({logEntries, setLogEntries}) {
       const rows=await supa("POST","journal_entries",{user_id:UID,tag:selTag,txt:txt.trim()});
       if(rows&&rows[0]){newEntry.id=rows[0].id;newEntry.dt=rows[0].created_at;}
     }catch(e){}
-    setLogEntries(prev=>[newEntry,...prev]);
+    setLogEntries(prev=>{
+      const updated=[newEntry,...prev];
+      localStorage.setItem("jlog_backup",JSON.stringify(updated));
+      return updated;
+    });
     setTxt("");
   }
 
@@ -896,7 +921,7 @@ function App() {
   const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [syncStatus, setSyncStatus] = useState("Updated Fri 12 Jun 2026, 14:20");
+  const [syncStatus, setSyncStatus] = useState("Updated Sat 13 Jun 2026, 09:40");
   const [settKey, setSettKey] = useState(apiKey);
   const [settProt, setSettProt] = useState(protTgt);
 
@@ -922,11 +947,19 @@ function App() {
         const foodMap={};
         (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
         setAllFood(foodMap);
-        setLogEntries((log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt})));
+        const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
+        setLogEntries(logData);
+        // Keep localStorage in sync as backup
+        localStorage.setItem("jlog_backup",JSON.stringify(logData));
         setCycleDates((cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed})));
         const ss={};(supp||[]).forEach(r=>{if(r.taken)ss[r.supplement]=true;});setSuppState(ss);
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
-      }catch(e){setSyncStatus("sync error — using local data");}
+      }catch(e){
+        setSyncStatus("sync error — using local data");
+        // Fall back to localStorage backup
+        const backup=localStorage.getItem("jlog_backup");
+        if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
+      }
     }
     load();
   },[]);
@@ -948,7 +981,7 @@ function App() {
     const todayFood=allFood[tkey()]||[];
     const tp=todayFood.reduce((s,e)=>s+(e.p||0),0);
     const jArr=logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
-    return `Julia Serebro, 41F, 166cm. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. Today Fri 12 Jun 2026: 3719 steps, yoga 91min. Last night: 6h48m sleep (deep 102min 26%, REM 93min). Readiness 67/100. Protein today: ${Math.round(tp)}g/${protTgt}g. Week: 55k steps, 7 sessions. Log: ${jArr.join(" | ")||"none"}`;
+    return `Julia Serebro, 41F, 166cm. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. Today Sat 13 Jun 2026: 1102 steps (early morning). Last night Fri 12: 7h sleep (deep 105min 25%, REM 104min 25%), bedtime 01:15. Readiness 89/100 Great. Protein today: ${Math.round(tp)}g/${protTgt}g. Week: 57k steps, 7 sessions (yoga Fri, gym+elliptical+run Thu, gym+walk Mon, yoga Sun). Log: ${jArr.join(" | ")||"none"}`;
   }
 
   async function sendChat(){
