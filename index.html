@@ -519,11 +519,9 @@ function TabFood({allFood, setAllFood, protTgt, apiKey}) {
 
       {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
 
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button onClick={()=>{setMealDate(tkey());setMealTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{flex:1,...s.btn("s"),display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,borderStyle:"dashed",borderWidth:1.5}}>
-          📝 Type
-        </button>
-      </div>
+      <button onClick={()=>{setMealDate(tkey());setMealTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
+        📝 Log a meal
+      </button>
 
       {/* FOOD ENTRIES */}
       {food.length===0
@@ -893,6 +891,7 @@ function App() {
   const [cycleDates, setCycleDates] = useState([]);
   const [suppState, setSuppState] = useState({});
   const [showSett, setShowSett] = useState(false);
+  const [showSync, setShowSync] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
   const [chatInput, setChatInput] = useState("");
@@ -983,6 +982,7 @@ function App() {
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
           <button onClick={()=>setTab("cycle")} style={{...s.pill(C.pil,C.pi),border:"none",cursor:"pointer",fontFamily:"inherit"}}>cycle</button>
+          <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
           <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
       </div>
@@ -1022,6 +1022,29 @@ function App() {
             <div style={{display:"flex",gap:8,padding:"12px 14px",borderTop:`.5px solid ${C.bd}`}}>
               <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Ask anything about your health..." style={{...s.input,flex:1,borderRadius:20}}/>
               <button onClick={sendChat} style={{...s.btn("p"),borderRadius:20,padding:"9px 16px"}}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SYNC MODAL */}
+      {showSync&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSync(false);}}>
+          <div style={s.modal}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:8}}>🔄 Sync health data</h3>
+            <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Tapping the button below opens Claude with a pre-filled message. Claude will pull your latest Fitbit data and rebuild the dashboard file for you to download.</p>
+            <a
+              href={"https://claude.ai/new?q="+encodeURIComponent("Please pull my latest health data from Google Health (steps, sleep, workouts for today and this week) and update my health dashboard file.")}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={()=>setShowSync(false)}
+              style={{display:"block",background:C.pu,color:"#fff",textAlign:"center",padding:"12px 18px",borderRadius:8,fontWeight:500,fontSize:14,marginBottom:12,textDecoration:"none"}}
+            >
+              Open Claude &amp; sync →
+            </a>
+            <p style={{fontSize:11,color:C.t3,lineHeight:1.6}}>After Claude rebuilds the file, download it using the ↓ button and replace your GitHub Pages <code>index.html</code>.</p>
+            <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
+              <button onClick={()=>setShowSync(false)} style={s.btn("s")}>Close</button>
             </div>
           </div>
         </div>
