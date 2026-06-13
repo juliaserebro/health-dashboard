@@ -3,705 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Julia - Health Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<title>Health Coach</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#f5f4f0;--surface:#fff;--s2:#f0ede8;--border:rgba(0,0,0,.08);--bm:rgba(0,0,0,.14);--text:#1a1917;--t2:#6b6860;--t3:#a09d98;--teal:#0f7b5f;--tl:#e0f4ed;--tm:#1D9E75;--pu:#4a42b0;--pl:#eeedf8;--am:#a05f0a;--al:#fdf3e3;--red:#c0392b;--rl:#fdf0ee;--pi:#993556;--pil:#fbeaf0;--og:#b35a1f;--ogl:#fdebd0;--bl:#185FA5;--bll:#e6f1fb;--r:12px;--rs:8px}
-body{font-family:"Inter",-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5}
-.shell{max-width:980px;margin:0 auto;padding:20px 16px 80px}
-.hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:10px;flex-wrap:wrap}
-.hdr h1{font-size:19px;font-weight:600;letter-spacing:-.3px}
-.hdr .sub{font-size:12px;color:var(--t2);margin-top:2px}
-.hdr-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.sync{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:500}
-.sync-ok{background:var(--tl);color:var(--teal)}.sync-err{background:var(--rl);color:var(--red)}.sync-load{background:var(--s2);color:var(--t3)}
-.updated{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--s2);color:var(--t3)}
-.cpill{font-size:11px;font-weight:500;padding:5px 12px;border-radius:20px;cursor:pointer;border:none;font-family:inherit}
-.tabs{display:flex;gap:2px;margin-bottom:20px;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tb{font-family:inherit;font-size:13px;font-weight:500;color:var(--t2);background:none;border:none;cursor:pointer;padding:8px 14px;border-radius:var(--rs) var(--rs) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color .15s;flex-shrink:0}
-.tb:hover{color:var(--text)}.tb.active{color:var(--text);border-bottom-color:var(--text)}
-.tp{display:none}.tp.active{display:block}
-.card{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);padding:16px 18px}
-.ct{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:12px}
-.mg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
-@media(max-width:580px){.mg{grid-template-columns:repeat(2,1fr)}}
-.mc{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);padding:14px 16px}
-.ml{font-size:11px;color:var(--t2);margin-bottom:4px}.mv{font-size:21px;font-weight:600;letter-spacing:-.5px;line-height:1.1}.ms{font-size:11px;margin-top:3px}
-.good{color:var(--tm)}.warn{color:var(--am)}.bad{color:var(--red)}.muted{color:var(--t3)}
-.ai-card{background:var(--surface);border-radius:var(--r);border:.5px solid var(--border);border-left:3px solid var(--pu);padding:16px 18px;margin-bottom:14px}
-.ai-lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--pu);margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.ai-dot{width:6px;height:6px;border-radius:50%;background:var(--pu);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.ai-section{margin-bottom:10px}
-.ai-section-head{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px}
-.ai-section-body{font-size:12px;color:var(--t2);line-height:1.6;padding-left:4px}
-.tc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-@media(max-width:580px){.tc{grid-template-columns:1fr}}
-.mb14{margin-bottom:14px}
-.sr{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px}
-.sd{width:32px;color:var(--t3);flex-shrink:0}.sbw{flex:1;height:7px;border-radius:4px;background:var(--s2);overflow:hidden;display:flex}.sdur{width:38px;text-align:right;color:var(--t2)}
-.sde{background:#3C3489}.sre{background:#7F77DD}.sli{background:#AFA9EC}.saw{background:#D3D1C7}
-.wi{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:.5px solid var(--border);font-size:12px}.wi:last-child{border:none}
-.wb{font-size:10px;font-weight:500;padding:2px 8px;border-radius:20px}
-.by{background:#fdebd0;color:#b35a1f}.bw{background:var(--tl);color:var(--teal)}.bo{background:var(--al);color:var(--am)}.bgym{background:var(--pl);color:var(--pu)}.bell{background:var(--tl);color:var(--teal)}
-.pb{height:6px;border-radius:3px;background:var(--s2);overflow:hidden;margin:5px 0 3px}
-.pf{height:100%;border-radius:3px;transition:width .4s}
-.pl{display:flex;justify-content:space-between;font-size:10px;color:var(--t3)}
-.sbs{display:flex;align-items:flex-end;gap:4px;height:86px;padding-top:4px}
-.sbc{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
-.sbi{width:100%;border-radius:3px 3px 0 0;min-height:3px}
-.sbn{font-size:8px;color:var(--t2);text-align:center;line-height:1.2}
-.sbl{font-size:9px;color:var(--t3)}
-.ii{display:flex;gap:10px;padding:10px 0;border-bottom:.5px solid var(--border);font-size:12px;line-height:1.5}.ii:last-child{border:none}
-.idot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.cw{position:relative;width:100%}
-.section-sep{border:none;border-top:2px solid var(--s2);margin:28px 0 24px}
-.section-label{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:16px;display:flex;align-items:center;gap:8px}
-.section-label::after{content:"";flex:1;height:1px;background:var(--s2)}
-.fir{display:flex;gap:8px;margin-bottom:14px}
-.fb{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--surface);border:1.5px dashed var(--bm);border-radius:var(--r);cursor:pointer;font-family:inherit;font-size:13px;color:var(--t2);transition:all .15s}
-.fb:hover{border-color:var(--tm);color:var(--teal);background:var(--tl)}
-.fb svg{width:17px;height:17px;flex-shrink:0}
-.fe{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);margin-bottom:6px}
-.fel{flex:1}.fen{font-size:13px;font-weight:500}.fed{font-size:11px;color:var(--t2);margin-top:1px}
-.fem{display:flex;gap:7px;font-size:11px;flex-shrink:0}
-.mp{padding:2px 7px;border-radius:20px;font-weight:500}
-.mpp{background:var(--tl);color:var(--teal)}.mpc{background:var(--al);color:var(--am)}.mpf{background:var(--pl);color:var(--pu)}
-.fdel{background:none;border:none;color:var(--t3);cursor:pointer;padding:4px;margin-left:6px;font-size:16px;line-height:1}
-.fdel:hover{color:var(--red)}
-.ms2{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-@media(max-width:480px){.ms2{grid-template-columns:repeat(2,1fr)}}
-.mb2{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:10px 12px;text-align:center}
-.mb2v{font-size:18px;font-weight:600}.mb2l{font-size:10px;color:var(--t3);margin-top:2px}
-.je{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:12px 14px;margin-bottom:8px}
-.jeh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.jt{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px}
-.t-pain{background:var(--rl);color:var(--red)}.t-medical{background:var(--bll);color:var(--bl)}.t-feedback{background:var(--tl);color:var(--teal)}.t-mood{background:var(--al);color:var(--am)}.t-life{background:var(--pl);color:var(--pu)}.t-sleep{background:#f1efe8;color:var(--t2)}.t-correction{background:var(--pil);color:var(--pi)}
-.jdate{font-size:10px;color:var(--t3)}.jtxt{font-size:12px;line-height:1.6}
-.jdel{background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:2px}
-.jdel:hover{color:var(--red)}
-.ts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.to{font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;cursor:pointer;border:1.5px solid transparent;transition:all .12s;opacity:.55}
-.to.sel{opacity:1;border-color:currentColor}
-.to.t-pain{background:var(--rl);color:var(--red)}.to.t-medical{background:var(--bll);color:var(--bl)}.to.t-feedback{background:var(--tl);color:var(--teal)}.to.t-mood{background:var(--al);color:var(--am)}.to.t-life{background:var(--pl);color:var(--pu)}.to.t-sleep{background:#f1efe8;color:var(--t2)}.to.t-correction{background:var(--pil);color:var(--pi)}
-.cp{border-radius:var(--r);padding:16px 18px;border:.5px solid var(--border);margin-bottom:14px}
-.cpn{font-size:18px;font-weight:600;margin-bottom:4px}
-.cdg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
-.cdc{background:var(--surface);border-radius:var(--rs);border:.5px solid var(--border);padding:10px 12px}
-.cdl{font-size:10px;color:var(--t3);margin-bottom:3px}.cdv{font-size:13px;font-weight:500}
-.chi{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:.5px solid var(--border);font-size:12px}.chi:last-child{border:none}
-.cb{font-size:10px;padding:2px 8px;border-radius:20px;border:none;cursor:pointer;font-family:inherit;font-weight:500}
-.c-conf{background:var(--tl);color:var(--teal)}.c-pred{background:var(--al);color:var(--am)}
-.mo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px}
-.mo.open{display:flex}
-.modal{background:var(--surface);border-radius:var(--r);padding:24px;width:400px;max-width:100%}
-.modal h3{font-size:16px;font-weight:600;margin-bottom:6px}
-.modal p{font-size:13px;color:var(--t2);margin-bottom:16px}
-.ma{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
-.btn{font-family:inherit;font-size:13px;font-weight:500;padding:8px 18px;border-radius:var(--rs);cursor:pointer;transition:all .15s}
-.btn-p{background:var(--text);color:#fff;border:none}.btn-p:hover{background:#333}
-.btn-s{background:var(--surface);color:var(--t2);border:.5px solid var(--bm)}.btn-s:hover{background:var(--s2)}
-.btn-sm{padding:5px 12px;font-size:12px}
-.mic{width:64px;height:64px;border-radius:50%;background:var(--tl);border:2px solid var(--tm);cursor:pointer;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;transition:all .15s}
-.mic.rec{background:var(--rl);border-color:var(--red);animation:pr 1s infinite}
-@keyframes pr{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.3)}50%{box-shadow:0 0 0 10px rgba(192,57,43,0)}}
-.mic svg{width:26px;height:26px}
-.vt{min-height:44px;background:var(--s2);border-radius:var(--rs);padding:10px 14px;font-size:13px;color:var(--text);margin-bottom:12px}
-.pd{border:2px dashed var(--bm);border-radius:var(--r);padding:20px;text-align:center;cursor:pointer;margin-bottom:12px;transition:all .15s}
-.pd:hover{border-color:var(--tm);background:var(--tl)}
-.pp{width:100%;border-radius:var(--rs);margin-bottom:10px;max-height:180px;object-fit:cover}
-.sf label{display:block;font-size:12px;font-weight:500;color:var(--t2);margin-bottom:4px}
-.sf input,.sf select{width:100%;padding:8px 12px;border:.5px solid var(--bm);border-radius:var(--rs);font-family:inherit;font-size:13px;background:var(--s2);color:var(--text);margin-bottom:12px}
-.sf input[type=password]{font-family:"DM Mono",monospace;font-size:12px}
-.sn{font-size:11px;color:var(--t3);margin-top:-8px;margin-bottom:12px}
-.sp{width:15px;height:15px;border:2px solid var(--bm);border-top-color:var(--pu);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.fb2{display:flex;justify-content:space-between;align-items:center}
-.empty{text-align:center;padding:24px 16px;color:var(--t3);font-size:13px}
-.empty strong{display:block;font-size:14px;color:var(--t2);margin-bottom:4px}
-.div{border:none;border-top:.5px solid var(--border);margin:12px 0}
-.pbox{background:var(--s2);border-radius:var(--rs);padding:12px}
-.pbox-l{font-size:10px;color:var(--t3);margin-bottom:3px}.pbox-v{font-size:14px;font-weight:500}
-.goal-row{padding:12px 0;border-bottom:.5px solid var(--border)}.goal-row:last-child{border:none}
-.goal-num{font-size:13px;font-weight:500;margin-bottom:4px}.goal-desc{font-size:12px;color:var(--t2);line-height:1.6}
-.plan-box{border-radius:var(--rs);padding:12px}
-.plan-title{font-size:11px;font-weight:600;margin-bottom:6px}.plan-desc{font-size:11px;color:var(--t2);line-height:1.6}
-.ex-category{margin-bottom:16px}
-.ex-cat-title{font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px;padding-bottom:4px;border-bottom:.5px solid var(--border)}
-.ex-item{display:flex;gap:10px;padding:6px 0;border-bottom:.5px solid var(--s2);font-size:12px}.ex-item:last-child{border:none}
-.ex-name{font-weight:500;flex:1}.ex-note{color:var(--t2);font-size:11px}
-textarea{font-family:inherit;outline:none}
-textarea:focus{box-shadow:0 0 0 2px var(--pu)}
-.mt14{margin-top:14px}
-
-.readiness-card{background:var(--sf);border-radius:var(--r);border:.5px solid var(--bd);padding:20px 18px;margin-bottom:14px}
-.r-score{font-size:56px;font-weight:700;letter-spacing:-2px;line-height:1}
-.r-label{font-size:13px;font-weight:500;margin-top:4px;margin-bottom:12px}
-.r-bar{height:8px;border-radius:4px;background:var(--s2);margin-bottom:14px;overflow:hidden}
-.r-fill{height:100%;border-radius:4px}
-.r-breakdown{display:flex;flex-direction:column;gap:5px}
-.rb-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;padding:5px 8px;border-radius:var(--rs);background:var(--s2)}
-.rb-lbl{display:flex;align-items:center;gap:6px;color:var(--t2)}
-.rb-pts{font-weight:600;font-size:12px}
-.rb-pts.pos{color:var(--tm)}.rb-pts.neg{color:var(--red)}.rb-pts.neu{color:var(--am)}
-.r-ctx{font-size:11px;color:var(--t3);margin-top:10px;padding:8px 10px;background:var(--s2);border-radius:var(--rs)}
-.supp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-@media(max-width:480px){.supp-grid{grid-template-columns:repeat(2,1fr)}}
-.supp-item{background:var(--sf);border:.5px solid var(--bd);border-radius:var(--rs);padding:10px 12px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:8px}
-.supp-item.chk{background:var(--tl);border-color:var(--tm)}
-.supp-chk{width:18px;height:18px;border-radius:50%;border:2px solid var(--bm);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent}
-.supp-item.chk .supp-chk{background:var(--tm);border-color:var(--tm);color:#fff}
-.supp-nm{font-size:12px;font-weight:500}
-.supp-tm{font-size:10px;color:var(--t3);margin-top:1px}
-.heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:10px}
-.hm-day{border-radius:4px;background:var(--s2);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;padding:3px;position:relative;overflow:hidden;min-height:58px}
-.hm-today{box-shadow:0 0 0 2px var(--tx)}
-.hm-strip{width:100%;border-radius:3px;padding:2px 3px;font-size:9px;font-weight:600;text-align:center;line-height:1.4;white-space:nowrap;overflow:hidden}
-.hm-strip-gym{background:var(--pl);color:var(--pu)}
-.hm-strip-yoga{background:#fdebd0;color:#b35a1f}
-.hm-strip-cardio{background:var(--tl);color:var(--teal)}
-.hm-steps-badge{font-size:9px;font-weight:700;color:var(--teal);position:absolute;top:2px;right:3px}
-.hm-lbl{font-size:10px;color:var(--t3);text-align:center;font-weight:500}
-.updated{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--s2);color:var(--t3)}
-
-.coach-btn{position:fixed;bottom:24px;right:20px;z-index:50;background:var(--pu);color:#fff;border:none;border-radius:30px;padding:12px 18px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(74,66,176,.35)}
-.coach-btn:hover{background:#3a32a0}
-.coach-btn svg{width:18px;height:18px}
-.chat-modal{background:var(--sf);border-radius:var(--r);padding:0;width:440px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden}
-.chat-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:.5px solid var(--bd);}
-.chat-hdr h3{font-size:15px;font-weight:600;margin:0}
-.chat-hdr p{font-size:11px;color:var(--t3);margin:2px 0 0}
-.chat-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--t3);line-height:1;padding:2px}
-.chat-msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-height:200px}
-.chat-msg{max-width:88%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.55}
-.chat-msg.user{background:var(--pu);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
-.chat-msg.ai{background:var(--s2);color:var(--tx);align-self:flex-start;border-bottom-left-radius:4px}
-.chat-msg.ai.loading{color:var(--t3);font-style:italic}
-.chat-input-row{display:flex;gap:8px;padding:12px 14px;border-top:.5px solid var(--bd);}
-.chat-input-row input{flex:1;padding:9px 12px;border:.5px solid var(--bm);border-radius:20px;font-family:inherit;font-size:13px;background:var(--s2);color:var(--tx)}
-.chat-input-row button{background:var(--pu);color:#fff;border:none;border-radius:20px;padding:9px 16px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', -apple-system, sans-serif; background: #f5f4f0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
 </style>
 </head>
 <body>
-<div class="shell">
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
 
-<div class="hdr">
-  <div>
-    <h1>Health Coach</h1>
-    <div class="sub" id="hdate"></div>
-  </div>
-  <div class="hdr-r">
-    <span class="updated" id="upd-lbl">Updated Fri 12 Jun 2026, 14:20</span>
-    <button class="cpill" id="cpill" onclick="gTab('cycle')" style="background:var(--pil);color:var(--pi);">cycle</button>
-    <button class="btn btn-s btn-sm" onclick="openSett()">&#9881; Settings</button>
-  </div>
-</div>
+// React loaded via CDN
 
-<div class="tabs">
-  <button class="tb active" onclick="gTab('dash',this)">Dashboard</button>
-  <button class="tb" onclick="gTab('food',this)">Food</button>
-  <button class="tb" onclick="gTab('cycle',this)">Cycle</button>
-  <button class="tb" onclick="gTab('log',this)">Log</button>
-  <button class="tb" onclick="gTab('profile',this)">Profile</button>
-</div>
-
-<!-- DASHBOARD -->
-<div id="tp-dash" class="tp active">
-
-    <div style="background:var(--sf);border-radius:var(--r);border:.5px solid var(--bd);padding:16px 18px;margin-bottom:14px;">
-    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:8px;">Readiness today &mdash; Friday 12 June</div>
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
-      <div style="font-size:52px;font-weight:700;letter-spacing:-2px;line-height:1;color:var(--am);">67</div>
-      <div style="flex:1;">
-        <div style="height:7px;border-radius:4px;background:var(--s2);overflow:hidden;margin-bottom:5px;"><div style="width:67%;height:100%;border-radius:4px;background:var(--am);"></div></div>
-        <div style="font-size:12px;font-weight:500;color:var(--am);">Good</div>
-      </div>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:0;margin-bottom:10px;border:.5px solid var(--bd);border-radius:var(--rs);overflow:hidden;">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#128704; Sleep duration (6h 48m)</span><span style="font-weight:600;color:var(--am);">18/30</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#128164; Deep sleep (102min, 26%)</span><span style="font-weight:600;color:var(--tm);">20/20</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#129504; REM sleep (93min, 23%)</span><span style="font-weight:600;color:var(--tm);">10/10</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#127947; Training load (big day Thu)</span><span style="font-weight:600;color:var(--am);">12/20</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#127769; Bedtime 01:27 (late)</span><span style="font-weight:600;color:var(--red);">4/10</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#127863; Alcohol (none logged)</span><span style="font-weight:600;color:var(--t3);">+0</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--s2);border-bottom:.5px solid var(--bd);"><span style="color:var(--t2);">&#129385; Protein (not yet logged)</span><span style="font-weight:600;color:var(--t3);">+0</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 10px;background:var(--tl);"><span style="color:var(--teal);">&#10024; Sleep efficiency bonus (49%)</span><span style="font-weight:600;color:var(--teal);">+3</span></div>
-    </div>
-    <div style="font-size:11px;color:var(--t3);padding:7px 10px;background:var(--s2);border-radius:var(--rs);">Short sleep + big Thu are main factors. Deep sleep quality 26% was excellent. Yoga this morning was a smart choice &mdash; active recovery fits a 67 readiness day well.</div>
-  </div><div class="section-label">Today &mdash; Friday 12 June</div>
-
-  <div class="mg">
-    <div class="mc"><div class="ml">Steps today</div><div class="mv" id="d-steps">3,694</div><div class="ms muted">early &mdash; keep moving</div></div>
-    <div class="mc"><div class="ml">Sleep last night</div><div class="mv">6h 48m</div><div class="ms good">102m deep &middot; 93m REM</div></div>
-    <div class="mc"><div class="ml">Protein today</div><div class="mv" id="d-prot">0g</div><div class="ms warn" id="d-prot-s">log first meal</div></div>
-    <div class="mc"><div class="ml">Cycle phase</div><div class="mv" id="d-phase" style="font-size:15px;">&#8212;</div><div class="ms muted" id="d-cday">add in Cycle tab</div></div>
-  </div>
-
-  <div class="ai-card">
-    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; today<button onclick="generateAI('today')" style="margin-left:auto;font-size:10px;background:var(--pl);color:var(--pu);border:none;border-radius:20px;padding:2px 8px;cursor:pointer;font-family:inherit;">refresh</button></div>
-    <div id="ai-today"><span class="sp"></span><span style="color:var(--t3);font-style:italic;">Generating briefing...</span></div>
-  </div>
-
-  <div class="tc">
-    <div class="card">
-      <div class="ct">Last night &mdash; Thu 11 Jun</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-        <div><div style="font-size:22px;font-weight:600;letter-spacing:-.5px;">6h 48m</div><div style="font-size:11px;color:var(--t3);">bedtime 01:27</div></div>
-        <div style="font-size:12px;display:flex;flex-direction:column;gap:3px;padding-top:2px;">
-          <div style="display:flex;justify-content:space-between;"><span style="color:#3C3489;font-weight:500;">Deep</span><span>102m (26%)</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="color:#7F77DD;font-weight:500;">REM</span><span>93m (23%)</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="color:#AFA9EC;font-weight:500;">Light</span><span>203m</span></div>
-          <div style="display:flex;justify-content:space-between;"><span class="muted">Awake</span><span>9m</span></div>
-        </div>
-      </div>
-      <div class="sbw" style="height:10px;border-radius:5px;"><div class="sde" style="width:26%;"></div><div class="sre" style="width:23%;"></div><div class="sli" style="width:47%;"></div><div class="saw" style="width:1%;"></div></div>
-    </div>
-    <div class="card">
-      <div class="ct">Protein goal today</div>
-      <div class="fb2" style="margin-bottom:4px;"><span style="font-size:13px;font-weight:500;" id="p-lbl">0g logged</span><span style="font-size:12px;color:var(--t2);" id="p-tgt">100g target</span></div>
-      <div class="pb"><div class="pf" id="p-bar" style="width:0%;background:var(--tm);"></div></div>
-      <div class="pl"><span id="p-pct">0%</span><span id="p-rem">100g remaining</span></div>
-      <div class="div"></div>
-      <div class="ct" style="margin-bottom:6px;">Recent health flags</div>
-      <div id="d-jflags" style="font-size:12px;color:var(--t3);">No active health notes</div>
-    </div>
-  </div>
-
-  <hr class="section-sep">
-  <div class="section-label">This week &mdash; Sun 7 Jun &ndash; Sat 13 Jun</div>
-
-  <div class="mg">
-    <div class="mc"><div class="ml">Total steps</div><div class="mv">55,978</div>
-        <div class="ms good">Sun&ndash;Fri so far</div></div>
-    <div class="mc"><div class="ml">Workouts</div><div class="mv">7</div><div class="ms good">2 gym &middot; 2 yoga &middot; 1 run &middot; 1 walk &middot; 1 elliptical</div></div>
-    <div class="mc"><div class="ml">Avg sleep</div><div class="mv">7h 20m</div>
-        <div class="ms muted">4 nights synced</div></div>
-    <div class="mc"><div class="ml">Protein avg</div><div class="mv" id="w-prot">&#8212;</div><div class="ms muted">log meals to track</div></div>
-  </div>
-
-  <div class="ai-card">
-    <div class="ai-lbl"><span class="ai-dot"></span>AI coach &mdash; weekly review<button onclick="generateAI('week')" style="margin-left:auto;font-size:10px;background:var(--pl);color:var(--pu);border:none;border-radius:20px;padding:2px 8px;cursor:pointer;font-family:inherit;">refresh</button></div>
-    <div id="ai-week"><span class="sp"></span><span style="color:var(--t3);font-style:italic;">Generating weekly review...</span></div>
-  </div>
-
-  <div class="tc">
-    <div class="card"><div class="ct">Daily steps this week</div><div class="sbs" id="step-bars"></div></div>
-    <div class="card"><div class="ct">Sleep this week</div><div id="sleep-week"></div></div>
-  </div>
-
-  <div class="card mb14">
-    <div class="ct">Workouts this week</div>
-    <div class="wi"><div><span class="wb by">Yoga</span><span style="margin-left:8px;font-weight:500;">Fri 12 Jun</span></div><div style="font-size:12px;color:var(--t2);">91 min &middot; 99bpm &middot; 23 AZM &middot; 11:20&ndash;12:51</div></div>
-    <div class="wi"><div><span class="wb bw">Run</span><span style="margin-left:8px;font-weight:500;">Thu 11 Jun</span></div><div style="font-size:12px;color:var(--t2);">23 min &middot; 119bpm &middot; 913m &middot; 16 AZM &middot; 19:14</div></div>
-    <div class="wi"><div><span class="wb bgym">Gym</span><span style="margin-left:8px;font-weight:500;">Thu 11 Jun</span></div><div style="font-size:12px;color:var(--t2);">38 min &middot; 94bpm &middot; 10:08&ndash;10:46</div></div>
-    <div class="wi"><div><span class="wb bell">Elliptical</span><span style="margin-left:8px;font-weight:500;">Thu 11 Jun</span></div><div style="font-size:12px;color:var(--t2);">24 min &middot; 109bpm &middot; 13 AZM &middot; 09:43&ndash;10:07</div></div>
-    <div class="wi"><div><span class="wb bw">Walk</span><span style="margin-left:8px;font-weight:500;">Mon 8 Jun</span></div><div style="font-size:12px;color:var(--t2);">60 min &middot; 3.1km &middot; 99bpm &middot; 31 AZM</div></div>
-    <div class="wi"><div><span class="wb bgym">Gym</span><span style="margin-left:8px;font-weight:500;">Mon 8 Jun</span></div><div style="font-size:12px;color:var(--t2);">25 min &middot; 68bpm &middot; light zone</div></div>
-    <div class="wi"><div><span class="wb by">Yoga</span><span style="margin-left:8px;font-weight:500;">Sun 7 Jun</span></div><div style="font-size:12px;color:var(--t2);">60 min &middot; 101bpm &middot; 31 AZM</div></div>
-  </div>
-
-  <div class="card">
-    <div class="ct">Weekly insights</div>
-    <div class="ii"><div class="idot" style="background:var(--tm);"></div><div>Outstanding week &mdash; 7 sessions and 56k+ steps. Thursday: gym + elliptical + run + 13k steps. Friday: yoga 91min.</div></div>
-    <div class="ii"><div class="idot" style="background:var(--pu);"></div><div>Thursday run (23min, 119bpm) adds cardiovascular work on top of gym. That&rsquo;s exactly the combination your cardio goal needs.</div></div>
-    <div class="ii"><div class="idot" style="background:var(--am);"></div><div>Sleep shorter this week (avg 7h 9m vs 7h 42m last week) &mdash; jet lag still resolving, bedtimes trending earlier.</div></div>
-    <div class="ii"><div class="idot" style="background:var(--red);"></div><div>Friday readiness is 67/100 &mdash; short sleep and big day Thu are the main factors. Deep sleep quality (26%) was excellent despite the shorter duration.</div></div>
-  </div>
-
-  <hr class="section-sep">
-  <div class="section-label">Month &mdash; June 2026</div>
-
-  <div class="mg">
-    <div class="mc"><div class="ml">Total workouts</div><div class="mv">5</div><div class="ms muted">Fri 5, Sun 7, Mon 8 &times;3</div></div>
-    <div class="mc"><div class="ml">Gym sessions</div><div class="mv warn">1</div><div class="ms warn">target: 12/month</div></div>
-    <div class="mc"><div class="ml">Yoga sessions</div><div class="mv good">2</div><div class="ms muted">target: 8/month</div></div>
-    <div class="mc"><div class="ml">Week 2 of 4</div><div class="mv">50%</div><div class="ms muted">month in progress</div></div>
-  </div>
-
-  <div class="card mb14">
-    <div class="ct">Consistency &mdash; June 2026</div>
-    <div class="heatmap" id="heatmap"></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--t3);margin-top:8px;">
-      <span style="display:flex;align-items:center;gap:4px;"><span style="background:var(--pl);color:var(--pu);font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;">gym</span></span>
-      <span style="display:flex;align-items:center;gap:4px;"><span style="background:#fdebd0;color:#b35a1f;font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;">yoga</span></span>
-      <span style="display:flex;align-items:center;gap:4px;"><span style="background:var(--tl);color:var(--teal);font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;">cardio</span></span>
-      <span style="display:flex;align-items:center;gap:4px;"><span style="font-size:9px;font-weight:700;color:var(--teal);">10k</span> = steps milestone</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="ct">Week by week &mdash; June 2026</div>
-    <div class="wi"><div><strong style="font-size:12px;">Week 1</strong> &nbsp; Mon 1 &ndash; Sat 6 Jun</div><div style="font-size:12px;color:var(--t2);">1 workout (yoga Fri 5 Jun &mdash; 96min &#9733;)</div></div>
-    <div class="wi" style="background:var(--tl);border-radius:6px;padding:7px 8px;"><div><strong style="font-size:12px;color:var(--teal);">Week 2 &larr; current</strong> &nbsp; Sun 7 &ndash; Sat 13 Jun</div><div style="font-size:12px;color:var(--teal);">7 workouts &middot; 1 gym &middot; 2 yoga &middot; 2 walk &middot; 1 elliptical &middot; 1 run</div></div>
-    <div class="wi" style="color:var(--t3);"><div style="font-size:12px;">Week 3 &nbsp; Sun 14 &ndash; Sat 20 Jun</div><div></div></div>
-    <div class="wi" style="color:var(--t3);border:none"><div style="font-size:12px;">Week 4 &nbsp; Sun 21 &ndash; Sat 27 Jun</div><div></div></div>
-  </div>
-
-</div>
-
-<!-- FOOD LOG -->
-<div id="tp-food" class="tp">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-    <button class="btn btn-s btn-sm" onclick="foodDatePrev()" style="padding:5px 10px;">&#8592;</button>
-    <span style="flex:1;text-align:center;font-size:13px;font-weight:500;" id="food-date-lbl">Today</span>
-    <button class="btn btn-s btn-sm" onclick="foodDateNext()" id="food-date-next" style="padding:5px 10px;">&#8594;</button>
-  </div>
-  <div class="ms2">
-    <div class="mb2"><div class="mb2v" id="f-cal">0</div><div class="mb2l">kcal</div></div>
-    <div class="mb2"><div class="mb2v" id="f-prot" style="color:var(--teal);">0g</div><div class="mb2l">protein</div></div>
-    <div class="mb2"><div class="mb2v" id="f-carb" style="color:var(--am);">0g</div><div class="mb2l">carbs</div></div>
-    <div class="mb2"><div class="mb2v" id="f-fat" style="color:var(--pu);">0g</div><div class="mb2l">fat</div></div>
-  </div>
-  <div class="card mb14">
-    <div class="fb2" style="margin-bottom:4px;"><span style="font-size:13px;font-weight:500;">Daily protein goal</span><span style="font-size:12px;color:var(--t2);"><span id="fp-logged">0</span>g / <span id="fp-tgt">100</span>g</span></div>
-    <div class="pb"><div class="pf" id="fp-bar" style="width:0%;background:var(--tm);"></div></div>
-    <div class="plr"><span id="fp-pct">0%</span><span id="fp-left">100g to go</span></div>
-    <div style="border-top:.5px solid var(--bd);margin-top:10px;padding-top:10px;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:8px;">Daily balance</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-        <div style="text-align:center;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">Calories</div>
-          <div style="font-size:15px;font-weight:600;" id="bal-kcal">0</div>
-          <div style="font-size:9px;color:var(--t3);">target 1800-2200</div>
-          <div style="height:3px;border-radius:2px;background:var(--s2);margin-top:4px;overflow:hidden;"><div id="bal-kcal-bar" style="height:100%;border-radius:2px;background:var(--tm);width:0%;"></div></div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">Carbs</div>
-          <div style="font-size:15px;font-weight:600;" id="bal-carb">0g</div>
-          <div style="font-size:9px;color:var(--t3);">target 180-250g</div>
-          <div style="height:3px;border-radius:2px;background:var(--s2);margin-top:4px;overflow:hidden;"><div id="bal-carb-bar" style="height:100%;border-radius:2px;background:var(--am);width:0%;"></div></div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">Fat</div>
-          <div style="font-size:15px;font-weight:600;" id="bal-fat">0g</div>
-          <div style="font-size:9px;color:var(--t3);">target 50-80g</div>
-          <div style="height:3px;border-radius:2px;background:var(--s2);margin-top:4px;overflow:hidden;"><div id="bal-fat-bar" style="height:100%;border-radius:2px;background:var(--pu);width:0%;"></div></div>
-        </div>
-      </div>
-      <div id="nutrition-feedback" style="font-size:11px;color:var(--t3);margin-top:8px;text-align:center;"></div>
-    </div>
-  </div>
-  <div class="fir">
-    <button class="fb" onclick="openPhoto('food')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Photo</button>
-    <button class="fb" onclick="openVoice('food')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Voice</button>
-    <button class="fb" onclick="openTxt()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="9" y2="18"/></svg>Type</button>
-  </div>
-  <div id="food-ai" class="ai-card" style="display:none;"><div class="ai-lbl"><span class="ai-dot"></span>Analysing meal...</div><div id="food-ai-txt"><span class="sp"></span>Identifying food...</div></div>
-  <div id="food-entries"><div class="empty"><strong>No meals logged today</strong>Tap Photo, Voice, or Type to log your first meal.</div></div>
-</div>
-
-<!-- CYCLE -->
-<div id="tp-cycle" class="tp">
-  <div class="cp" id="cycle-banner" style="background:var(--pil);border-color:rgba(153,53,86,.2);">
-    <div class="ct">Current phase</div>
-    <div class="cpn" id="c-phase-name" style="color:var(--pi);">Add your cycle dates to get started</div>
-    <div style="font-size:12px;color:var(--t2);margin-top:6px;" id="c-phase-desc">Enter your last period start date below.</div>
-  </div>
-  <div class="cdg" id="c-dates-grid" style="display:none;">
-    <div class="cdc"><div class="cdl">Last period</div><div class="cdv" id="c-last">&#8212;</div></div>
-    <div class="cdc"><div class="cdl">Next predicted</div><div class="cdv" id="c-next">&#8212;</div></div>
-    <div class="cdc"><div class="cdl">Avg cycle length</div><div class="cdv" id="c-avg">&#8212;</div></div>
-  </div>
-  <div class="card mb14">
-    <div class="ct">Cycle history</div>
-    <p style="font-size:12px;color:var(--t2);margin-bottom:12px;">Add past period start dates. More dates = better predictions. Tap predicted dates to confirm.</p>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <input type="date" id="c-input" style="flex:1;padding:8px 12px;border:.5px solid var(--bm);border-radius:var(--rs);font-family:inherit;font-size:13px;background:var(--s2);color:var(--text);">
-      <button class="btn btn-p btn-sm" onclick="addCycleDate()">Add</button>
-    </div>
-    <div id="c-list"><div class="empty" style="padding:12px 0;"><strong>No dates added yet</strong></div></div>
-  </div>
-  <div class="ai-card"><div class="ai-lbl"><span class="ai-dot"></span>Cycle-aware coaching</div><div id="ai-cycle" style="font-size:13px;color:var(--t3);">Add cycle dates above to get phase-specific guidance.</div></div>
-  <div class="card">
-    <div class="ct">Phase guide</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-      <div style="padding:10px;background:var(--rl);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px;">MENSTRUAL &middot; Days 1-5</div><div style="font-size:11px;color:var(--t2);line-height:1.5;">Lower intensity. Gentle yoga, walking. Iron-rich foods. Rest is productive training.</div></div>
-      <div style="padding:10px;background:var(--tl);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--teal);margin-bottom:4px;">FOLLICULAR &middot; Days 6-13</div><div style="font-size:11px;color:var(--t2);line-height:1.5;">Rising energy. Best window for new challenges and heavier strength work.</div></div>
-      <div style="padding:10px;background:var(--al);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--am);margin-bottom:4px;">OVULATORY &middot; Days 14-16</div><div style="font-size:11px;color:var(--t2);line-height:1.5;">Peak strength. Ideal for gym sessions. High protein supports performance.</div></div>
-      <div style="padding:10px;background:var(--pl);border-radius:var(--rs);"><div style="font-size:11px;font-weight:600;color:var(--pu);margin-bottom:4px;">LUTEAL &middot; Days 17-28</div><div style="font-size:11px;color:var(--t2);line-height:1.5;">Fatigue rises. Higher protein and magnesium. Scale back from day 22.</div></div>
-    </div>
-  </div>
-</div>
-
-<!-- MY LOG -->
-<div id="tp-log" class="tp">
-  <div class="ai-card"><div class="ai-lbl"><span class="ai-dot"></span>How the AI coach uses this log</div><div style="font-size:12px;color:var(--text);line-height:1.65;">Every entry is read before generating recommendations. Log pain, medical updates, physio notes, energy, mood, travel, sleep context, corrections, or spine updates. The coach adjusts your plan based on what you log here.</div></div>
-  <div class="card mb14">
-    <div class="ct">Add entry</div>
-    <div class="ts">
-      <div class="to t-pain sel" data-tag="pain" onclick="selTag(this)">Pain</div>
-      <div class="to t-medical" data-tag="medical" onclick="selTag(this)">Medical update</div>
-      <div class="to t-feedback" data-tag="feedback" onclick="selTag(this)">Exercise feedback</div>
-      <div class="to t-mood" data-tag="mood" onclick="selTag(this)">Energy / mood</div>
-      <div class="to t-life" data-tag="life" onclick="selTag(this)">Life context</div>
-      <div class="to t-sleep" data-tag="sleep" onclick="selTag(this)">Sleep note</div>
-      <div class="to t-postworkout" data-tag="postworkout" onclick="selTag(this)" style="background:var(--orl);color:var(--or);">Post-workout feel</div>
-      <div class="to t-correction" data-tag="correction" onclick="selTag(this)">Correct AI</div>
-      <div class="to t-medical" data-tag="spine" onclick="selTag(this)">Spine update</div>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:10px;">
-      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openVoice('log')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Voice</button>
-      <button class="fb" style="flex:0 0 auto;padding:10px 14px;" onclick="openPhoto('log')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Photo / doc</button>
-    </div>
-    <textarea id="log-input" placeholder="Be specific - e.g. left glute pain during downward dog, achy 3/10, went away after 10 min. Or: physio cleared hip hinges. Or: MRI results show..." style="width:100%;padding:10px 12px;border:.5px solid var(--bm);border-radius:var(--rs);font-size:13px;resize:vertical;min-height:72px;background:var(--s2);color:var(--text);margin-bottom:10px;"></textarea>
-    <button class="btn btn-p" onclick="addLogEntry()">Save entry</button>
-  </div>
-  <div class="section-label">Spine history</div>
-  <div class="tc mb14">
-    <div class="card" style="border-left:3px solid var(--am);">
-      <div class="ct" style="color:var(--am);">L4-L5 disc herniation</div>
-      <div style="font-size:12px;color:var(--t2);line-height:1.7;">
-        <div style="margin-bottom:5px;"><span style="font-weight:500;color:var(--text);">Onset:</span> Feb-Mar 2025. Radicular pain into leg, nerve compression, functional limitations.</div>
-        <div style="margin-bottom:5px;"><span style="font-weight:500;color:var(--text);">May 2025:</span> Significant leg pain reduction. Returned to light activity.</div>
-        <div style="margin-bottom:5px;"><span style="font-weight:500;color:var(--text);">Aug 2025:</span> Recurrent lumbar symptoms.</div>
-        <div style="margin-bottom:8px;"><span style="font-weight:500;color:var(--text);">Current:</span> Left glute pain to outer left shin during walking, yoga, Pilates. Achy, not sharp. MRI and physio pending.</div>
-        <span style="background:var(--al);color:var(--am);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;">Monitoring &mdash; physio pending</span>
-      </div>
-    </div>
-    <div class="card" style="border-left:3px solid var(--bll);">
-      <div class="ct" style="color:var(--bl);">T9-T10 surgery</div>
-      <div style="font-size:12px;color:var(--t2);line-height:1.7;">
-        <div style="margin-bottom:5px;"><span style="font-weight:500;color:var(--text);">Discovery:</span> Spinal cord compression at T9-T10 on imaging. Incidental finding.</div>
-        <div style="margin-bottom:5px;"><span style="font-weight:500;color:var(--text);">Surgery:</span> T9-T10 decompression ~March 2026. Recovery without complications.</div>
-        <div style="margin-bottom:8px;"><span style="font-weight:500;color:var(--text);">Status:</span> Cleared for full activity. Follow-up MRI due September 2026.</div>
-        <span style="background:var(--tl);color:var(--teal);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;">Cleared &mdash; MRI due Sep 2026</span>
-      </div>
-    </div>
-  </div>
-  <div class="section-label">All entries</div>
-  <div id="log-entries"><div class="empty"><strong>No entries yet</strong>Start logging to build your health history.</div></div>
-</div>
-
-<!-- MY PROFILE -->
-<div id="tp-profile" class="tp">
-  <div class="section-label">Personal info</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
-    <div class="pbox"><div class="pbox-l">Name</div><div class="pbox-v">Julia Serebro</div></div>
-    <div class="pbox"><div class="pbox-l">Date of birth</div><div class="pbox-v">29 Nov 1985</div></div>
-    <div class="pbox"><div class="pbox-l">Height</div><div class="pbox-v">166 cm</div></div>
-    <div class="pbox"><div class="pbox-l">Age</div><div class="pbox-v" id="calc-age">40</div></div>
-  </div>
-  <div class="section-label">InBody baseline &mdash; 8 June 2026</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
-    <div class="pbox"><div class="pbox-l">Weight</div><div class="pbox-v" style="font-size:18px;">57.6 kg</div></div>
-    <div class="pbox" style="background:var(--tl);"><div class="pbox-l" style="color:var(--teal);">Skeletal muscle</div><div class="pbox-v" style="font-size:18px;">24.9 kg</div></div>
-    <div class="pbox" style="background:var(--al);"><div class="pbox-l" style="color:var(--am);">Body fat</div><div class="pbox-v" style="font-size:18px;">12.2 kg</div></div>
-    <div class="pbox"><div class="pbox-l">Body fat %</div><div class="pbox-v" style="font-size:18px;">21.2%</div></div>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
-    <div class="pbox"><div class="pbox-l">BMI</div><div class="pbox-v">20.9</div></div>
-    <div class="pbox"><div class="pbox-l">InBody score</div><div class="pbox-v">78 / 100</div></div>
-    <div class="pbox"><div class="pbox-l">Visceral fat</div><div class="pbox-v">Level 5 <span style="color:var(--teal);font-size:11px;">low</span></div></div>
-    <div class="pbox"><div class="pbox-l">BMR</div><div class="pbox-v">1,350 kcal</div></div>
-  </div>
-  <div class="section-label">Goals</div>
-  <div class="tc mb14">
-    <div class="card" style="border-left:3px solid var(--tm);">
-      <div class="ct">3 months &mdash; September 2026</div>
-      <div style="display:flex;flex-direction:column;">
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Weight</span><span style="font-weight:500;">57-58 kg</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Skeletal muscle</span><span style="font-weight:500;color:var(--teal);">25.5 kg <small>+0.6</small></span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Body fat</span><span style="font-weight:500;color:var(--am);">11.5 kg <small>-0.7</small></span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Body fat %</span><span style="font-weight:500;">19.8%</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">InBody score</span><span style="font-weight:500;">82+</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;"><span style="color:var(--t2);">Push-ups</span><span style="font-weight:500;">10 consecutive</span></div>
-      </div>
-    </div>
-    <div class="card" style="border-left:3px solid var(--pu);">
-      <div class="ct">6 months &mdash; December 2026</div>
-      <div style="display:flex;flex-direction:column;">
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Weight</span><span style="font-weight:500;">57-59 kg</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Skeletal muscle</span><span style="font-weight:500;color:var(--teal);">26.9 kg <small>+2.0</small></span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Body fat</span><span style="font-weight:500;color:var(--am);">10.2 kg <small>-2.0</small></span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">Body fat %</span><span style="font-weight:500;">17.5%</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--border);"><span style="color:var(--t2);">InBody score</span><span style="font-weight:500;">85+</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;"><span style="color:var(--t2);">Push-ups</span><span style="font-weight:500;">15 consecutive</span></div>
-      </div>
-    </div>
-  </div>
-  <div class="card mb14">
-    <div class="ct">The 4 goals</div>
-    <div class="goal-row"><div class="goal-num">1. Build glute and leg muscle mass</div><div class="goal-desc">Increase skeletal muscle from 24.9 kg baseline through progressive lower body resistance training. Glutes, hamstrings, quads as primary focus.</div></div>
-    <div class="goal-row"><div class="goal-num">2. Improve upper body strength</div><div class="goal-desc">Build from ~5 consecutive push-ups. Target 10 by September, 15 by December. Push-up variations, rows, shoulder pressing.</div></div>
-    <div class="goal-row"><div class="goal-num">3. Strengthen lower back</div><div class="goal-desc">Build spinal stability post T9-T10 surgery and L4-L5 herniation. Deep core activation, glute strengthening, progressive loading within physio guidelines.</div></div>
-    <div class="goal-row"><div class="goal-num">4. Develop cardiovascular fitness</div><div class="goal-desc">Build sustained aerobic capacity beyond walking. Targets set progressively based on injury progress and physio clearance.</div></div>
-  </div>
-  <div class="section-label">Workout plan</div>
-  <div class="card mb14">
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
-      <div class="plan-box" style="background:var(--al);"><div class="plan-title" style="color:var(--am);">GYM &middot; 3x/week</div><div class="plan-desc">Lower body + upper body + core. Progressive overload each session.</div></div>
-      <div class="plan-box" style="background:var(--tl);"><div class="plan-title" style="color:var(--teal);">CARDIO &middot; 2x/week</div><div class="plan-desc">Walking, hiking, low-impact. Adjusted by injury status and cycle phase.</div></div>
-      <div class="plan-box" style="background:var(--pl);"><div class="plan-title" style="color:var(--pu);">YOGA &middot; 2x/week</div><div class="plan-desc">Ashtanga primary series minus backbends. Mobility and recovery focus.</div></div>
-    </div>
-    <div class="ex-category">
-      <div class="ex-cat-title">Glutes and legs</div>
-      <div class="ex-item"><span class="ex-name">Hip thrust / glute bridge</span><span class="ex-note">Primary glute builder &middot; start bodyweight, progress to barbell</span></div>
-      <div class="ex-item"><span class="ex-name">Romanian deadlift</span><span class="ex-note">Glutes + hamstrings &middot; start light, focus on form</span></div>
-      <div class="ex-item"><span class="ex-name">Goblet squat</span><span class="ex-note">Quads + glutes &middot; safer for lower back than back squat</span></div>
-      <div class="ex-item"><span class="ex-name">Step-ups</span><span class="ex-note">Single-leg glute activation &middot; low spinal load</span></div>
-      <div class="ex-item"><span class="ex-name">Lateral band walks</span><span class="ex-note">Glute medius &middot; important for knee and hip stability</span></div>
-      <div class="ex-item"><span class="ex-name">Leg press (machine)</span><span class="ex-note">Quad + glute compound &middot; reduces spinal load vs free squat</span></div>
-    </div>
-    <div class="ex-category">
-      <div class="ex-cat-title">Upper body</div>
-      <div class="ex-item"><span class="ex-name">Push-ups (progressive)</span><span class="ex-note">Baseline ~5 &middot; incline then standard then decline</span></div>
-      <div class="ex-item"><span class="ex-name">Dumbbell row</span><span class="ex-note">Upper back + biceps &middot; bench support reduces spinal load</span></div>
-      <div class="ex-item"><span class="ex-name">Shoulder press (seated)</span><span class="ex-note">Deltoids &middot; seated reduces lumbar strain</span></div>
-      <div class="ex-item"><span class="ex-name">Lat pulldown</span><span class="ex-note">Back width and posture &middot; good while building to pull-ups</span></div>
-      <div class="ex-item"><span class="ex-name">Chest press (machine or dumbbell)</span><span class="ex-note">Pecs + triceps &middot; machine option if back discomfort</span></div>
-    </div>
-    <div class="ex-category">
-      <div class="ex-cat-title">Core and spinal stability</div>
-      <div class="ex-item"><span class="ex-name">Dead bug</span><span class="ex-note">Deep core &middot; safest for post-surgery spine, no flexion</span></div>
-      <div class="ex-item"><span class="ex-name">Bird dog</span><span class="ex-note">Core + glutes &middot; recommended for L4-L5 stability</span></div>
-      <div class="ex-item"><span class="ex-name">Forearm plank</span><span class="ex-note">Neutral spine endurance &middot; build from 20s to 60s</span></div>
-      <div class="ex-item"><span class="ex-name">Pallof press</span><span class="ex-note">Anti-rotation core &middot; cable or band, very spine-safe</span></div>
-      <div class="ex-item"><span class="ex-name">Clamshell with band</span><span class="ex-note">Glute medius + hip stability &middot; directly supports L4-L5</span></div>
-    </div>
-    <div style="padding:10px;background:var(--s2);border-radius:var(--rs);font-size:11px;color:var(--t2);">
-      <strong style="color:var(--text);">Not cleared yet (pending physio):</strong> Back squats, deadlifts from floor, loaded spinal flexion, high-impact cardio. Update via My log when physio clears these.
-    </div>
-  </div>
-  <div class="card">
-    <div class="ct">Supplements</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-      <div class="pbox"><div class="pbox-l">Muscle building</div><div class="pbox-v" style="font-size:12px;">Creatine &middot; Collagen</div></div>
-      <div class="pbox"><div class="pbox-l">Recovery</div><div class="pbox-v" style="font-size:12px;">Omega-3 &middot; Magnesium bisglycinate</div></div>
-      <div class="pbox"><div class="pbox-l">General health</div><div class="pbox-v" style="font-size:12px;">D3+K2 &middot; Multivitamin</div></div>
-    </div>
-  </div>
-</div>
-
-</div><!-- /shell -->
-
-<!-- VOICE MODAL -->
-<div class="mo" id="mo-voice">
-  <div class="modal" style="text-align:center;">
-    <h3 id="v-title">Describe what you ate</h3>
-    <p id="v-desc">Tap the mic and speak</p>
-    <button class="mic" id="mic-btn" onclick="toggleRec()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
-    <div class="vt" id="v-txt">Tap the mic to start...</div>
-    <div class="ma"><button class="btn btn-s" onclick="closeVoice()">Cancel</button><button class="btn btn-p" id="v-sub" onclick="submitVoice()" disabled>Use this</button></div>
-  </div>
-</div>
-
-<!-- PHOTO MODAL -->
-<div class="mo" id="mo-photo">
-  <div class="modal">
-    <h3 id="ph-title">Photo your meal</h3>
-    <p>Take a photo or upload from camera roll.</p>
-    <div class="pd" onclick="document.getElementById('ph-input').click()">
-      <img id="ph-prev" class="pp" style="display:none;" alt="Preview">
-      <div id="ph-txt"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 6px;display:block;opacity:.3;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><div style="font-size:13px;color:var(--t3);">Tap to open camera or choose photo</div></div>
-    </div>
-    <input type="file" id="ph-input" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(event)">
-    <div class="ma"><button class="btn btn-s" onclick="closePhoto()">Cancel</button><button class="btn btn-p" id="ph-sub" onclick="submitPhoto()" disabled>Analyse</button></div>
-  </div>
-</div>
-
-<!-- TEXT MODAL -->
-<div class="mo" id="mo-txt">
-  <div class="modal">
-    <h3>Describe your meal</h3>
-    <p>Type what you ate, how much, and when.</p>
-    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;"><label style="font-size:12px;color:var(--t2);white-space:nowrap;">When did you eat?</label><input type="time" id="meal-time-input" style="flex:1;padding:7px 10px;border:.5px solid var(--bm);border-radius:var(--rs);font-family:inherit;font-size:13px;background:var(--s2);color:var(--tx);"></div>
-    <textarea id="tx-input" placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style="width:100%;padding:10px 12px;border:.5px solid var(--bm);border-radius:var(--rs);font-size:13px;resize:vertical;min-height:72px;background:var(--s2);color:var(--text);"></textarea>
-    <div class="ma"><button class="btn btn-s" onclick="closeTxt()">Cancel</button><button class="btn btn-p" onclick="submitTxt()">Analyse</button></div>
-  </div>
-</div>
-
-<!-- SETTINGS MODAL -->
-<div class="mo" id="mo-sett">
-  <div class="modal" style="width:420px;">
-    <h3 style="margin-bottom:16px;">Settings</h3>
-    <div class="sf">
-      <label>Anthropic API key</label>
-      <input type="password" id="s-key" placeholder="sk-ant-api03-..." autocomplete="off">
-      <p class="sn">Stored locally in your browser only.</p>
-      <label>Daily protein target (g)</label>
-      <input type="number" id="s-prot" value="100" min="50" max="200">
-    </div>
-    <div class="ma"><button class="btn btn-s" onclick="closeSett()">Cancel</button><button class="btn btn-p" onclick="saveSett()">Save</button></div>
-  </div>
-</div>
-
-<script>
-const SUPA_URL="https://itdrrugsztpqkafxfljt.supabase.co";
-const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
-const UID="julia";
-
-async function supa(method,table,body,query){
-  const url=SUPA_URL+"/rest/v1/"+table+(query?"?"+query:"");
-  const hdrs={"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
-  if(method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
-  const res=await fetch(url,{method,headers:hdrs,body:body?JSON.stringify(body):undefined});
-  if(!res.ok){const e=await res.text();throw new Error(table+": "+e);}
-  if(res.status===204||method==="DELETE") return null;
-  return res.json();
-}
-
-function syncStatus(state){
-  const el=document.getElementById("upd-lbl");if(!el)return;
-  if(state==="syncing") el.textContent="syncing...";
-  else if(state==="ok") el.textContent="Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-  else el.textContent="sync error";
-}
-
-async function loadFood(){
-  const rows=await supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc");
-  allFood={};
-  (rows||[]).forEach(r=>{
-    const d=r.log_date;if(!allFood[d])allFood[d]=[];
-    allFood[d].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});
-  });
-}
-
-async function loadLog(){
-  const rows=await supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100");
-  logEntries=(rows||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
-}
-
-async function loadCycle(){
-  const rows=await supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc");
-  cycleDates=(rows||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed}));
-}
-
-async function loadSupps(){
-  const rows=await supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey());
-  suppState={};
-  (rows||[]).forEach(r=>{if(r.taken)suppState[r.supplement]=true;});
-}
-
-async function loadSettings(){
-  // Step 1: always load localStorage immediately - this is the primary source
-  apiKey=localStorage.getItem("jkey")||"";
-  protTgt=parseInt(localStorage.getItem("jprot")||"100");
-  // Step 2: try Supabase to get latest (may override localStorage)
-  try{
-    const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
-    if(rows&&rows.length){
-      const supaKey=rows[0].anthropic_key||"";
-      const supaProt=rows[0].protein_target||100;
-      // Use whichever has the key - prefer Supabase if it has one
-      if(supaKey) apiKey=supaKey;
-      protTgt=supaProt;
-      // Always keep localStorage in sync with Supabase
-      if(apiKey) localStorage.setItem("jkey",apiKey);
-      localStorage.setItem("jprot",String(protTgt));
-    }
-  }catch(e){
-    // Supabase unreachable - fine, using localStorage values set in Step 1
-  }
-  const sk=document.getElementById("s-key");if(sk&&apiKey)sk.value=apiKey;
-  const sp=document.getElementById("s-prot");if(sp)sp.value=protTgt;
-}
-
+// ── LIVE DATA (Fri 12 Jun 2026, 14:20 Israel) ─────────────────────────────
+const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
+const UID = "julia";
 
 const STEPS = [
   {d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},
-  {d:"Thu",s:13717},{d:"Fri",s:3694,today:true},{d:"Sat",s:0,future:true}
+  {d:"Thu",s:13717},{d:"Fri",s:3719,today:true},{d:"Sat",s:0,future:true}
 ];
 const SLEEP_WEEK = [
   {d:"Sun 8",total:483,de:128,r:118,l:230,a:7},
@@ -709,498 +37,1020 @@ const SLEEP_WEEK = [
   {d:"Wed 10",total:430,de:89,r:120,l:221,a:4},
   {d:"Thu 11",total:408,de:102,r:93,l:203,a:9}
 ];
-const PHASES = {
-  menstrual:{n:"Menstrual",days:"Days 1-5",c:"var(--red)",bg:"var(--rl)"},
-  follicular:{n:"Follicular",days:"Days 6-13",c:"var(--teal)",bg:"var(--tl)"},
-  ovulatory:{n:"Ovulatory",days:"Days 14-16",c:"var(--am)",bg:"var(--al)"},
-  luteal:{n:"Luteal",days:"Days 17-28",c:"var(--pu)",bg:"var(--pl)"}
+const JUNE_WORKOUTS = {5:["yoga"],7:["yoga"],8:["gym","walk"],11:["gym","elliptical","run","walk"],12:["yoga"]};
+const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719};
+
+// ── COLORS ────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#f5f4f0", sf:"#fff", s2:"#f0ede8",
+  tx:"#1a1917", t2:"#6b6860", t3:"#a09d98",
+  teal:"#0f7b5f", tl:"#e0f4ed", tm:"#1D9E75",
+  pu:"#4a42b0", pl:"#eeedf8",
+  am:"#a05f0a", al:"#fdf3e3",
+  red:"#c0392b", rl:"#fdf0ee",
+  pi:"#993556", pil:"#fbeaf0",
+  or:"#b35a1f", orl:"#fdebd0",
+  bd:"rgba(0,0,0,.08)"
 };
-const TLBLS = {pain:"Pain",medical:"Medical",feedback:"Feedback",postworkout:"Post-workout",mood:"Mood",life:"Life",sleep:"Sleep",correction:"Correct AI",spine:"Spine"};
 
-function tkey(d){const dt=d||new Date();return dt.toISOString().slice(0,10);}
-let foodDate=tkey();
-let allFood={};
-let logEntries=[];
-let cycleDates=[];
-let suppState={};
-let apiKey=localStorage.getItem("jkey")||"";
-let protTgt=parseInt(localStorage.getItem("jprot")||"100");
-let vTarget="food", phTarget="food", phB64=null, isRec=false, recog=null, selTag2="pain";
+// ── SUPABASE ──────────────────────────────────────────────────────────────
+async function supa(method, table, body, query) {
+  const url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
+  const hdrs = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+  if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
+  const res = await fetch(url,{method,headers:hdrs,body:body?JSON.stringify(body):undefined});
+  if (!res.ok) { const e=await res.text(); throw new Error(table+": "+e); }
+  if (res.status===204||method==="DELETE") return null;
+  return res.json();
+}
 
-document.addEventListener("DOMContentLoaded",async()=>{
-  const now = new Date();
-  document.getElementById("hdate").textContent = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  const dob = new Date("1985-11-29");
-  let age = now.getFullYear()-dob.getFullYear();
-  if(now < new Date(now.getFullYear(),dob.getMonth(),dob.getDate())) age--;
-  const ael = document.getElementById("calc-age"); if(ael) ael.textContent=age;
-  renderStepBars();renderSleepBars();renderHeatmap();
-  document.querySelectorAll(".mo").forEach(o=>o.addEventListener("click",e=>{if(e.target===o)o.classList.remove("open");}));
-  syncStatus("syncing");
-  // Load settings FIRST so apiKey is available for generateAI
-  try{ await loadSettings(); }catch(e){ apiKey=localStorage.getItem("jkey")||""; protTgt=parseInt(localStorage.getItem("jprot")||"100"); }
-  try{
-    await Promise.all([loadFood(),loadLog(),loadCycle(),loadSupps()]);
-    syncStatus("ok");
-  }catch(err){
-    console.error("Supabase:",err);syncStatus("err");
+function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
+
+// ── STYLES ────────────────────────────────────────────────────────────────
+const s = {
+  shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 80px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
+  card:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"16px 18px",marginBottom:14},
+  hdr:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,gap:10,flexWrap:"wrap"},
+  h1:{fontSize:19,fontWeight:600,letterSpacing:"-.3px",margin:0},
+  tabs:{display:"flex",gap:2,marginBottom:20,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"},
+  tb:(active)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,color:active?C.tx:C.t2,background:"none",border:"none",cursor:"pointer",padding:"8px 14px",borderBottom:active?`2px solid ${C.tx}`:"2px solid transparent",marginBottom:-1,whiteSpace:"nowrap",flexShrink:0}),
+  mg:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14},
+  mg2:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14},
+  mc:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"14px 16px"},
+  ml:{fontSize:11,color:C.t2,marginBottom:4},
+  mv:{fontSize:21,fontWeight:600,letterSpacing:"-.5px",lineHeight:1.1},
+  ms:{fontSize:11,marginTop:3},
+  secLbl:{fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:16,display:"flex",alignItems:"center",gap:8},
+  secLine:{flex:1,height:1,background:C.s2},
+  hr:{border:"none",borderTop:`2px solid ${C.s2}`,margin:"28px 0 24px"},
+  aiCard:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,borderLeft:`3px solid ${C.pu}`,padding:"16px 18px",marginBottom:14},
+  aiLbl:{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:10,display:"flex",alignItems:"center",gap:6},
+  btn:(v)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,padding:"8px 18px",borderRadius:8,cursor:"pointer",border:"none",...(v==="p"?{background:C.tx,color:"#fff"}:{background:C.sf,color:C.t2,border:`.5px solid ${C.bd}`})}),
+  btnSm:{padding:"5px 12px",fontSize:12},
+  input:{width:"100%",padding:"8px 12px",border:`.5px solid ${C.bd}`,borderRadius:8,fontFamily:"inherit",fontSize:13,background:C.s2,color:C.tx,boxSizing:"border-box"},
+  pill:(bg,color)=>({fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:color}),
+  wi:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:`.5px solid ${C.bd}`,fontSize:12},
+  badge:(bg,color)=>({fontSize:10,fontWeight:500,padding:"2px 8px",borderRadius:20,background:bg,color,marginRight:8}),
+  pb:{height:6,borderRadius:3,background:C.s2,overflow:"hidden",margin:"5px 0 3px"},
+  pf:(w,bg)=>({height:"100%",borderRadius:3,width:w+"%",background:bg}),
+  mo:{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
+  modal:{background:C.sf,borderRadius:12,padding:24,width:400,maxWidth:"100%"},
+};
+
+// ── MINI COMPONENTS ───────────────────────────────────────────────────────
+function Card({children, style={}}) {
+  return <div style={{...s.card,...style}}>{children}</div>;
+}
+function SecLabel({children}) {
+  return <div style={s.secLbl}>{children}<div style={s.secLine}/></div>;
+}
+function Metric({label,value,sub,subColor}) {
+  return (
+    <div style={s.mc}>
+      <div style={s.ml}>{label}</div>
+      <div style={s.mv}>{value}</div>
+      {sub && <div style={{...s.ms,color:subColor||C.t3}}>{sub}</div>}
+    </div>
+  );
+}
+function Spinner() {
+  return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
+}
+
+// ── DASHBOARD TAB ─────────────────────────────────────────────────────────
+function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
+  const [aiToday, setAiToday] = useState(null);
+  const [aiWeek, setAiWeek] = useState(null);
+  const [loading, setLoading] = useState({today:false,week:false});
+
+  const todayFood = allFood[tkey()]||[];
+  const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
+
+  function buildCtx() {
+    const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
+    return `USER: Julia Serebro, 41F, 166cm, 57.6kg. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. TODAY: Friday 12 June 2026. Steps: 3719. Yoga session 11:20-12:51 (91min/99bpm). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Readiness: 67/100. Protein today: ${Math.round(tp)}g (target ${protTgt}g). THIS WEEK: Steps Sun 7361, Mon 11972, Tue 8461, Wed 10033, Thu 13717, Fri 3719. Workouts: Fri yoga 91min, Thu run 23min/119bpm, Thu gym 38min, Thu elliptical 24min, Mon gym 25min, Mon walk 60min, Sun yoga 60min. Sleep: Sun 8 8h3m (deep128 rem118), Tue 9 7h19m, Wed 10 7h10m, Thu 11 6h48m. HEALTH LOG: ${jArr.join(" | ")||"No entries"}`;
   }
-  updateFood();renderLog();renderCycle();renderSuppGrid();updateDashFlags();
-  if(apiKey){generateAI("today");generateAI("week");}
-  else{
-    document.getElementById("ai-today").innerHTML="<span style='color:var(--t3)'>Add your API key in Settings to enable AI coaching.</span>";
-    document.getElementById("ai-week").innerHTML="<span style='color:var(--t3)'>Add your API key in Settings to enable AI coaching.</span>";
-  }
-});
 
-function setEl(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
-
-function gTab(n,btn){
-  document.querySelectorAll(".tp").forEach(p=>p.classList.remove("active"));
-  document.querySelectorAll(".tb").forEach(b=>b.classList.remove("active"));
-  const panel=document.getElementById("tp-"+n); if(panel)panel.classList.add("active");
-  if(btn)btn.classList.add("active");
-  else document.querySelectorAll(".tb").forEach(b=>{
-    const map={dash:"Dashboard",food:"Food",cycle:"Cycle",log:"Log",profile:"Profile"};
-    if(b.textContent.trim()===(map[n]||n))b.classList.add("active");
-  });
-}
-
-
-// ── HEATMAP ────────────────────────────────────────────────────────────────
-const JUNE_WORKOUTS={5:["yoga"],7:["yoga"],8:["gym","walk"],11:["gym","elliptical","walk","run"],12:["yoga"]};
-function renderHeatmap(){
-  const c=document.getElementById("heatmap");if(!c)return;
-  const now=new Date(),today=now.getDate();
-  const firstDay=new Date(now.getFullYear(),now.getMonth(),1).getDay();
-  const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-  const days=["S","M","T","W","T","F","S"];
-  const juneSteps={3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3694};
-  let html=days.map(d=>"<div class='hm-lbl'>"+d+"</div>").join("");
-  for(let i=0;i<firstDay;i++) html+="<div></div>";
-  for(let d=1;d<=daysInMonth;d++){
-    const w=JUNE_WORKOUTS[d]||[];
-    const steps=juneSteps[d]||0;
-    let cls="hm-day";
-    if(d===today) cls+=" hm-today";
-    const hasGym=w.includes("gym"),hasYoga=w.includes("yoga");
-    const hasCardio=w.includes("walk")||w.includes("elliptical");
-    let strips="";
-    if(hasGym) strips+="<div class='hm-strip hm-strip-gym'>gym</div>";
-    if(hasYoga) strips+="<div class='hm-strip hm-strip-yoga'>yoga</div>";
-    if(hasCardio) strips+="<div class='hm-strip hm-strip-cardio'>cardio</div>";
-    const stepsLabel=steps>=10000?"<span class='hm-steps-badge'>10k</span>":"";
-    const title=d+" Jun"+(w.length?" - "+w.join(", "):""+(steps>0?" - "+steps.toLocaleString()+" steps":""));
-    html+="<div class='"+cls+"' title='"+title+"'>"+stepsLabel+strips+"</div>";
-  }
-  c.innerHTML=html;
-}
-
-// ── SUPPLEMENTS ────────────────────────────────────────────────────────────
-
-function renderSuppGrid(){
-  document.querySelectorAll(".supp-item").forEach(el=>{
-    if(suppState[el.dataset.supp]) el.classList.add("chk"); else el.classList.remove("chk");
-  });
-  updateSuppStatus();
-}
-function toggleSupp(el){
-  const s=el.dataset.supp;
-  suppState[s]=!suppState[s];
-  if(suppState[s]) el.classList.add("chk"); else el.classList.remove("chk");
-  supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:s,taken:suppState[s]||false},"on_conflict=user_id,log_date,supplement").catch(()=>{});
-  updateSuppStatus();
-}
-function updateSuppStatus(){
-  const total=document.querySelectorAll(".supp-item").length;
-  const done=Object.values(suppState).filter(Boolean).length;
-  const el=document.getElementById("supp-status");
-  if(el) el.textContent=done===0?"Tap each supplement when you take it. Resets daily.":done===total?"All supplements taken today ✅":done+" of "+total+" taken today";
-}
-
-function renderStepBars(){
-  const c=document.getElementById("step-bars"); if(!c)return;
-  const max=Math.max(...STEPS.map(d=>d.s),1);
-  c.innerHTML=STEPS.map(d=>{
-    const h=d.future?0:Math.max(Math.round((d.s/max)*56),d.s>0?4:0);
-    const col=d.future?"var(--s2)":d.today?"#9FE1CB":d.s>=10000?"#0F6E56":"#1D9E75";
-    const num=d.future?"":d.s===0?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":String(d.s);
-    return "<div class='sbc'><div class='sbn'>"+num+"</div><div class='sbi' style='height:"+h+"px;background:"+col+";'></div><div class='sbl'>"+d.d+"</div></div>";
-  }).join("");
-}
-
-function renderSleepBars(){
-  const c=document.getElementById("sleep-week"); if(!c)return;
-  c.innerHTML=SLEEP_WEEK.map(d=>{
-    if(d.nodata)return "<div class='sr'><span class='sd'>"+d.d+"</span><div class='sbw'><div style='width:100%;background:var(--s2);'></div></div><span class='sdur' style='color:var(--t3);'>--</span></div>";
-    const tot=d.de+d.r+d.l+d.a;
-    return "<div class='sr'><span class='sd'>"+d.d+"</span><div class='sbw'><div class='sde' style='width:"+Math.round(d.de/tot*100)+"%'></div><div class='sre' style='width:"+Math.round(d.r/tot*100)+"%'></div><div class='sli' style='width:"+Math.round(d.l/tot*100)+"%'></div><div class='saw' style='width:"+Math.round(d.a/tot*100)+"%'></div></div><span class='sdur'>"+Math.floor(d.total/60)+"h"+d.total%60+"m</span></div>";
-  }).join("");
-}
-
-function phaseFromDay(d){return d<=5?"menstrual":d<=13?"follicular":d<=16?"ovulatory":"luteal";}
-function avgLen(){
-  const c=cycleDates.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>a-b);
-  if(c.length<2)return 28;
-  const diffs=[];for(let i=1;i<c.length;i++)diffs.push((c[i]-c[i-1])/864e5);
-  return Math.round(diffs.reduce((a,b)=>a+b,0)/diffs.length);
-}
-function cycleInfo(){
-  const c=cycleDates.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>b-a);
-  if(!c.length)return null;
-  const last=c[0],now=new Date();now.setHours(0,0,0,0);
-  const day=Math.floor((now-last)/864e5)+1;
-  const avg=avgLen();
-  return{day:((day-1)%avg)+1,phase:phaseFromDay(((day-1)%avg)+1),last,next:new Date(last.getTime()+(avg*864e5)),avg};
-}
-async function addCycleDate(){
-  const v=document.getElementById("c-input").value;if(!v)return;
-  const ex=cycleDates.find(x=>x.d===v);
-  if(ex)ex.ok=true;else cycleDates.push({d:v,ok:true,id:Date.now()});
-  cycleDates.sort((a,b)=>new Date(a.d)-new Date(b.d));
-  syncStatus("syncing");
-  try{
-    const rows=await supa("POST","cycle_dates",{user_id:UID,date:v,confirmed:true});
-    if(rows&&rows[0])cycleDates[cycleDates.length-1].id=rows[0].id;
-    syncStatus("ok");
-  }catch(e){syncStatus("err");}
-  genPredicted();renderCycle();
-  document.getElementById("c-input").value="";
-  if(apiKey)generateAI("cycle");
-}
-function genPredicted(){
-  const c=cycleDates.filter(x=>x.ok).map(x=>new Date(x.d)).sort((a,b)=>a-b);
-  if(!c.length)return;
-  const avg=avgLen(),now=new Date();now.setHours(0,0,0,0);
-  const ex=new Set(cycleDates.map(x=>x.d));
-  let cur=new Date(c[c.length-1].getTime()+(avg*864e5));
-  for(let i=0;i<6;i++){
-    const k=cur.toISOString().slice(0,10);
-    if(!ex.has(k)&&cur>=now){cycleDates.push({d:k,ok:false,id:Date.now()+i});ex.add(k);}
-    cur=new Date(cur.getTime()+(avg*864e5));
-  }
-}
-async function confirmCyc(id){const e=cycleDates.find(x=>x.id===id);if(!e)return;e.ok=true;try{await supa("PATCH","cycle_dates",{confirmed:true},"id=eq."+id);}catch(er){}renderCycle();}
-async function delCyc(id){cycleDates=cycleDates.filter(x=>x.id!==id);try{await supa("DELETE","cycle_dates",null,"id=eq."+id);}catch(er){}renderCycle();}
-function saveCyc(){}
-function renderCycle(){
-  const info=cycleInfo();
-  const pill=document.getElementById("cpill");
-  if(info){
-    const p=PHASES[info.phase];
-    pill.textContent="Day "+info.day+" "+info.phase;
-    pill.style.background=p.bg;pill.style.color=p.c;
-    setEl("d-phase",p.n);setEl("d-cday","Day "+info.day+" of cycle");
-    const b=document.getElementById("cycle-banner");b.style.background=p.bg;
-    document.getElementById("c-phase-name").textContent=p.n+" - "+p.days;
-    document.getElementById("c-phase-name").style.color=p.c;
-    setEl("c-phase-desc","See phase guide below for recommendations.");
-    document.getElementById("c-dates-grid").style.display="grid";
-    setEl("c-last",info.last.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}));
-    setEl("c-next",info.next.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}));
-    setEl("c-avg",info.avg+" days");
-  } else {
-    pill.textContent="cycle";pill.style.background="var(--pil)";pill.style.color="var(--pi)";
-  }
-  const sorted=[...cycleDates].sort((a,b)=>new Date(b.d)-new Date(a.d));
-  const list=document.getElementById("c-list");
-  if(!sorted.length){list.innerHTML="<div class='empty' style='padding:12px 0;'><strong>No dates added yet</strong></div>";return;}
-  list.innerHTML=sorted.map(e=>{
-    const lbl=new Date(e.d).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"});
-    const badge=e.ok?"<span class='cb c-conf'>Confirmed</span>":"<button class='cb c-pred' onclick='confirmCyc("+e.id+")'>Predicted - confirm?</button>";
-    return "<div class='chi'><strong style='font-size:12px;'>"+lbl+"</strong><div style='display:flex;align-items:center;gap:8px;'>"+badge+"<button class='jdel' onclick='delCyc("+e.id+")'>&times;</button></div></div>";
-  }).join("");
-}
-
-function selTag(el){document.querySelectorAll(".ts .to").forEach(t=>t.classList.remove("sel"));el.classList.add("sel");selTag2=el.dataset.tag;}
-async function addLogEntry(text){
-  const t=text||document.getElementById("log-input").value.trim();if(!t)return;
-  logEntries.unshift({id:Date.now(),dt:new Date().toISOString(),tag:selTag2,txt:t});
-  localStorage.setItem("jlog",JSON.stringify(logEntries));
-  document.getElementById("log-input").value="";
-  renderLog();updateDashFlags();
-  renderHeatmap();
-  renderSuppGrid();
-  if(apiKey){generateAI("today");generateAI("week");}
-}
-async function delLog(id){logEntries=logEntries.filter(e=>e.id!==id);try{await supa("DELETE","journal_entries",null,"id=eq."+id);}catch(e){}renderLog();updateDashFlags();}
-function renderLog(){
-  const c=document.getElementById("log-entries");
-  if(!logEntries.length){c.innerHTML="<div class='empty'><strong>No entries yet</strong>Start logging to build your health history.</div>";return;}
-  c.innerHTML=logEntries.map(e=>{
-    const d=new Date(e.dt);
-    const ds=d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-    const tagClass=e.tag==="spine"?"t-medical":("t-"+e.tag);
-    return "<div class='je'><div class='jeh'><div style='display:flex;align-items:center;gap:8px;'><span class='jt "+tagClass+"'>"+TLBLS[e.tag]+"</span><span class='jdate'>"+ds+"</span></div><button class='jdel' onclick='delLog("+e.id+")'>&times;</button></div><div class='jtxt'>"+e.txt+"</div></div>";
-  }).join("");
-}
-function updateDashFlags(){
-  const el=document.getElementById("d-jflags");if(!el)return;
-  if(!logEntries.length){el.textContent="No active health notes";el.style.color="var(--t3)";return;}
-  el.innerHTML=logEntries.slice(0,4).map(e=>{
-    const tagClass=e.tag==="spine"?"t-medical":("t-"+e.tag);
-    return "<div style='margin-bottom:4px;'><span class='jt "+tagClass+"' style='font-size:10px;padding:1px 6px;'>"+TLBLS[e.tag]+"</span> <span style='font-size:11px;color:var(--t2);'>"+e.txt.slice(0,65)+(e.txt.length>65?"...":"")+"</span></div>";
-  }).join("");
-}
-
-function foodDatePrev(){
-  const d=new Date(foodDate);d.setDate(d.getDate()-1);foodDate=d.toISOString().slice(0,10);updateFood();
-}
-function foodDateNext(){
-  const d=new Date(foodDate);d.setDate(d.getDate()+1);
-  const next=d.toISOString().slice(0,10);
-  if(next<=tkey()){foodDate=next;updateFood();}
-}
-function updateFood(){
-  const food=allFood[foodDate]||[];
-  const isToday=foodDate===tkey();
-  const lbl=document.getElementById("food-date-lbl");if(lbl)lbl.textContent=isToday?"Today":new Date(foodDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"});
-  const nextBtn=document.getElementById("food-date-next");if(nextBtn)nextBtn.disabled=isToday;
-  const tp=food.reduce((s,e)=>s+(e.p||0),0),tc=food.reduce((s,e)=>s+(e.c||0),0);
-  const tf=food.reduce((s,e)=>s+(e.f||0),0),tk=food.reduce((s,e)=>s+(e.k||0),0);
-  setEl("f-cal",Math.round(tk));setEl("f-prot",Math.round(tp)+"g");setEl("f-carb",Math.round(tc)+"g");setEl("f-fat",Math.round(tf)+"g");
-  const pct=Math.min(100,Math.round((tp/protTgt)*100));
-  setEl("fp-logged",Math.round(tp));setEl("fp-pct",pct+"%");setEl("fp-tgt",protTgt);setEl("fp-left",Math.max(0,Math.round(protTgt-tp))+"g to go");
-  const fpb=document.getElementById("fp-bar");if(fpb){fpb.style.width=pct+"%";fpb.style.background=pct>=90?"var(--teal)":pct>=60?"var(--tm)":"var(--am)";}
-  setEl("d-prot",Math.round(tp)+"g");
-  const ds=document.getElementById("d-prot-s");if(ds){const r=Math.max(0,Math.round(protTgt-tp));ds.textContent=r>0?r+"g to target":"Goal reached!";ds.className="ms "+(r>0?"warn":"good");}
-  setEl("p-lbl",Math.round(tp)+"g logged");setEl("p-pct",pct+"%");setEl("p-rem",Math.max(0,Math.round(protTgt-tp))+"g remaining");
-  const c=document.getElementById("food-entries");
-  if(!food.length){c.innerHTML="<div class='empty'><strong>No meals logged today</strong>Tap Photo, Voice, or Type to log your first meal.</div>";return;}
-  c.innerHTML=food.map((e,i)=>{
-    const timeStr=e.time?"<div style=\'font-size:10px;color:var(--t3);margin-top:2px;\'>"+e.time+"</div>":"";
-    const confStr=e.conf&&e.conf!=="high"?"<span style=\'font-size:10px;color:var(--am);margin-left:6px;\'>"+e.conf+" confidence</span>":"";
-    return "<div class=\'fe\'><div class=\'fel\'><div class=\'fen\'>"+e.n+"</div><div class=\'fed\'>"+(e.det||"")+confStr+"</div>"+timeStr+"</div><div class=\'fem\'><span class=\'mp mpp\'>"+Math.round(e.p||0)+"g P</span><span class=\'mp mpc\'>"+Math.round(e.c||0)+"g C</span><span class=\'mp mpf\'>"+Math.round(e.f||0)+"g F</span></div><button class=\'fdel\' onclick=\'editFood(\""+foodDate+'\",'+i+")\" style=\'color:var(--t2);font-size:11px;margin-right:2px;\'>edit</button><button class=\'fdel\' onclick=\'delFood(\""+foodDate+'\",'+i+")\'>&times;</button></div>";}).join("");;
-  // food saved to Supabase on add
-}
-
-function editFood(date,i){
-  if(!allFood[date]) return;
-  const entry=allFood[date][i];
-  const newName=prompt("Edit food name:",entry.n);
-  if(newName===null) return;
-  const newP=prompt("Protein (g):",Math.round(entry.p||0));
-  if(newP===null) return;
-  const newC=prompt("Carbs (g):",Math.round(entry.c||0));
-  if(newC===null) return;
-  const newF=prompt("Fat (g):",Math.round(entry.f||0));
-  if(newF===null) return;
-  allFood[date][i]={...entry,n:newName,p:parseFloat(newP)||0,c:parseFloat(newC)||0,f:parseFloat(newF)||0,k:parseFloat(newP)*4+parseFloat(newC)*4+parseFloat(newF)*9};
-  // Update in Supabase if we have a dbid
-  if(entry.dbid){
-    supa("PATCH","food_log",{name:newName,protein:parseFloat(newP)||0,carbs:parseFloat(newC)||0,fat:parseFloat(newF)||0,kcal:allFood[date][i].k},"id=eq."+entry.dbid).catch(()=>{});
-  }
-  updateFood();
-}
-
-async function delFood(date,i){if(!allFood[date])return;const entry=allFood[date][i];if(entry&&entry.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}allFood[date].splice(i,1);updateFood();}
-
-function buildCtx(){
-  const todayFood=allFood[tkey()]||[];
-  const tp=todayFood.reduce((s,e)=>s+(e.p||0),0);
-  const jArr=logEntries.slice(0,12).map(e=>"["+TLBLS[e.tag]+"] "+e.txt);
-  const j=jArr.join(" | ");
-  const ci=cycleInfo();
-  const cc=ci?"Cycle Day "+ci.day+" of ~"+ci.avg+"-day cycle, phase: "+ci.phase+" ("+PHASES[ci.phase].days+")":"Cycle not tracked";
-  const now=new Date();
-  const todayStr=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  return "USER: Julia Serebro, 41F (DOB 29 Nov 1985). 166cm, 57.6kg. Post T9-T10 spinal decompression surgery March 2026. L4-L5 disc herniation history. Cleared for full activity. Goals: build glute/leg muscle, upper body strength (baseline ~5 push-ups), strengthen lower back, develop cardio. Current symptom: left glute pain to outer shin during walking/yoga/Pilates, achy not sharp, physio pending. SUPPLEMENTS: creatine, omega-3, magnesium bisglycinate, D3+K2, collagen, multivitamin. TODAY: "+todayStr+". Steps today: 3694. Today workout: Yoga 11:20-12:51 (91min/99bpm/23AZM). Last night sleep Thu 11 Jun: 6h 48m, deep 102min (26%), REM 93min (23%), bedtime 01:27. Readiness: 67/100. Protein today: "+Math.round(tp)+"g (target "+protTgt+"g). THIS WEEK Sun 7-Sat 13 Jun: Steps Sun 7361, Mon 11972, Tue 8461, Wed 10033, Thu 13717, Fri 3694. Workouts: Fri yoga 91min/99bpm, Thu run 23min/119bpm/913m, Thu gym 38min/94bpm, Thu elliptical 24min/109bpm, Mon gym 25min/68bpm, Mon walk 60min/99bpm, Sun yoga 60min/101bpm. Sleep (this week): Sun 8 Jun 8h3m (deep 128 rem 118), Tue 9 Jun 7h19m (deep 118 rem 116), Wed 10 Jun 7h10m (deep 89 rem 120), Thu 11 Jun 6h48m (deep 102 rem 93). "+cc+". HEALTH LOG: "+(j||"No entries");
-}
-
-function formatAI(txt){
-  const lines=txt.split("\n");
-  let html="";
-  for(const raw of lines){
-    const line=raw.trim();if(!line)continue;
-    const m=line.match(/^([^\w\s]?\s*)([A-Z][A-Z\s\-]+[A-Z]):\s*(.*)/);
-    if(m&&m[2].trim().length>=3){
-      html+="<div class='ai-section'><div class='ai-section-head'>"+m[1]+m[2]+"</div><div class='ai-section-body'>"+m[3]+"</div></div>";
-    } else {
-      html+="<div class='ai-section-body' style='margin-bottom:6px;'>"+line+"</div>";
-    }
-  }
-  return html||"<span style='color:var(--t3)'>"+txt+"</span>";
-}
-
-const TODAY_PROMPT="Give a personalised coaching briefing for today. Use this exact structure - start each section on a new line with an emoji, then the label in CAPS, then a colon, then your text. Leave a blank line between sections. Sections: ACTIVITY (what to do today), NUTRITION (protein gap and food suggestion), RECOVERY (sleep insight), HEALTH (only if health log has pain or injury - otherwise skip), CYCLE (only if cycle is set - skip otherwise). Be specific and warm. Max 2 sentences per section.";
-const WEEK_PROMPT="Give a weekly review. Use this exact structure - start each section on a new line with an emoji, then the label in CAPS, then a colon, then your text. Leave a blank line between sections. Sections: WELL DONE (wins), MISSED (gaps), SMART SWAP (one specific adjustment like skip aerobic since step count covers it), NEXT WEEK (priorities), FLAG (only if health log has something important - otherwise skip). Be specific. Max 2 sentences per section.";
-const CYCLE_PROMPT="Give cycle phase coaching. Use this exact structure - start each section on a new line with an emoji, then label in CAPS, then colon, then text. Leave blank line between sections. Sections: TRAINING (intensity and exercise recs), NUTRITION (food and macro focus), RECOVERY (sleep priorities), SUPPLEMENTS (timing or additions relevant to phase). Max 2 sentences each.";
-
-async function generateAI(t){
-  const el=document.getElementById("ai-"+t);if(!el)return;
-  if(!apiKey){el.innerHTML="<span style='color:var(--t3)'>Add your API key in Settings.</span>";return;}
-  el.innerHTML="<span class='sp'></span><span style='color:var(--t3);font-style:italic;'>Generating...</span>";
-  const prompt=t==="today"?TODAY_PROMPT:t==="week"?WEEK_PROMPT:CYCLE_PROMPT;
-  try{
-    const txt=await callAI([{role:"user",content:buildCtx()+"\n\n"+prompt}],null,400);
-    el.innerHTML=formatAI(txt);
-  }catch(err){el.innerHTML="<span style='color:var(--red);font-size:12px;'>Error: "+err.message+"</span><br><span style='font-size:11px;color:var(--t3);'>(Check API key in Settings)</span>";}
-}
-
-async function callAI(msgs,sys,maxT){
-  const body={model:"claude-sonnet-4-6",max_tokens:maxT||300,messages:msgs};
-  if(sys)body.system=sys;
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
-  const d=await r.json();if(d.error)throw new Error(d.error.message);
-  return d.content[0].text.trim();
-}
-
-async function addFoodEntry(entry){
-  if(!allFood[foodDate]) allFood[foodDate]=[];
-  allFood[foodDate].push(entry);
-  updateFood();
-  // Save to Supabase
-  try{
-    const rows=await supa("POST","food_log",{
-      user_id:UID, log_date:foodDate,
-      meal_time:entry.time||null, name:entry.n, detail:entry.det||null,
-      protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+  async function callAI(prompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:buildCtx()+"\n\n"+prompt}]})
     });
-    if(rows&&rows[0]) allFood[foodDate][allFood[foodDate].length-1].dbid=rows[0].id;
-    syncStatus("ok");
-  }catch(e){
-    syncStatus("err");
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message);
+    return d.content[0].text.trim();
   }
-}
 
-async function analyseFood(inp){
-  if(!apiKey){alert("Add your Anthropic API key in Settings first.");openSett();return;}
-  gTab("food");
-  const ac=document.getElementById("food-ai"),at=document.getElementById("food-ai-txt");
-  ac.style.display="block";at.innerHTML="<span class='sp'></span>Identifying food...";
-  const sys='Return ONLY valid JSON no other text: {"n":"Short name","det":"Brief description","p":25,"c":30,"f":12,"k":330,"conf":"high|medium|low"} All numbers integers.';
-  const msgs=inp.type==="image"?[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:inp.v}},{type:"text",text:"Analyse this meal return JSON."}]}]:[{role:"user",content:"Analyse: "+inp.v+". Return JSON."}];
-  try{
-    const raw=await callAI(msgs,sys,200);
-    const e=JSON.parse(raw.replace(/```json|```/g,"").trim());
-    at.innerHTML="<strong>"+e.n+"</strong> - "+e.det+" <span style='font-size:11px;color:var(--t3);'>Confidence: "+e.conf+"</span>";
-    setTimeout(()=>{ac.style.display="none";},3500);
-    const mti=document.getElementById("meal-time-input");
-    const nowT=new Date();
-    const mealTime=mti?mti.value+" (logged "+nowT.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+")":nowT.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-    await addFoodEntry({n:e.n,det:e.det,p:e.p,c:e.c,f:e.f,k:e.k,time:mealTime,conf:e.conf});
-  }catch(err){at.textContent="Could not analyse. "+err.message;}
-}
+  function formatAI(txt) {
+    return txt.split("\n").filter(l=>l.trim()).map((line,i)=>{
+      const m = line.match(/^([^\w\s]{0,3}\s*)([A-Z][A-Z\s\-]{2,}[A-Z]):\s*(.*)/);
+      if (m && m[2].trim().length>=3) {
+        return <div key={i} style={{marginBottom:8}}><div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:2}}>{m[1].trim()} {m[2].trim()}</div><div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingLeft:4}}>{m[3]}</div></div>;
+      }
+      return <div key={i} style={{fontSize:12,color:C.t2,lineHeight:1.6,marginBottom:4}}>{line}</div>;
+    });
+  }
 
-function openVoice(t){
-  vTarget=t;
-  document.getElementById("v-title").textContent=t==="food"?"Describe what you ate":"Log a health entry";
-  document.getElementById("v-desc").textContent=t==="food"?"Tap the mic and say what you had":"Tap the mic and describe what to log";
-  document.getElementById("v-txt").textContent="Tap the mic to start...";
-  document.getElementById("v-sub").disabled=true;
-  document.getElementById("mo-voice").classList.add("open");
-}
-function closeVoice(){if(isRec)stopRec();document.getElementById("mo-voice").classList.remove("open");}
-function toggleRec(){
-  if(isRec){stopRec();return;}
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){document.getElementById("v-txt").textContent="Not supported. Try Chrome or Safari.";return;}
-  recog=new SR();recog.continuous=false;recog.interimResults=true;recog.lang="en-US";
-  recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join("");document.getElementById("v-txt").textContent=t;if(e.results[e.results.length-1].isFinal)document.getElementById("v-sub").disabled=false;};
-  recog.onend=()=>{
-    isRec=false;document.getElementById("mic-btn").classList.remove("rec");
-    const vtxt=document.getElementById("v-txt");
-    if(vtxt&&vtxt.textContent&&vtxt.textContent!=="Tap the mic to start..."){
-      document.getElementById("v-sub").disabled=false;
+  async function genAI(type) {
+    if (!apiKey) return;
+    setLoading(l=>({...l,[type]:true}));
+    const p = type==="today"
+      ? "Give a personalised coaching briefing. Format: emoji CAPS LABEL: text, each on new line. Sections: ACTIVITY (already did yoga+steps today), NUTRITION (protein gap), RECOVERY (sleep insight), FLAG (only if health log has pain). Max 2 sentences each."
+      : "Weekly review. Format: emoji CAPS LABEL: text. Sections: WELL DONE, MISSED, SMART SWAP, NEXT WEEK, FLAG (if relevant). Max 2 sentences each.";
+    try {
+      const txt = await callAI(p);
+      if (type==="today") setAiToday(txt);
+      else setAiWeek(txt);
+    } catch(e) {
+      if (type==="today") setAiToday("Error: "+e.message);
+      else setAiWeek("Error: "+e.message);
     }
-  };
-  recog.start();isRec=true;document.getElementById("mic-btn").classList.add("rec");
-}
-function stopRec(){if(recog)recog.stop();isRec=false;document.getElementById("mic-btn").classList.remove("rec");}
-async function submitVoice(){
-  const t=document.getElementById("v-txt").textContent;
-  if(!t||t==="Tap the mic to start...")return;
-  closeVoice();
-  if(vTarget==="food")await analyseFood({type:"text",v:t});
-  else addLogEntry(t);
-}
-
-function openPhoto(t){
-  phTarget=t;phB64=null;
-  document.getElementById("ph-title").textContent=t==="food"?"Photo your meal":"Attach document or photo";
-  document.getElementById("ph-prev").style.display="none";
-  document.getElementById("ph-txt").style.display="block";
-  document.getElementById("ph-sub").disabled=true;
-  document.getElementById("mo-photo").classList.add("open");
-}
-function closePhoto(){document.getElementById("mo-photo").classList.remove("open");}
-function handlePhoto(e){
-  const f=e.target.files[0];if(!f)return;
-  const r=new FileReader();r.onload=ev=>{const u=ev.target.result;phB64=u.split(",")[1];const p=document.getElementById("ph-prev");p.src=u;p.style.display="block";document.getElementById("ph-txt").style.display="none";document.getElementById("ph-sub").disabled=false;};r.readAsDataURL(f);
-}
-async function submitPhoto(){
-  if(!phB64)return;closePhoto();
-  if(phTarget==="food")await analyseFood({type:"image",v:phB64});
-  else{
-    if(!apiKey){addLogEntry("[Photo attached]");return;}
-    try{
-      const txt=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:phB64}},{type:"text",text:"This is a health document or medical photo. Describe key findings in 2-3 sentences factually."}]}],null,200);
-      addLogEntry("[Photo] "+txt);
-    }catch{addLogEntry("[Photo attached]");}
+    setLoading(l=>({...l,[type]:false}));
   }
-}
 
-function openTxt(){document.getElementById("mo-txt").classList.add("open");}
-function closeTxt(){document.getElementById("mo-txt").classList.remove("open");}
-async function submitTxt(){
-  const t=document.getElementById("tx-input").value.trim();if(!t)return;
-  document.getElementById("tx-input").value="";closeTxt();
-  await analyseFood({type:"text",v:t});
-}
+  useEffect(()=>{ if(apiKey){genAI("today");genAI("week");} },[apiKey]);
 
-function openSett(){document.getElementById("mo-sett").classList.add("open");}
-function closeSett(){document.getElementById("mo-sett").classList.remove("open");}
-function loadSett(){}
-async function __saveSett_placeholder(){
-  apiKey=localStorage.getItem("jkey")||"";
-  protTgt=parseInt(localStorage.getItem("jprot")||"100");
-  if(apiKey)document.getElementById("s-key").value=apiKey;
-  document.getElementById("s-prot").value=protTgt;
-}
-async function saveSett(){
-  const k=document.getElementById("s-key").value.trim();
-  const pt=parseInt(document.getElementById("s-prot").value)||100;
-  // Always save to localStorage as primary fallback
-  localStorage.setItem("jkey",k);
-  localStorage.setItem("jprot",String(pt));
-  apiKey=k;protTgt=pt;
-  syncStatus("syncing");
-  try{
-    await supa("POST","settings",{user_id:UID,anthropic_key:k,protein_target:pt},"on_conflict=user_id");
-    syncStatus("ok");
-  }catch(e){
-    syncStatus("err");
-  }
-  closeSett();updateFood();
-  if(k){generateAI("today");generateAI("week");}
-}
-</script>
-<!-- COACH CHAT BUTTON -->
-<button class="coach-btn" onclick="openCoach()">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-  Ask your coach
-</button>
+  const maxStep = Math.max(...STEPS.map(d=>d.s),1);
 
-<!-- COACH CHAT MODAL -->
-<div class="mo" id="mo-coach">
-  <div class="chat-modal">
-    <div class="chat-hdr">
-      <div>
-        <h3>Your AI health coach</h3>
-        <p>Asks about your actual data &mdash; sleep, workouts, nutrition, cycle</p>
+  return (
+    <div>
+      {/* READINESS */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — Friday 12 June</div>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
+          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.am}}>67</div>
+          <div style={{flex:1}}>
+            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"67%",height:"100%",background:C.am,borderRadius:4}}/></div>
+            <div style={{fontSize:12,fontWeight:500,color:C.am}}>Good</div>
+          </div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+          {[
+            ["Sleep duration (6h 48m)","18/30",C.am],
+            ["Deep sleep (102min, 26%)","20/20",C.tm],
+            ["REM sleep (93min, 23%)","10/10",C.tm],
+            ["Training load (big day Thu)","12/20",C.am],
+            ["Bedtime 01:27 (late)","4/10",C.red],
+            ["Alcohol (none logged)","+0",C.t3],
+            ["Protein (not yet logged)","+0",C.t3],
+          ].map(([label,pts,col],i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
+              <span style={{color:C.t2}}>{label}</span>
+              <span style={{fontWeight:600,color:col}}>{pts}</span>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.tl}}>
+            <span style={{color:C.teal}}>✨ Sleep efficiency bonus (49%)</span>
+            <span style={{fontWeight:600,color:C.teal}}>+3</span>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Short sleep + big day Thursday are the main factors. Deep sleep quality (26%) was excellent — your body made the most of the time it had.</div>
+      </Card>
+
+      <SecLabel>Today — Friday 12 June</SecLabel>
+
+      <div style={s.mg}>
+        <Metric label="Steps today" value="3,719" sub="growing — yoga done" subColor={C.t3}/>
+        <Metric label="Sleep last night" value="6h 48m" sub="102m deep · 93m REM" subColor={C.tm}/>
+        <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={tp>=protTgt?C.tm:C.am}/>
+        <Metric label="Cycle phase" value="—" sub="add in Cycle tab" subColor={C.t3}/>
       </div>
-      <button class="chat-close" onclick="closeCoach()">&times;</button>
+
+      {/* AI TODAY */}
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+          AI coach — today
+          <button onClick={()=>genAI("today")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+        </div>
+        {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
+         : aiToday ? formatAI(aiToday)
+         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {/* SLEEP LAST NIGHT */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Last night — Thu 11 Jun</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div><div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>6h 48m</div><div style={{fontSize:11,color:C.t3}}>bedtime 01:27</div></div>
+            <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>102m (26%)</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>93m (23%)</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#AFA9EC",fontWeight:500}}>Light</span><span>203m</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>9m</span></div>
+            </div>
+          </div>
+          <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
+            <div style={{width:"26%",background:"#3C3489"}}/>
+            <div style={{width:"23%",background:"#7F77DD"}}/>
+            <div style={{width:"49%",background:"#AFA9EC"}}/>
+            <div style={{width:"2%",background:"#D3D1C7"}}/>
+          </div>
+        </Card>
+
+        {/* PROTEIN */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Protein goal today</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+            <span style={{fontWeight:500}}>{Math.round(tp)}g logged</span>
+            <span style={{color:C.t2}}>{protTgt}g target</span>
+          </div>
+          <div style={s.pb}><div style={s.pf(Math.min(100,Math.round(tp/protTgt*100)),tp>=protTgt?C.teal:C.tm)}/></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
+            <span>{Math.min(100,Math.round(tp/protTgt*100))}%</span>
+            <span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
+          </div>
+        </Card>
+      </div>
+
+      <hr style={s.hr}/>
+      <SecLabel>This week — Sun 7 Jun – Sat 13 Jun</SecLabel>
+
+      <div style={s.mg}>
+        <Metric label="Total steps" value="55,978" sub="Sun–Fri so far" subColor={C.tm}/>
+        <Metric label="Workouts" value="7" sub="2 gym · 2 yoga · 1 run · 1 walk · 1 elliptical" subColor={C.tm}/>
+        <Metric label="Avg sleep" value="7h 20m" sub="4 nights synced" subColor={C.t3}/>
+        <Metric label="Protein avg" value="—" sub="log meals to track" subColor={C.t3}/>
+      </div>
+
+      {/* AI WEEK */}
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+          AI coach — weekly review
+          <button onClick={()=>genAI("week")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+        </div>
+        {loading.week ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
+         : aiWeek ? formatAI(aiWeek)
+         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
+      </div>
+
+      {/* STEP BARS */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
+            {STEPS.map((d,i)=>{
+              const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
+              const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
+              const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
+              return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
+                <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
+                <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
+              </div>;
+            })}
+          </div>
+        </Card>
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep this week</div>
+          {SLEEP_WEEK.map((d,i)=>{
+            const tot=d.de+d.r+d.l+d.a;
+            const h=Math.floor(d.total/60),m=d.total%60;
+            return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+              <span style={{width:38,color:C.t3,fontSize:10}}>{d.d}</span>
+              <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
+                <div style={{width:Math.round(d.de/tot*100)+"%",background:"#3C3489"}}/>
+                <div style={{width:Math.round(d.r/tot*100)+"%",background:"#7F77DD"}}/>
+                <div style={{width:Math.round(d.l/tot*100)+"%",background:"#AFA9EC"}}/>
+              </div>
+              <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
+            </div>;
+          })}
+        </Card>
+      </div>
+
+      {/* WORKOUTS LIST */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts this week</div>
+        {[
+          {label:"Yoga",bg:C.orl,col:C.or,day:"Fri 12 Jun",detail:"91 min · 99bpm · 23 AZM · 11:20–12:51"},
+          {label:"Run",bg:C.tl,col:C.teal,day:"Thu 11 Jun",detail:"23 min · 119bpm · 913m · 16 AZM"},
+          {label:"Gym",bg:C.pl,col:C.pu,day:"Thu 11 Jun",detail:"38 min · 94bpm · 10:08–10:46"},
+          {label:"Elliptical",bg:C.tl,col:C.teal,day:"Thu 11 Jun",detail:"24 min · 109bpm · 13 AZM"},
+          {label:"Walk",bg:C.tl,col:C.teal,day:"Mon 8 Jun",detail:"60 min · 3.1km · 99bpm · 31 AZM"},
+          {label:"Gym",bg:C.pl,col:C.pu,day:"Mon 8 Jun",detail:"25 min · 68bpm"},
+          {label:"Yoga",bg:C.orl,col:C.or,day:"Sun 7 Jun",detail:"60 min · 101bpm · 31 AZM"},
+        ].map((w,i)=>(
+          <div key={i} style={{...s.wi,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
+            <div><span style={{...s.badge(w.bg,w.col)}}>{w.label}</span><span style={{fontWeight:500}}>{w.day}</span></div>
+            <div style={{fontSize:12,color:C.t2}}>{w.detail}</div>
+          </div>
+        ))}
+      </Card>
+
+      <hr style={s.hr}/>
+      <SecLabel>Month — June 2026</SecLabel>
+
+      <div style={s.mg}>
+        <Metric label="Active days" value="7" sub="target: 20/month" subColor={C.tm}/>
+        <Metric label="Gym sessions" value="2" sub="target: 12/month" subColor={C.t3}/>
+        <Metric label="Movement sessions" value="3" sub="yoga & movement · target: 5" subColor={C.tm}/>
+        <Metric label="Protein days hit" value="—" sub="log meals to track" subColor={C.t3}/>
+      </div>
+
+      {/* HEATMAP */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
+        <HeatmapGrid/>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
+          <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
+          <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
+        </div>
+      </Card>
+
+      {/* WEEK BY WEEK */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week — June 2026</div>
+        {[
+          {label:"Week 1",range:"Mon 1 – Sat 6 Jun",detail:"1 active day · yoga Fri 5 Jun (96min ★)",current:false},
+          {label:"Week 2 ← current",range:"Sun 7 – Sat 13 Jun",detail:"6 active days · 2 gym · 2 yoga · 1 run · 1 elliptical",current:true},
+          {label:"Week 3",range:"Sun 14 – Sat 20 Jun",detail:"",current:false},
+          {label:"Week 4",range:"Sun 21 – Sat 27 Jun",detail:"",current:false},
+        ].map((w,i)=>(
+          <div key={i} style={{...s.wi,borderBottom:i<3?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
+            <div><strong style={{fontSize:12,color:w.current?C.teal:C.tx}}>{w.label}</strong><span style={{fontSize:12,color:w.current?C.teal:C.t2,marginLeft:8}}>{w.range}</span></div>
+            <div style={{fontSize:12,color:w.current?C.teal:C.t2}}>{w.detail}</div>
+          </div>
+        ))}
+      </Card>
     </div>
-    <div class="chat-msgs" id="chat-msgs">
-      <div class="chat-msg ai">Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?</div>
+  );
+}
+
+function HeatmapGrid() {
+  const today = new Date().getDate();
+  const firstDay = new Date(2026,5,1).getDay(); // June 2026 starts on Monday=1
+  const days = ["S","M","T","W","T","F","S"];
+  const cells = [];
+  // day labels
+  days.forEach((d,i)=>cells.push(<div key={"lbl"+i} style={{fontSize:9,color:C.t3,textAlign:"center"}}>{d}</div>));
+  // padding
+  for(let i=0;i<firstDay;i++) cells.push(<div key={"pad"+i}/>);
+  // days
+  for(let d=1;d<=30;d++){
+    const w=JUNE_WORKOUTS[d]||[];
+    const steps=JUNE_STEPS[d]||0;
+    const isActive=steps>=8000||w.length>0;
+    const hasGym=w.includes("gym"),hasYoga=w.includes("yoga"),hasCardio=w.includes("walk")||w.includes("elliptical")||w.includes("run");
+    cells.push(
+      <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===today?{outline:`2px solid ${C.tx}`}:{})}}>
+        {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
+        {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
+        {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
+        {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{w.includes("run")?"run":"cardio"}</div>}
+      </div>
+    );
+  }
+  return <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>{cells}</div>;
+}
+
+// ── FOOD TAB ──────────────────────────────────────────────────────────────
+function TabFood({allFood, setAllFood, protTgt, apiKey}) {
+  const [foodDate, setFoodDate] = useState(tkey());
+  const [showTxt, setShowTxt] = useState(false);
+  const [txtInput, setTxtInput] = useState("");
+  const [mealDate, setMealDate] = useState(tkey());
+  const [mealTime, setMealTime] = useState(new Date().toTimeString().slice(0,5));
+  const [analysing, setAnalysing] = useState(false);
+  const [aiMsg, setAiMsg] = useState("");
+  const [editIdx, setEditIdx] = useState(null);
+  const [editEntry, setEditEntry] = useState({});
+
+  const food = allFood[foodDate]||[];
+  const tp=food.reduce((s,e)=>s+(e.p||0),0);
+  const tc=food.reduce((s,e)=>s+(e.c||0),0);
+  const tf=food.reduce((s,e)=>s+(e.f||0),0);
+  const tk=food.reduce((s,e)=>s+(e.k||0),0);
+  const pct=Math.min(100,Math.round(tp/protTgt*100));
+
+  const isToday = foodDate===tkey();
+  const dateLabel = isToday?"Today":new Date(foodDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"});
+
+  function prevDay(){const d=new Date(foodDate);d.setDate(d.getDate()-1);setFoodDate(d.toISOString().slice(0,10));}
+  function nextDay(){const d=new Date(foodDate);d.setDate(d.getDate()+1);if(d.toISOString().slice(0,10)<=tkey())setFoodDate(d.toISOString().slice(0,10));}
+
+  async function analyseText() {
+    if(!txtInput.trim()||!apiKey) return;
+    setAnalysing(true);setAiMsg("Analysing...");
+    try {
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:300,messages:[{role:"user",content:'Return ONLY valid JSON: {"n":"name","det":"brief desc","p":25,"c":30,"f":12,"k":330}. Analyse: '+txtInput}]})
+      });
+      const d=await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const raw=d.content[0].text.trim();
+      const entry=JSON.parse(raw.replace(/```json|```/g,"").trim());
+      entry.time=mealTime;
+      // Save to Supabase
+      const targetDate=mealDate||foodDate;
+      try {
+        const rows=await supa("POST","food_log",{user_id:UID,log_date:targetDate,meal_time:mealTime,name:entry.n,detail:entry.det||null,protein:entry.p,carbs:entry.c,fat:entry.f,kcal:entry.k});
+        if(rows&&rows[0]) entry.dbid=rows[0].id;
+      } catch(e) {}
+      setAllFood(prev=>({...prev,[targetDate]:[...(prev[targetDate]||[]),entry]}));
+      setAiMsg(entry.n+" logged ✓");
+      setTxtInput("");setShowTxt(false);
+    } catch(e){setAiMsg("Error: "+e.message);}
+    setAnalysing(false);
+  }
+
+  async function delFood(i) {
+    const entry=food[i];
+    if(entry?.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}
+    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].filter((_,j)=>j!==i)}));
+  }
+
+  async function saveEdit() {
+    const newP=parseFloat(editEntry.p)||0,newC=parseFloat(editEntry.c)||0,newF=parseFloat(editEntry.f)||0;
+    const newK=Math.round(newP*4+newC*4+newF*9);
+    const updated={...food[editIdx],n:editEntry.n,p:newP,c:newC,f:newF,k:newK};
+    if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,protein:newP,carbs:newC,fat:newF,kcal:newK},"id=eq."+updated.dbid);}catch(e){}}
+    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)}));
+    setEditIdx(null);
+  }
+
+  const feedbackMsg = ()=>{
+    if(tk===0) return "";
+    const msgs=[];
+    if(tp>=protTgt) msgs.push("Protein goal hit ✅");
+    else msgs.push(`${Math.round(protTgt-tp)}g protein to go`);
+    if(tc>250) msgs.push("carbs above range");
+    if(tf>80) msgs.push("fat above range");
+    if(tk>2200) msgs.push("calories above range");
+    return msgs.join(" · ");
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <button onClick={prevDay} style={{...s.btn("s"),...s.btnSm}}>←</button>
+        <span style={{flex:1,textAlign:"center",fontSize:13,fontWeight:500}}>{dateLabel}</span>
+        <button onClick={nextDay} disabled={isToday} style={{...s.btn("s"),...s.btnSm,opacity:isToday?.5:1}}>→</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[["kcal",Math.round(tk),""],["protein",Math.round(tp)+"g",C.tm],["carbs",Math.round(tc)+"g",C.am],["fat",Math.round(tf)+"g",C.pu]].map(([l,v,col])=>(
+          <div key={l} style={{background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontSize:18,fontWeight:600,color:col||C.tx}}>{v}</div>
+            <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+          <span style={{fontWeight:500}}>Daily protein goal</span>
+          <span style={{color:C.t2}}>{Math.round(tp)}g / {protTgt}g</span>
+        </div>
+        <div style={s.pb}><div style={s.pf(pct,pct>=90?C.teal:C.tm)}/></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3,marginBottom:feedbackMsg()?8:0}}>
+          <span>{pct}%</span><span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
+        </div>
+        {feedbackMsg()&&<div style={{fontSize:11,color:tp>=protTgt?C.tm:C.am,textAlign:"center",paddingTop:8,borderTop:`.5px solid ${C.bd}`}}>{feedbackMsg()}</div>}
+      </Card>
+
+      {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
+
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button onClick={()=>{setMealDate(tkey());setMealTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{flex:1,...s.btn("s"),display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,borderStyle:"dashed",borderWidth:1.5}}>
+          📝 Type
+        </button>
+      </div>
+
+      {/* FOOD ENTRIES */}
+      {food.length===0
+        ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No meals logged{isToday?"":" for this day"}</strong>{isToday?"Tap Type to log your first meal.":""}</div>
+        : food.map((e,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,marginBottom:6}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:500}}>{e.n}</div>
+              <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.det}</div>
+              {e.time&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>{e.time}</div>}
+            </div>
+            <div style={{display:"flex",gap:6,fontSize:11,marginRight:8}}>
+              <span style={{...s.pill(C.tl,C.teal)}}>{Math.round(e.p||0)}g P</span>
+              <span style={{...s.pill(C.al,C.am)}}>{Math.round(e.c||0)}g C</span>
+              <span style={{...s.pill(C.pl,C.pu)}}>{Math.round(e.f||0)}g F</span>
+            </div>
+            <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0)});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11,marginRight:4}}>edit</button>
+            <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
+          </div>
+        ))
+      }
+
+      {/* TYPE MODAL */}
+      {showTxt&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowTxt(false);}}>
+          <div style={s.modal}>
+            <h3 style={{marginBottom:6,fontSize:16,fontWeight:600}}>Describe your meal</h3>
+            <p style={{fontSize:13,color:C.t2,marginBottom:16}}>Type what you ate and how much.</p>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label><input type="date" value={mealDate} onChange={e=>setMealDate(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Time</label><input type="time" value={mealTime} onChange={e=>setMealTime(e.target.value)} style={s.input}/></div>
+            </div>
+            <textarea value={txtInput} onChange={e=>setTxtInput(e.target.value)} placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style={{...s.input,resize:"vertical",minHeight:72,marginBottom:16}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowTxt(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={analyseText} disabled={analysing||!txtInput.trim()} style={{...s.btn("p"),opacity:analysing||!txtInput.trim()?.6:1}}>{analysing?"Analysing...":"Analyse"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL */}
+      {editIdx!==null&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setEditIdx(null);}}>
+          <div style={s.modal}>
+            <h3 style={{marginBottom:16,fontSize:16,fontWeight:600}}>Edit food entry</h3>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Food name</label>
+            <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
+                <div key={k} style={{flex:1}}>
+                  <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
+                  <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setEditIdx(null)} style={s.btn("s")}>Cancel</button>
+              <button onClick={saveEdit} style={s.btn("p")}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-    <div class="chat-input-row">
-      <input type="text" id="chat-input" placeholder="Ask anything about your health..." onkeydown="if(event.key==='Enter')sendChat()">
-      <button onclick="sendChat()">Send</button>
+  );
+}
+
+// ── CYCLE TAB ─────────────────────────────────────────────────────────────
+function TabCycle({cycleDates, setCycleDates}) {
+  const [dateInput, setDateInput] = useState("");
+
+  const confirmed = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+
+  function cycleInfo(){
+    if(!confirmed.length) return null;
+    const last=new Date(confirmed[0].d);
+    const now=new Date();now.setHours(0,0,0,0);
+    const day=Math.floor((now-last)/864e5)+1;
+    const phase=day<=5?"menstrual":day<=13?"follicular":day<=16?"ovulatory":"luteal";
+    return {day:((day-1)%28)+1,phase};
+  }
+
+  const info=cycleInfo();
+  const PHASES={
+    menstrual:{n:"Menstrual",days:"Days 1-5",c:C.red,bg:C.rl},
+    follicular:{n:"Follicular",days:"Days 6-13",c:C.teal,bg:C.tl},
+    ovulatory:{n:"Ovulatory",days:"Days 14-16",c:C.am,bg:C.al},
+    luteal:{n:"Luteal",days:"Days 17-28",c:C.pu,bg:C.pl},
+  };
+
+  async function addDate(){
+    if(!dateInput) return;
+    if(cycleDates.find(x=>x.d===dateInput)) return;
+    const newEntry={d:dateInput,ok:true,id:Date.now()};
+    try {
+      const rows=await supa("POST","cycle_dates",{user_id:UID,date:dateInput,confirmed:true});
+      if(rows&&rows[0]) newEntry.id=rows[0].id;
+    } catch(e){}
+    setCycleDates(prev=>[...prev,newEntry]);
+    setDateInput("");
+  }
+
+  async function delDate(id){
+    setCycleDates(prev=>prev.filter(x=>x.id!==id));
+    try{await supa("DELETE","cycle_dates",null,"id=eq."+id);}catch(e){}
+  }
+
+  const phase=info?PHASES[info.phase]:null;
+
+  return (
+    <div>
+      <div style={{background:phase?phase.bg:C.pil,borderRadius:12,padding:"16px 18px",border:`.5px solid ${phase?phase.c+"33":C.pi+"33"}`,marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Current phase</div>
+        <div style={{fontSize:18,fontWeight:600,color:phase?phase.c:C.pi,marginBottom:4}}>
+          {phase?phase.n+" — "+phase.days:"Add your cycle dates to get started"}
+        </div>
+        <div style={{fontSize:12,color:C.t2}}>{phase?"Day "+info.day+" of cycle":"Enter your last period start date below."}</div>
+      </div>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
+        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date as it happens. The app calculates your current phase from your most recent confirmed date.</p>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
+          <button onClick={addDate} style={{...s.btn("p"),...s.btnSm}}>Add</button>
+        </div>
+        {confirmed.length===0
+          ? <div style={{textAlign:"center",padding:"12px 0",color:C.t3,fontSize:13}}><strong style={{display:"block",color:C.t2}}>No dates added yet</strong>Add your most recent period start date above.</div>
+          : confirmed.map((e,i)=>(
+            <div key={e.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:i<confirmed.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
+              <strong>{new Date(e.d).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"})}</strong>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Confirmed</span>
+                <button onClick={()=>delDate(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
+              </div>
+            </div>
+          ))
+        }
+      </Card>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Phase guide</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {Object.entries(PHASES).map(([key,p])=>(
+            <div key={key} style={{padding:10,background:p.bg,borderRadius:8}}>
+              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()} · {p.days}</div>
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>
+                {key==="menstrual"?"Lower intensity. Gentle yoga, walking. Iron-rich foods. Rest is productive.":
+                 key==="follicular"?"Rising energy. Best window for new challenges and heavier strength work.":
+                 key==="ovulatory"?"Peak strength. Ideal for gym sessions. High protein supports performance.":
+                 "Fatigue rises. Higher protein and magnesium. Scale back from day 22."}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
-  </div>
-</div>
+  );
+}
+
+// ── LOG TAB ───────────────────────────────────────────────────────────────
+const TAGS=["pain","medical","feedback","postworkout","mood","life","sleep","correction","spine"];
+const TAG_LABELS={pain:"Pain",medical:"Medical update",feedback:"Exercise feedback",postworkout:"Post-workout",mood:"Energy / mood",life:"Life context",sleep:"Sleep note",correction:"Correct AI",spine:"Spine update"};
+const TAG_STYLE={pain:[C.rl,C.red],medical:[C.tl+"88",C.teal],feedback:[C.tl,C.teal],postworkout:[C.orl,C.or],mood:[C.al,C.am],life:[C.pl,C.pu],sleep:["#f1efe8",C.t2],correction:[C.pil,C.pi],spine:["#e6f1fb","#185FA5"]};
+
+function TabLog({logEntries, setLogEntries}) {
+  const [selTag, setSelTag] = useState("pain");
+  const [txt, setTxt] = useState("");
+
+  async function addEntry(){
+    if(!txt.trim()) return;
+    const newEntry={id:Date.now(),dt:new Date().toISOString(),tag:selTag,txt:txt.trim()};
+    try {
+      const rows=await supa("POST","journal_entries",{user_id:UID,tag:selTag,txt:txt.trim()});
+      if(rows&&rows[0]){newEntry.id=rows[0].id;newEntry.dt=rows[0].created_at;}
+    }catch(e){}
+    setLogEntries(prev=>[newEntry,...prev]);
+    setTxt("");
+  }
+
+  async function delEntry(id){
+    setLogEntries(prev=>prev.filter(e=>e.id!==id));
+    try{await supa("DELETE","journal_entries",null,"id=eq."+id);}catch(e){}
+  }
+
+  return (
+    <div>
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}><div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>How the AI coach uses this log</div>
+        <div style={{fontSize:12,color:C.tx,lineHeight:1.65}}>Every entry is read before generating recommendations. Log pain, medical updates, physio notes, post-workout feel, energy, mood, or corrections. The coach adjusts based on what you log here.</div>
+      </div>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Add entry</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+          {TAGS.map(tag=>{
+            const [bg,col]=TAG_STYLE[tag]||[C.s2,C.t2];
+            const active=selTag===tag;
+            return <button key={tag} onClick={()=>setSelTag(tag)} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",background:bg,color:col,border:`1.5px solid ${active?col:"transparent"}`,opacity:active?1:.55}}>{TAG_LABELS[tag]}</button>;
+          })}
+        </div>
+        <textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Be specific — e.g. left glute sore after hip thrusts, 4/10, faded by evening." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:10}}/>
+        <button onClick={addEntry} style={s.btn("p")}>Save entry</button>
+      </Card>
+
+      <SecLabel>Spine history</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div style={{...s.card,borderLeft:`3px solid ${C.am}`,marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.am,marginBottom:8}}>L4-L5 disc herniation</div>
+          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Onset:</strong> Feb–Mar 2025. Radicular pain, nerve compression.</div>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>May 2025:</strong> Significant leg pain reduction.</div>
+            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Current:</strong> Left glute pain to outer shin. MRI and physio pending.</div>
+            <span style={{...s.pill(C.al,C.am),fontSize:10}}>Monitoring — physio pending</span>
+          </div>
+        </div>
+        <div style={{...s.card,borderLeft:`3px solid #185FA5`,marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:"#185FA5",marginBottom:8}}>T9-T10 surgery</div>
+          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Surgery:</strong> T9-T10 decompression ~March 2026.</div>
+            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Status:</strong> Cleared for full activity. Follow-up MRI due Sep 2026.</div>
+            <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Cleared — MRI due Sep 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <SecLabel>All entries</SecLabel>
+      {logEntries.length===0
+        ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No entries yet</strong>Start logging to build your health history.</div>
+        : logEntries.map(e=>{
+          const [bg,col]=TAG_STYLE[e.tag]||[C.s2,C.t2];
+          const d=new Date(e.dt);
+          const ds=d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+          return (
+            <div key={e.id} style={{...s.card,marginBottom:8,padding:"12px 14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{...s.pill(bg,col),fontSize:10}}>{TAG_LABELS[e.tag]}</span>
+                  <span style={{fontSize:10,color:C.t3}}>{ds}</span>
+                </div>
+                <button onClick={()=>delEntry(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14,padding:2}}>×</button>
+              </div>
+              <div style={{fontSize:12,lineHeight:1.6}}>{e.txt}</div>
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+}
+
+// ── PROFILE TAB ───────────────────────────────────────────────────────────
+function TabProfile({suppState, setSupp}) {
+  const SUPPS=[
+    {id:"creatine",name:"Creatine",time:"Morning with food"},
+    {id:"omega3",name:"Omega-3",time:"With meal"},
+    {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
+    {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
+    {id:"collagen",name:"Collagen",time:"With vitamin C"},
+    {id:"multi",name:"Multivitamin",time:"With meal"},
+  ];
+  const done=Object.values(suppState).filter(Boolean).length;
+
+  return (
+    <div>
+      <SecLabel>Personal info</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+        {[["Name","Julia Serebro"],["Date of birth","29 Nov 1985"],["Height","166 cm"],["Age","40"]].map(([l,v])=>(
+          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>InBody baseline — 8 June 2026</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
+        {[["Weight","57.6 kg",null],["Skeletal muscle","24.9 kg",C.tl],["Body fat","12.2 kg",C.al],["Body fat %","21.2%",null]].map(([l,v,bg])=>(
+          <div key={l} style={{background:bg||C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:18,fontWeight:600}}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+        {[["BMI","20.9"],["InBody score","78 / 100"],["Visceral fat","Level 5 ✓"],["BMR","1,350 kcal"]].map(([l,v])=>(
+          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>Goals</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {[
+          {title:"3 months — September 2026",color:C.tm,items:[["Weight","57-58 kg"],["Skeletal muscle","25.5 kg (+0.6)"],["Body fat","11.5 kg (-0.7)"],["Body fat %","19.8%"],["InBody score","82+"],["Push-ups","10 consecutive"]]},
+          {title:"6 months — December 2026",color:C.pu,items:[["Weight","57-59 kg"],["Skeletal muscle","26.9 kg (+2.0)"],["Body fat","10.2 kg (-2.0)"],["Body fat %","17.5%"],["InBody score","85+"],["Push-ups","15 consecutive"]]},
+        ].map(g=>(
+          <div key={g.title} style={{...s.card,borderLeft:`3px solid ${g.color}`,marginBottom:0}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>{g.title}</div>
+            {g.items.map(([l,v])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`.5px solid ${C.bd}`}}>
+                <span style={{color:C.t2}}>{l}</span><span style={{fontWeight:500}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>Supplements — daily checklist</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
+        {SUPPS.map(sup=>{
+          const checked=!!suppState[sup.id];
+          return (
+            <div key={sup.id} onClick={()=>setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.sf,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"10px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all .15s"}}>
+              <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.bd}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,flexShrink:0}}>{checked?"✓":""}</div>
+              <div><div style={{fontSize:12,fontWeight:500}}>{sup.name}</div><div style={{fontSize:10,color:C.t3,marginTop:1}}>{sup.time}</div></div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:11,color:C.t3,marginBottom:14}}>
+        {done===0?"Tap each supplement when you take it. Resets daily.":done===SUPPS.length?"All supplements taken today ✅":`${done} of ${SUPPS.length} taken today`}
+      </div>
+
+      <SecLabel>Workout plan</SecLabel>
+      <Card>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+          {[["GYM · 3x/week",C.pl,C.pu,"Lower body + upper body + core. Progressive overload."],["CARDIO · 2x/week",C.tl,C.teal,"Walking, hiking, elliptical. Adjusted by injury and cycle phase."],["YOGA · 2x/week",C.orl,C.or,"Ashtanga primary minus backbends. Mobility and recovery."]].map(([t,bg,col,desc])=>(
+            <div key={t} style={{padding:12,background:bg,borderRadius:8}}>
+              <div style={{fontSize:11,fontWeight:600,color:col,marginBottom:4}}>{t}</div>
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>{desc}</div>
+            </div>
+          ))}
+        </div>
+        {[
+          ["Glutes and legs",[["Hip thrust / glute bridge","Primary glute builder · start bodyweight"],["Romanian deadlift","Glutes + hamstrings · start light"],["Goblet squat","Quads + glutes · safer for lower back"],["Step-ups","Single-leg glute activation · low spinal load"],["Lateral band walks","Glute medius · knee and hip stability"],["Leg press (machine)","Compound · reduces spinal load"]]],
+          ["Upper body",[["Push-ups (progressive)","Baseline ~5 · incline then standard then decline"],["Dumbbell row","Upper back + biceps · bench support"],["Seated shoulder press","Deltoids · seated reduces lumbar strain"],["Lat pulldown","Back width and posture"],["Chest press (machine)","Pecs + triceps · machine if back discomfort"]]],
+          ["Core and spinal stability",[["Dead bug","Deep core · safest for post-surgery spine"],["Bird dog","Core + glutes · recommended for L4-L5"],["Forearm plank","Neutral spine endurance · build 20s to 60s"],["Pallof press","Anti-rotation core · spine-safe"],["Clamshell with band","Glute medius · directly supports L4-L5"]]],
+        ].map(([cat,exercises])=>(
+          <div key={cat}>
+            <div style={{fontSize:12,fontWeight:600,color:C.tx,marginBottom:8,paddingBottom:4,borderBottom:`.5px solid ${C.bd}`,marginTop:14}}>{cat}</div>
+            {exercises.map(([name,note])=>(
+              <div key={name} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:`.5px solid ${C.s2}`,fontSize:12}}>
+                <span style={{fontWeight:500,flex:1}}>{name}</span>
+                <span style={{color:C.t2,fontSize:11}}>{note}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{padding:10,background:C.s2,borderRadius:8,fontSize:11,color:C.t2,marginTop:10}}>
+          <strong style={{color:C.tx}}>Pending physio clearance:</strong> Back squats, deadlifts from floor, loaded spinal flexion, high-impact cardio.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState("dash");
+  const [apiKey, setApiKey] = useState(()=>localStorage.getItem("jkey")||"");
+  const [protTgt, setProtTgt] = useState(()=>parseInt(localStorage.getItem("jprot")||"100"));
+  const [allFood, setAllFood] = useState({});
+  const [logEntries, setLogEntries] = useState([]);
+  const [cycleDates, setCycleDates] = useState([]);
+  const [suppState, setSuppState] = useState({});
+  const [showSett, setShowSett] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("Updated Fri 12 Jun 2026, 14:20");
+  const [settKey, setSettKey] = useState(apiKey);
+  const [settProt, setSettProt] = useState(protTgt);
+
+  useEffect(()=>{
+    async function load(){
+      setSyncStatus("syncing...");
+      // Load settings first
+      try{
+        const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
+        if(rows&&rows.length){
+          if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
+          if(rows[0].protein_target){setProtTgt(rows[0].protein_target);localStorage.setItem("jprot",String(rows[0].protein_target));}
+        }
+      }catch(e){}
+      // Load data
+      try{
+        const [food,log,cyc,supp]=await Promise.all([
+          supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc"),
+          supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100"),
+          supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc"),
+          supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
+        ]);
+        const foodMap={};
+        (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
+        setAllFood(foodMap);
+        setLogEntries((log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt})));
+        setCycleDates((cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed})));
+        const ss={};(supp||[]).forEach(r=>{if(r.taken)ss[r.supplement]=true;});setSuppState(ss);
+        setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+      }catch(e){setSyncStatus("sync error — using local data");}
+    }
+    load();
+  },[]);
+
+  async function saveSett(){
+    localStorage.setItem("jkey",settKey);
+    localStorage.setItem("jprot",String(settProt));
+    setApiKey(settKey);setProtTgt(settProt);
+    try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey,protein_target:settProt},"on_conflict=user_id");}catch(e){}
+    setShowSett(false);
+  }
+
+  async function setSupp(id,val){
+    setSuppState(p=>({...p,[id]:val}));
+    try{await supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:id,taken:val},"on_conflict=user_id,log_date,supplement");}catch(e){}
+  }
+
+  function buildCtxForChat(){
+    const todayFood=allFood[tkey()]||[];
+    const tp=todayFood.reduce((s,e)=>s+(e.p||0),0);
+    const jArr=logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
+    return `Julia Serebro, 41F, 166cm. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. Today Fri 12 Jun 2026: 3719 steps, yoga 91min. Last night: 6h48m sleep (deep 102min 26%, REM 93min). Readiness 67/100. Protein today: ${Math.round(tp)}g/${protTgt}g. Week: 55k steps, 7 sessions. Log: ${jArr.join(" | ")||"none"}`;
+  }
+
+  async function sendChat(){
+    if(!chatInput.trim()||!apiKey) return;
+    const msg=chatInput.trim();setChatInput("");setChatLoading(true);
+    setChatMsgs(p=>[...p,{role:"user",txt:msg}]);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:buildCtxForChat()+"\n\nAs Julia's AI health coach, answer this: "+msg}]})
+      });
+      const d=await res.json();
+      const reply=d.content?.[0]?.text||"Error";
+      setChatMsgs(p=>[...p,{role:"ai",txt:reply}]);
+    }catch(e){setChatMsgs(p=>[...p,{role:"ai",txt:"Error: "+e.message}]);}
+    setChatLoading(false);
+  }
+
+  const TABS=[{id:"dash",label:"Dashboard"},{id:"food",label:"Food"},{id:"cycle",label:"Cycle"},{id:"log",label:"Log"},{id:"profile",label:"Profile"}];
+
+  return (
+    <div style={s.shell}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`}</style>
+
+      <div style={s.hdr}>
+        <div>
+          <h1 style={s.h1}>Health Coach</h1>
+          <div style={{fontSize:12,color:C.t2,marginTop:2}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
+          <button onClick={()=>setTab("cycle")} style={{...s.pill(C.pil,C.pi),border:"none",cursor:"pointer",fontFamily:"inherit"}}>cycle</button>
+          <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+        </div>
+      </div>
+
+      <div style={s.tabs}>
+        {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
+      </div>
+
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey}/>}
+      {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
+      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
+      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp}/>}
+
+      {/* COACH CHAT BUTTON */}
+      <button onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
+        💬 Ask your coach
+      </button>
+
+      {/* CHAT MODAL */}
+      {showChat&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowChat(false);}}>
+          <div style={{...s.modal,width:440,maxHeight:"80vh",display:"flex",flexDirection:"column",padding:0,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",borderBottom:`.5px solid ${C.bd}`}}>
+              <div>
+                <h3 style={{fontSize:15,fontWeight:600,margin:0}}>Your AI health coach</h3>
+                <p style={{fontSize:11,color:C.t3,margin:"2px 0 0"}}>Asks about your actual data</p>
+              </div>
+              <button onClick={()=>setShowChat(false)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.t3}}>×</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
+              {chatMsgs.map((m,i)=>(
+                <div key={i} style={{maxWidth:"88%",padding:"9px 12px",borderRadius:12,fontSize:13,lineHeight:1.55,alignSelf:m.role==="user"?"flex-end":"flex-start",background:m.role==="user"?C.pu:C.s2,color:m.role==="user"?"#fff":C.tx}}>{m.txt}</div>
+              ))}
+              {chatLoading&&<div style={{alignSelf:"flex-start",background:C.s2,padding:"9px 12px",borderRadius:12,fontSize:13,color:C.t3}}><Spinner/>Thinking...</div>}
+            </div>
+            <div style={{display:"flex",gap:8,padding:"12px 14px",borderTop:`.5px solid ${C.bd}`}}>
+              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Ask anything about your health..." style={{...s.input,flex:1,borderRadius:20}}/>
+              <button onClick={sendChat} style={{...s.btn("p"),borderRadius:20,padding:"9px 16px"}}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SETTINGS MODAL */}
+      {showSett&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSett(false);}}>
+          <div style={{...s.modal,width:420}}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:16}}>Settings</h3>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
+            <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
+            <p style={{fontSize:11,color:C.t3,marginBottom:12}}>Stored locally in your browser only.</p>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Daily protein target (g)</label>
+            <input type="number" value={settProt} onChange={e=>setSettProt(parseInt(e.target.value)||100)} min={50} max={200} style={{...s.input,marginBottom:16}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowSett(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={saveSett} style={s.btn("p")}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
 </body>
 </html>
