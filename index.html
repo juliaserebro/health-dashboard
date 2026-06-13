@@ -27,6 +27,25 @@ const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
 const UID = "julia";
 
+async function supa(method, table, body, query) {
+  const url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
+  const hdrs = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+  if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
+  let res;
+  try {
+    res = await fetch(url,{method,headers:hdrs,body:body?JSON.stringify(body):undefined});
+  } catch(networkErr) {
+    throw new Error("Network/CORS: "+networkErr.message);
+  }
+  if (!res.ok) { const e=await res.text(); throw new Error(table+" "+res.status+": "+e.slice(0,80)); }
+  if (res.status===204||method==="DELETE") return null;
+  return res.json();
+}
+
+function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
+
+
+
 const STEPS = [
   {d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},
   {d:"Thu",s:13717},{d:"Fri",s:3719},{d:"Sat",s:1102,today:true}
@@ -55,8 +74,6 @@ const C = {
 };
 
 // ── SUPABASE ──────────────────────────────────────────────────────────────
-function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
-
 // ── STYLES ────────────────────────────────────────────────────────────────
 const s = {
   shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 80px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
@@ -1037,7 +1054,9 @@ function App() {
         const ss={};(supp||[]).forEach(r=>{if(r.taken)ss[r.supplement]=true;});setSuppState(ss);
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
       }catch(e){
-        setSyncStatus("sync error — using local data");
+        const msg = e.message||String(e);
+        setSyncStatus("sync error: "+msg.slice(0,40));
+        console.error("Supabase load error:", e);
         // Fall back to localStorage backup
         const backup=localStorage.getItem("jlog_backup");
         if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
