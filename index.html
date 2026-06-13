@@ -165,7 +165,7 @@ function ProteinDaysMetric({allFood, protTgt}) {
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
-function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
+function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
@@ -240,7 +240,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
     if (!apiKey) return;
     setLoading(l=>({...l,[type]:true}));
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}. Rules: (1) Each section starts with emoji + CAPS LABEL on its own line. (2) First line of each section = the ACTION in bold using **text**. (3) Second line = brief why/context. (4) Sections: ACTIVITY, NUTRITION, RECOVERY, and FLAG only if health log has pain/injury. (5) Be specific to today's actual data - reference real numbers. (6) Max 2 lines per section. No filler phrases.`
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}. Rules: (1) Each section starts with emoji + CAPS LABEL on its own line. (2) First line = ACTION in bold using **text**. (3) Second line = brief why/context. (4) Sections: ACTIVITY, NUTRITION, RECOVERY. CRITICAL: if health log has any Pain or Post-workout entries from today or yesterday, show FLAG section first and make it the most prominent section - reference the specific pain described. (5) Be specific to today's actual data - reference real numbers including current protein logged. (6) Max 2 lines per section. No filler phrases. (7) If protein is already partially hit, acknowledge what's been eaten and what remains.`
       : `Weekly coaching review. Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = the ACTION or KEY INSIGHT in bold using **text**. (3) One sentence of context. (4) Sections: WELL DONE, MISSED, NEXT WEEK PRIORITY, FLAG (only if relevant). (5) Tight and actionable - no padding. Max 2 lines per section.`;
     try {
       const txt = await callAI(p);
@@ -253,7 +253,8 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt}) {
     setLoading(l=>({...l,[type]:false}));
   }
 
-  useEffect(()=>{ if(apiKey){genAI("today");genAI("week");} },[apiKey]);
+  useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
+  useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
 
   const maxStep = Math.max(...STEPS.map(d=>d.s),1);
 
@@ -496,7 +497,7 @@ function HeatmapGrid({allFood={}, protTgt=100}) {
 }
 
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -543,6 +544,8 @@ function TabFood({allFood, setAllFood, protTgt, apiKey}) {
       setAllFood(prev=>({...prev,[targetDate]:[...(prev[targetDate]||[]),entry]}));
       setAiMsg(entry.n+" logged ✓");
       setTxtInput("");setShowTxt(false);
+      // Auto-refresh AI coach with updated nutrition
+      if(onFoodLogged) onFoodLogged();
     } catch(e){setAiMsg("Error: "+e.message);}
     setAnalysing(false);
   }
@@ -1023,6 +1026,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState("Updated Sat 13 Jun 2026, 09:40");
   const [settKey, setSettKey] = useState(apiKey);
   const [settProt, setSettProt] = useState(protTgt);
+  const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   useEffect(()=>{
     async function load(){
@@ -1125,8 +1129,8 @@ function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
-      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey}/>}
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp}/>}
