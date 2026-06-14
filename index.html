@@ -341,7 +341,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     }
   }
 
-  useEffect(()=>{ if(apiKey&&fitbitData.steps.length>0){genAI("today");} },[apiKey, aiRefreshTick, fitbitData]);
+  useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
   useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
 
 
@@ -410,7 +410,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
         </div>
         {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
          : aiToday ? formatAI(aiToday)
-         : apiKey ? <div style={{fontSize:12,color:C.am}}>Tap refresh to generate ↑</div>
+         : apiKey ? <button onClick={()=>genAI("today")} style={{fontSize:12,color:C.pu,background:C.pl,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}}>Generate today's briefing</button>
          : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
       </div>
 
@@ -1321,11 +1321,17 @@ function App() {
   const [tab, setTab] = useState("dash");
   const [apiKey, setApiKey] = useState(()=>localStorage.getItem("jkey")||"");
   const [protTgt, setProtTgt] = useState(()=>parseInt(localStorage.getItem("jprot")||"100"));
-  const [allFood, setAllFood] = useState({});
-  const [logEntries, setLogEntries] = useState([]);
+
   const [cycleDates, setCycleDates] = useState([]);
   const [suppState, setSuppState] = useState({});
-  const [fitbitData, setFitbitData] = useState({sleep:[],steps:[],workouts:[]});
+  const [fitbitData, setFitbitData] = useState(FITBIT_SEED); // starts with seed, Supabase overwrites
+  // Pre-load from localStorage immediately so data shows before Supabase responds
+  const [allFood, setAllFood] = useState(()=>{
+    try{const b=localStorage.getItem("jfood_backup");return b?JSON.parse(b):{}}catch{return {};}
+  });
+  const [logEntries, setLogEntries] = useState(()=>{
+    try{const b=localStorage.getItem("jlog_backup");return b?JSON.parse(b):[]}catch{return [];}
+  });
   const [showSett, setShowSett] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [showChat, setShowChat] = useState(false);
