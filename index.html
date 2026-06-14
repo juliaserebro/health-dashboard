@@ -235,6 +235,37 @@ function StepsMetric({fitbitData}) {
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
+// ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
+function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const todayKey = now.toISOString().slice(0,10);
+  const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+  const todayFood = allFood[todayKey]||[];
+  const liveProt = Math.round(todayFood.reduce((s,e)=>s+(e.p||0),0));
+  const liveKcal = Math.round(todayFood.reduce((s,e)=>s+(e.k||0),0));
+  const liveCarbs = Math.round(todayFood.reduce((s,e)=>s+(e.c||0),0));
+  const liveFat = Math.round(todayFood.reduce((s,e)=>s+(e.f||0),0));
+  const mealNames = todayFood.map(e=>e.n).join(", ")||"nothing logged yet";
+  const yAlcohol = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  let cycleCtx = "Cycle not tracked";
+  if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
+  const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
+  const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
+  const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
+  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: no data";
+  const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
+  const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
+  const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
+  const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yKey);
+  const ySteps=(fitbitData.steps||[]).find(s=>s.date===yKey);
+  const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day, no workout logged";
+  const yStepsNote=ySteps?ySteps.steps.toLocaleString()+" steps":"steps unknown";
+  return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+}
+
 function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
@@ -244,31 +275,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
 
   function buildCtx() {
-    const now = new Date();
-    const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-    const todayKey = now.toISOString().slice(0,10);
-    const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
-    const todayFood = allFood[todayKey]||[];
-    const liveProt = Math.round(todayFood.reduce((s,e)=>s+(e.p||0),0));
-    const liveKcal = Math.round(todayFood.reduce((s,e)=>s+(e.k||0),0));
-    const liveCarbs = Math.round(todayFood.reduce((s,e)=>s+(e.c||0),0));
-    const liveFat = Math.round(todayFood.reduce((s,e)=>s+(e.f||0),0));
-    const mealNames = todayFood.map(e=>e.n).join(", ")||"nothing logged yet";
-    const yAlcohol = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
-    const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
-    let cycleCtx = "Cycle not tracked";
-    if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
-    const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
-    return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain to shin (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TODAY: ${todayStr}. ${(()=>{
-      const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
-      const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-      const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
-      const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m sleep, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: no data";
-      const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
-      const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
-      const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
-      return `Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${(()=>{const yw=(fitbitData.workouts||[]).filter(w=>w.date===yKey);return yw.length?yw.map(w=>w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", "):"rest day, no workout logged";})()}, ${(()=>{const ys=(fitbitData.steps||[]).find(s=>s.date===yKey);return ys?ys.steps.toLocaleString()+" steps":"steps unknown";})()}.`;
-    })()} Week: Fri yoga91min/99bpm, Thu run23min/119bpm+gym38min+elliptical24min, Mon gym25min+walk60min, Sun yoga60min, ~57k steps. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
   }
 
   async function callAI(prompt) {
@@ -334,7 +341,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     }
   }
 
-  useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
+  useEffect(()=>{ if(apiKey&&fitbitData.steps.length>0){genAI("today");} },[apiKey, aiRefreshTick, fitbitData]);
   useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
 
 
@@ -403,6 +410,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
         </div>
         {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
          : aiToday ? formatAI(aiToday)
+         : apiKey ? <div style={{fontSize:12,color:C.am}}>Tap refresh to generate ↑</div>
          : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
       </div>
 
@@ -518,7 +526,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
           </div>
         </Card>
         <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep this week</div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep — last 7 days</div>
           {(()=>{
             // Last 7 sleep records from fitbitData
             const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7).reverse();
@@ -543,7 +551,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
 
       {/* WORKOUTS LIST */}
       <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts this week</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
         {(()=>{
           const typeStyle={gym:[C.pl,C.pu],yoga:[C.orl,C.or],run:[C.tl,C.teal],elliptical:[C.tl,C.teal],walk:[C.tl,C.teal],pilates:[C.orl,C.or]};
           const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
@@ -819,7 +827,11 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
         if(rows&&rows[0]) entry.dbid=rows[0].id;
       } catch(e) {}
 
-      setAllFood(prev=>({...prev,[targetDate]:[...(prev[targetDate]||[]),entry]}));
+      setAllFood(prev=>{
+        const updated={...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
+        localStorage.setItem("jfood_backup",JSON.stringify(updated));
+        return updated;
+      });
       const badge = source==="verified"?"✓ verified from label":"~ estimated";
       setAiMsg(entry.n+" logged ("+badge+")");
       setTxtInput("");setShowTxt(false);
@@ -1385,6 +1397,8 @@ function App() {
         // Fall back to localStorage backup
         const backup=localStorage.getItem("jlog_backup");
         if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
+        const foodBackup=localStorage.getItem("jfood_backup");
+        if(foodBackup) try{setAllFood(JSON.parse(foodBackup));}catch(ex){}
         // Use seed data as fallback
         setFitbitData(FITBIT_SEED);
       }
@@ -1405,7 +1419,9 @@ function App() {
     try{await supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:id,taken:val},"on_conflict=user_id,log_date,supplement");}catch(e){}
   }
 
-  function buildCtxForChat(){ return buildCtx(); }
+  function buildCtxForChat(){
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
+  }
 
   async function sendChat(){
     if(!chatInput.trim()||!apiKey) return;
