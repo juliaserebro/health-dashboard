@@ -267,7 +267,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
       const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
       const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
       const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
-      return `Fitbit (live from Supabase): ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}.`;
+      return `Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${(()=>{const yw=(fitbitData.workouts||[]).filter(w=>w.date===yKey);return yw.length?yw.map(w=>w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", "):"rest day, no workout logged";})()}, ${(()=>{const ys=(fitbitData.steps||[]).find(s=>s.date===yKey);return ys?ys.steps.toLocaleString()+" steps":"steps unknown";})()}.`;
     })()} Week: Fri yoga91min/99bpm, Thu run23min/119bpm+gym38min+elliptical24min, Mon gym25min+walk60min, Sun yoga60min, ~57k steps. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
   }
 
@@ -318,12 +318,18 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   async function genAI(type) {
     if (!apiKey) return;
     setLoading(l=>({...l,[type]:true}));
+    try { await genAIInner(type); } finally { setLoading(l=>({...l,[type]:false})); }
+  }
+  async function genAIInner(type) {
     const p = type==="today"
       ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. 
 CRITICAL RULE: Scan the health log for any entries tagged [pain] or [postworkout] from TODAY. If found, you MUST: (a) show a 🚩 FLAG section as the VERY FIRST section, (b) recommend rest or very light activity only - NEVER recommend a workout session if pain is logged today, (c) reference the specific pain described in the log entry.
 FORMAT: Each section = emoji + CAPS LABEL on its own line. First line of section = **bold action**. Second line = brief why. Sections in order: FLAG (if pain today - mandatory first), ACTIVITY, NUTRITION, RECOVERY.
 SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${protTgt}g target. If protein partially hit, say what remains. Max 2 lines per section. No filler.`
-      : `Weekly coaching review. Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = the ACTION or KEY INSIGHT in bold using **text**. (3) One sentence of context. (4) Sections: WELL DONE, MISSED, NEXT WEEK PRIORITY, FLAG (only if relevant). (5) Tight and actionable - no padding. Max 2 lines per section.`;
+      : `Weekly coaching review. Week in Israel runs Sunday to Saturday.
+The week just COMPLETED was Sun 7 Jun – Sat 13 Jun: 57030 steps, 2 gym sessions, 2 yoga sessions, 1 run, 1 elliptical. Sleep avg 7h.
+The CURRENT week started Sun 14 Jun. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}.
+Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = **bold action or insight**. (3) One sentence context. (4) Sections: WELL DONE (about last week), FOCUS THIS WEEK (specific targets for current week), NEXT SESSION (what to do next workout), FLAG (only if relevant pain/injury). (5) Tight and actionable. Max 2 lines per section. Do NOT say "next week" — current week has already started.`
     try {
       const txt = await callAI(p);
       if (type==="today") setAiToday(txt);
@@ -332,7 +338,6 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
       if (type==="today") setAiToday("Error: "+e.message);
       else setAiWeek("Error: "+e.message);
     }
-    setLoading(l=>({...l,[type]:false}));
   }
 
   useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
@@ -370,7 +375,20 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
             <span style={{fontWeight:600,color:C.teal}}>+3</span>
           </div>
         </div>
-        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Rest day yesterday + deep/REM both solid. Main cost: sleep duration fell short (6h 42m) and another late bedtime (01:16). Full rest day today is well-timed for recovery.</div>
+        {(()=>{
+          const now=new Date();
+          const yDate=new Date(now.getTime()-864e5).toISOString().slice(0,10);
+          const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
+          const ySteps=(fitbitData.steps||[]).find(s=>s.date===yDate);
+          const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+          const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day";
+          const stepNote=ySteps&&ySteps.steps>=8000?"active ("+ySteps.steps.toLocaleString()+" steps)":ySteps?"low steps ("+ySteps.steps.toLocaleString()+")":"";
+          const sleepNote=lastSleep?`${Math.floor(lastSleep.total/60)}h ${lastSleep.total%60}m sleep (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m), bedtime ${lastSleep.bedtime}`:"";
+          const costNote=lastSleep&&lastSleep.total<420?"Sleep duration is the main cost today.":lastSleep&&lastSleep.bedtime>"01:00"?"Late bedtime is the main cost today.":"";
+          return <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>
+            Yesterday: {yActivity}{stepNote?" · "+stepNote:""}. Last night: {sleepNote}. {costNote}
+          </div>;
+        })()}
       </Card>
 
       <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
@@ -1393,12 +1411,7 @@ function App() {
     try{await supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:id,taken:val},"on_conflict=user_id,log_date,supplement");}catch(e){}
   }
 
-  function buildCtxForChat(){
-    const todayFood=allFood[tkey()]||[];
-    const tp=todayFood.reduce((s,e)=>s+(e.p||0),0);
-    const jArr=logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
-    return `Julia Serebro, 41F, 166cm. Post T9-T10 surgery Mar 2026. L4-L5 disc herniation. Goals: build glutes/legs, upper body strength, lower back stability, cardio. Today Sat 13 Jun 2026: 1102 steps (early morning). Last night Fri 12: 7h sleep (deep 105min 25%, REM 104min 25%), bedtime 01:15. Readiness 89/100 Great. Protein today: ${Math.round(tp)}g/${protTgt}g. Week: 57k steps, 7 sessions (yoga Fri, gym+elliptical+run Thu, gym+walk Mon, yoga Sun). Log: ${jArr.join(" | ")||"none"}`;
-  }
+  function buildCtxForChat(){ return buildCtx(); }
 
   async function sendChat(){
     if(!chatInput.trim()||!apiKey) return;
