@@ -322,14 +322,8 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   }
   async function genAIInner(type) {
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. 
-CRITICAL RULE: Scan the health log for any entries tagged [pain] or [postworkout] from TODAY. If found, you MUST: (a) show a 🚩 FLAG section as the VERY FIRST section, (b) recommend rest or very light activity only - NEVER recommend a workout session if pain is logged today, (c) reference the specific pain described in the log entry.
-FORMAT: Each section = emoji + CAPS LABEL on its own line. First line of section = **bold action**. Second line = brief why. Sections in order: FLAG (if pain today - mandatory first), ACTIVITY, NUTRITION, RECOVERY.
-SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${protTgt}g target. If protein partially hit, say what remains. Max 2 lines per section. No filler.`
-      : `Weekly coaching review. Week in Israel runs Sunday to Saturday.
-The week just COMPLETED was Sun 7 Jun – Sat 13 Jun: 57030 steps, 2 gym sessions, 2 yoga sessions, 1 run, 1 elliptical. Sleep avg 7h.
-The CURRENT week started Sun 14 Jun. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}.
-Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = **bold action or insight**. (3) One sentence context. (4) Sections: WELL DONE (about last week), FOCUS THIS WEEK (specific targets for current week), NEXT SESSION (what to do next workout), FLAG (only if relevant pain/injury). (5) Tight and actionable. Max 2 lines per section. Do NOT say "next week" — current week has already started.`
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain] or [postworkout] entries from TODAY, show FLAG section FIRST and do NOT recommend workouts. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${liveProt}g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
+      : `Weekly coaching review. Israeli week = Sunday to Saturday. Week COMPLETED: Sun 7 Jun – Sat 13 Jun (57030 steps, 2 gym, 2 yoga, 1 run, 1 elliptical, avg sleep 7h). Current week started Sun 14 Jun. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. Sections: WELL DONE (last week), FOCUS THIS WEEK (targets), NEXT SESSION (what to do next). FORMAT: emoji + CAPS LABEL, bold **action**, one sentence why. Tight, no padding, max 2 lines each. Do not say next week - it already started.`
     try {
       const txt = await callAI(p);
       if (type==="today") setAiToday(txt);
