@@ -28,23 +28,29 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const UID = "julia";
 
 async function supa(method, table, body, query) {
-  const url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
-  const hdrs = {
-    "Content-Type": "application/json",
-    "apikey": SUPA_KEY,
-    "Authorization": "Bearer " + SUPA_KEY,
-    "Accept": "application/json"
-  };
-  if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
+  // For GET: use query param auth (avoids CORS preflight)
+  // For POST/PATCH/DELETE: use headers (required)
+  let url, hdrs, fetchOpts;
+  if (method === "GET") {
+    // Simple request - no preflight - apikey as query param
+    const q = [query, "apikey="+SUPA_KEY].filter(Boolean).join("&");
+    url = SUPA_URL + "/rest/v1/" + table + "?" + q;
+    hdrs = {"Accept": "application/json"};
+    fetchOpts = {method:"GET", headers:hdrs};
+  } else {
+    url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
+    hdrs = {
+      "Content-Type": "application/json",
+      "apikey": SUPA_KEY,
+      "Authorization": "Bearer " + SUPA_KEY,
+      "Accept": "application/json"
+    };
+    if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
+    fetchOpts = {method, headers:hdrs, body:body?JSON.stringify(body):undefined, mode:"cors", credentials:"omit"};
+  }
   let res;
   try {
-    res = await fetch(url, {
-      method,
-      headers: hdrs,
-      body: body ? JSON.stringify(body) : undefined,
-      mode: "cors",
-      credentials: "omit"
-    });
+    res = await fetch(url, fetchOpts);
   } catch(networkErr) {
     throw new Error("Network/CORS: " + networkErr.message);
   }
@@ -1371,19 +1377,7 @@ function App() {
       try{
         // Upsert FITBIT_SEED to Supabase using merge resolution
         try {
-          const upsertHdrs = {
-            "Content-Type":"application/json",
-            "apikey":SUPA_KEY,
-            "Authorization":"Bearer "+SUPA_KEY,
-            "Prefer":"resolution=merge-duplicates,return=minimal"
-          };
-          await fetch(SUPA_URL+"/rest/v1/fitness_cache",{
-            method:"POST",
-            headers:upsertHdrs,
-            mode:"cors",
-            credentials:"omit",
-            body:JSON.stringify({user_id:UID,data:FITBIT_SEED,synced_at:FITBIT_SEED.synced_at})
-          });
+          await supa("POST","fitness_cache",{user_id:UID,data:FITBIT_SEED,synced_at:FITBIT_SEED.synced_at},"on_conflict=user_id");
         } catch(e){ console.log("Seed upsert:",e.message); }
 
         const [food,log,cyc,supp,fitbit]=await Promise.all([
