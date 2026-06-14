@@ -241,6 +241,195 @@ function StepsMetric({fitbitData}) {
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
+
+// ── GOOGLE HEALTH API ─────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = "749607035074-b06qae2bs7o4cfn7dlbbg0772eg7cntf.apps.googleusercontent.com";
+const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+  "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+  "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly"
+].join(" ");
+const HEALTH_API = "https://health.googleapis.com/v1/users/-";
+
+// Get stored Google access token
+function getGToken() {
+  try { return JSON.parse(localStorage.getItem("gtoken")||"null"); } catch { return null; }
+}
+function setGToken(tok) {
+  localStorage.setItem("gtoken", JSON.stringify(tok));
+}
+function clearGToken() {
+  localStorage.removeItem("gtoken");
+}
+function isGTokenValid(tok) {
+  if(!tok||!tok.access_token) return false;
+  return tok.expires_at > Date.now() + 60000; // valid if >1min remaining
+}
+
+// Start OAuth flow - opens Google consent screen
+const GOOGLE_REDIRECT_URI = "https://juliaserebro.github.io/health-dashboard/";
+
+function startGoogleAuth() {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: GOOGLE_REDIRECT_URI,
+    response_type: "token",
+    scope: GOOGLE_SCOPES,
+    include_granted_scopes: "true",
+    prompt: "consent"
+  });
+  window.location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
+}
+
+// Handle OAuth callback - parse token from URL hash
+function handleGoogleCallback() {
+  const hash = window.location.hash.substring(1);
+  if(!hash) return false;
+  const params = new URLSearchParams(hash);
+  const access_token = params.get("access_token");
+  const expires_in = params.get("expires_in");
+  if(!access_token) return false;
+  const tok = {
+    access_token,
+    expires_at: Date.now() + parseInt(expires_in||3600)*1000
+  };
+  setGToken(tok);
+  // Clean URL hash
+  window.history.replaceState(null, "", window.location.pathname);
+  return true;
+}
+
+// Fetch from Google Health API
+async function ghFetch(endpoint, params={}) {
+  const tok = getGToken();
+  if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
+  const url = HEALTH_API + endpoint + "?" + new URLSearchParams(params).toString();
+  const res = await fetch(url, {
+    headers: {"Authorization": "Bearer " + tok.access_token}
+  });
+  if(res.status===401) { clearGToken(); throw new Error("NOT_AUTHENTICATED"); }
+  if(!res.ok) { const e=await res.text(); throw new Error("GH API "+res.status+": "+e.slice(0,100)); }
+  return res.json();
+}
+
+// Fetch today's steps
+async function ghGetSteps(date) {
+  const res = await ghFetch("/dataTypes/steps:dailyRollUp", {
+    startDate: date, endDate: date
+  });
+  const pts = res.dataPoints||[];
+  return pts.reduce((s,p)=>s+(p.value?.integerValue||0),0);
+}
+
+// Fetch sleep for a date (morning date = when you woke up)
+async function ghGetSleep(date) {
+  // Sleep list - get sessions ending on this date
+  const prev = new Date(date);
+  prev.setDate(prev.getDate()-1);
+  const prevStr = prev.toISOString().slice(0,10);
+  const res = await ghFetch("/dataTypes/sleep:list", {
+    startDate: prevStr, endDate: date
+  });
+  const sessions = (res.dataPoints||[]).filter(s=>!s.isSynthetic);
+  // Find main sleep (longest session)
+  if(!sessions.length) return null;
+  const main = sessions.reduce((a,b)=>(a.value?.sleepDuration||0)>(b.value?.sleepDuration||0)?a:b);
+  const v = main.value||{};
+  const totalMin = Math.round((v.sleepDuration||0)/60);
+  const deepMin = Math.round((v.deepSleepDuration||0)/60);
+  const remMin = Math.round((v.remSleepDuration||0)/60);
+  const lightMin = Math.round((v.lightSleepDuration||0)/60);
+  const awakeMin = Math.round((v.awakeDuration||0)/60);
+  // Bedtime from start time
+  const startMs = parseInt(main.startTimeNanos||"0")/1e6;
+  const bedtime = startMs ? new Date(startMs).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Jerusalem"}) : null;
+  return {date, bedtime, total:totalMin, deep:deepMin, rem:remMin, light:lightMin, awake:awakeMin};
+}
+
+// Fetch recent workouts
+async function ghGetWorkouts(startDate, endDate) {
+  const res = await ghFetch("/dataTypes/exercise:list", {
+    startDate, endDate
+  });
+  const sessions = res.dataPoints||[];
+  return sessions.map(s=>{
+    const typeMap={WALK:"walk",RUN:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym"};
+    const rawType = s.value?.exerciseType||"workout";
+    const type = typeMap[rawType]||rawType.toLowerCase().replace(/_/g," ");
+    const durationMin = Math.round((s.value?.activeDuration||0)/60);
+    const avgHr = s.value?.averageHeartRate ? Math.round(s.value.averageHeartRate) : null;
+    return {date:s.endDate||endDate, type, duration_min:durationMin||null, avg_hr:avgHr};
+  });
+}
+
+// Full sync - fetch last 14 days of data
+async function ghFullSync(setSyncStatus, setFitbitData) {
+  setSyncStatus("Syncing from Google Health...");
+  try {
+    const now = new Date();
+    const today = now.toISOString().slice(0,10);
+    const twoWeeksAgo = new Date(now.getTime() - 14*864e5).toISOString().slice(0,10);
+    
+    // Collect steps for last 14 days
+    const stepsArr = [];
+    for(let i=0;i<14;i++){
+      const d = new Date(now.getTime()-i*864e5);
+      const dateStr = d.toISOString().slice(0,10);
+      try {
+        const steps = await ghGetSteps(dateStr);
+        if(steps>0) stepsArr.push({date:dateStr, steps});
+      } catch(e){ if(e.message==="NOT_AUTHENTICATED") throw e; }
+    }
+    
+    // Sleep for last 14 nights
+    const sleepArr = [];
+    for(let i=0;i<14;i++){
+      const d = new Date(now.getTime()-i*864e5);
+      const dateStr = d.toISOString().slice(0,10);
+      try {
+        const s = await ghGetSleep(dateStr);
+        if(s&&s.total>0) sleepArr.push(s);
+      } catch(e){ if(e.message==="NOT_AUTHENTICATED") throw e; }
+    }
+    
+    // Workouts last 14 days
+    let workoutsArr = [];
+    try {
+      workoutsArr = await ghGetWorkouts(twoWeeksAgo, today);
+    } catch(e){ if(e.message==="NOT_AUTHENTICATED") throw e; }
+    
+    // Build new fitbitData
+    const newData = {
+      sleep: sleepArr.sort((a,b)=>b.date.localeCompare(a.date)),
+      naps: [],
+      steps: stepsArr.sort((a,b)=>a.date.localeCompare(b.date)),
+      workouts: workoutsArr.sort((a,b)=>b.date.localeCompare(a.date)),
+      synced_at: new Date().toISOString()
+    };
+    
+    setFitbitData(newData);
+    
+    // Save to Supabase fitness_cache
+    try {
+      await fetch(SUPA_URL+"/rest/v1/fitness_cache", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Prefer":"resolution=merge-duplicates,return=minimal"},
+        body:JSON.stringify({user_id:UID,data:newData,synced_at:newData.synced_at})
+      });
+    } catch(e){ console.log("Supabase save:", e.message); }
+    
+    setSyncStatus("Synced " + new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+    return newData;
+  } catch(e) {
+    if(e.message==="NOT_AUTHENTICATED") {
+      setSyncStatus("Google Health: reconnect needed");
+    } else {
+      setSyncStatus("Sync error: " + e.message.slice(0,30));
+    }
+    throw e;
+  }
+}
+
 // ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
 function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   const now = new Date();
@@ -1263,6 +1452,8 @@ function App() {
   });
   const [showSett, setShowSett] = useState(false);
   const [showSync, setShowSync] = useState(false);
+  const [ghConnected, setGhConnected] = useState(()=>isGTokenValid(getGToken()));
+  const [ghSyncing, setGhSyncing] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
   const [chatInput, setChatInput] = useState("");
@@ -1273,6 +1464,15 @@ function App() {
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   useEffect(()=>{
+    // Handle Google OAuth callback (token in URL hash)
+    if(window.location.hash.includes("access_token")) {
+      const handled = handleGoogleCallback();
+      if(handled) {
+        setGhConnected(true);
+        // Auto-sync after connecting
+        setTimeout(()=>ghFullSync(setSyncStatus, setFitbitData).catch(()=>{}), 500);
+      }
+    }
     async function load(){
       setSyncStatus("syncing...");
       // Load settings first
@@ -1313,6 +1513,10 @@ function App() {
           setFitbitData(FITBIT_SEED);
         }
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+      // Auto-sync Google Health if token is valid
+      if(isGTokenValid(getGToken())) {
+        ghFullSync(setSyncStatus, setFitbitData).catch(e=>console.log("Auto-sync:",e.message));
+      }
       }catch(e){
         const msg = e.message||String(e);
         setSyncStatus("sync error: "+msg.slice(0,40));
@@ -1328,6 +1532,19 @@ function App() {
     }
     load();
   },[]);
+
+  async function syncGoogleHealth() {
+    if(!isGTokenValid(getGToken())) {
+      // Need to authenticate first
+      startGoogleAuth();
+      return;
+    }
+    setGhSyncing(true);
+    try {
+      await ghFullSync(setSyncStatus, setFitbitData);
+    } catch(e){}
+    setGhSyncing(false);
+  }
 
   async function saveSett(){
     localStorage.setItem("jkey",settKey);
@@ -1427,17 +1644,23 @@ function App() {
         <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSync(false);}}>
           <div style={s.modal}>
             <h3 style={{fontSize:16,fontWeight:600,marginBottom:8}}>🔄 Sync health data</h3>
-            <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Tapping the button below opens Claude with a pre-filled message. Claude will pull your latest Fitbit data and rebuild the dashboard file for you to download.</p>
-            <a
-              href={"https://claude.ai/new?q="+encodeURIComponent("Please pull my latest health data from Google Health (steps, sleep, workouts for today and this week) and update my health dashboard file.")}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={()=>setShowSync(false)}
-              style={{display:"block",background:C.pu,color:"#fff",textAlign:"center",padding:"12px 18px",borderRadius:8,fontWeight:500,fontSize:14,marginBottom:12,textDecoration:"none"}}
-            >
-              Open Claude &amp; sync →
-            </a>
-            <p style={{fontSize:11,color:C.t3,lineHeight:1.6}}>After Claude rebuilds the file, download it using the ↓ button and replace your GitHub Pages <code>index.html</code>.</p>
+            {ghConnected ? (
+              <div>
+                <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Connected to Google Health. Tap sync to fetch your latest steps, sleep, and workouts from the last 14 days.</p>
+                <button onClick={()=>{setShowSync(false);syncGoogleHealth();}} style={{...s.btn("p"),width:"100%",padding:12,fontSize:14,marginBottom:12}}>
+                  {ghSyncing?"Syncing...":"Sync now →"}
+                </button>
+                <button onClick={()=>{clearGToken();setGhConnected(false);}} style={{...s.btn("s"),width:"100%",fontSize:12}}>Disconnect Google Health</button>
+              </div>
+            ) : (
+              <div>
+                <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Connect your Google account to automatically sync steps, sleep, and workouts from your Fitbit Charge 6 — on any device, no Claude Desktop needed.</p>
+                <button onClick={()=>{setShowSync(false);syncGoogleHealth();}} style={{...s.btn("p"),width:"100%",padding:12,fontSize:14,marginBottom:12}}>
+                  Connect Google Health →
+                </button>
+                <p style={{fontSize:11,color:C.t3,lineHeight:1.6}}>You will be redirected to Google to grant permission, then returned to the app automatically.</p>
+              </div>
+            )}
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
               <button onClick={()=>setShowSync(false)} style={s.btn("s")}>Close</button>
             </div>
