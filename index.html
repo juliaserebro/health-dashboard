@@ -29,13 +29,24 @@ const UID = "julia";
 
 async function supa(method, table, body, query) {
   const url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
-  const hdrs = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+  const hdrs = {
+    "Content-Type": "application/json",
+    "apikey": SUPA_KEY,
+    "Authorization": "Bearer " + SUPA_KEY,
+    "Accept": "application/json"
+  };
   if (method==="POST"||method==="PATCH") hdrs["Prefer"]="return=representation";
   let res;
   try {
-    res = await fetch(url,{method,headers:hdrs,body:body?JSON.stringify(body):undefined});
+    res = await fetch(url, {
+      method,
+      headers: hdrs,
+      body: body ? JSON.stringify(body) : undefined,
+      mode: "cors",
+      credentials: "omit"
+    });
   } catch(networkErr) {
-    throw new Error("Network/CORS: "+networkErr.message);
+    throw new Error("Network/CORS: " + networkErr.message);
   }
   if (!res.ok) { const e=await res.text(); throw new Error(table+" "+res.status+": "+e.slice(0,80)); }
   if (res.status===204||method==="DELETE") return null;
@@ -46,22 +57,13 @@ function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
 
 
 
-// STEPS: update via sync session. todayIdx = 0-based index of today in the week.
-const STEPS_DATA = {
-  week: [{d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},{d:"Thu",s:13717},{d:"Fri",s:3719},{d:"Sat",s:3753}],
-  todayIdx: 6, // 0=Sun, 1=Mon ... 6=Sat
-  syncDate: "2026-06-13"
-};
-const STEPS = STEPS_DATA.week.map((d,i)=>({...d,today:i===STEPS_DATA.todayIdx,future:false}));
-const SLEEP_WEEK = [
-  {d:"Sun 8",total:483,de:128,r:118,l:230,a:7},
-  {d:"Tue 9",total:439,de:118,r:116,l:200,a:5},
-  {d:"Wed 10",total:430,de:89,r:120,l:221,a:4},
-  {d:"Thu 11",total:408,de:102,r:93,l:203,a:9},
-  {d:"Fri 12",total:420,de:105,r:104,l:211,a:9}
-];
-const JUNE_WORKOUTS = {5:["yoga"],7:["yoga"],8:["gym","walk"],11:["gym","elliptical","run","walk"],12:["yoga"]};
-const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719,13:3753};
+
+// ── FITBIT SEED DATA ─────────────────────────────────────────────────────
+// Updated: 2026-06-14. Auto-upserts to Supabase fitness_cache on load.
+// Each sync session: only this block changes. App reads from Supabase state.
+const FITBIT_SEED = { "sleep": [  {"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},  {"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},  {"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},  {"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},  {"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},  {"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},  {"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},  {"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},  {"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},  {"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},  {"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},  {"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10} ], "naps": [  {"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9} ], "steps": [  {"date":"2026-06-03","steps":5473},  {"date":"2026-06-04","steps":5912},  {"date":"2026-06-05","steps":6964},  {"date":"2026-06-06","steps":6676},  {"date":"2026-06-07","steps":7361},  {"date":"2026-06-08","steps":11972},  {"date":"2026-06-09","steps":8461},  {"date":"2026-06-10","steps":10033},  {"date":"2026-06-11","steps":13717},  {"date":"2026-06-12","steps":3719},  {"date":"2026-06-13","steps":6574},  {"date":"2026-06-14","steps":595} ], "workouts": [  {"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null},  {"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},  {"date":"2026-06-08","type":"gym","duration_min":25,"avg_hr":68},  {"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},  {"date":"2026-06-11","type":"gym","duration_min":38,"avg_hr":94},  {"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},  {"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},  {"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},  {"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99} ], "synced_at":"2026-06-14T10:15:00+03:00"};
+
+
 
 // ── COLORS ────────────────────────────────────────────────────────────────
 const C = {
@@ -167,8 +169,73 @@ function ProteinDaysMetric({allFood, protTgt}) {
   );
 }
 
+function WeeklySleepMetric({fitbitData}) {
+  const now=new Date();
+  const dow=now.getDay();
+  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
+  weekStart.setHours(0,0,0,0);
+  const weekSleep=(fitbitData.sleep||[]).filter(s=>{
+    const d=new Date(s.date);return d>=weekStart&&d<=now;
+  });
+  if(!weekSleep.length) return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data this week</div></div>;
+  const avg=Math.round(weekSleep.reduce((s,r)=>s+r.total,0)/weekSleep.length);
+  const h=Math.floor(avg/60),m=avg%60;
+  const col=avg>=420?C.tm:avg>=360?C.am:C.red;
+  return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:C.t3}}>{weekSleep.length} night{weekSleep.length!==1?"s":""} this week</div></div>;
+}
+
+function WeeklyWorkoutsMetric({fitbitData}) {
+  const now=new Date();
+  const dow=now.getDay();
+  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
+  weekStart.setHours(0,0,0,0);
+  const weekWorkouts=(fitbitData.workouts||[]).filter(w=>{
+    const d=new Date(w.date);return d>=weekStart&&d<=now;
+  });
+  const types=[...new Set(weekWorkouts.map(w=>w.type))];
+  const sub=types.length?types.join(" · "):"rest week so far";
+  return <div style={s.mc}><div style={s.ml}>Workouts</div><div style={{...s.mv,color:weekWorkouts.length>0?C.tm:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.t3}}>{sub}</div></div>;
+}
+
+function WeeklyStepsMetric({fitbitData}) {
+  const now=new Date();
+  const dow=now.getDay();
+  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
+  let total=0;
+  for(let i=0;i<=dow;i++){
+    const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
+    const dateStr=d.toISOString().slice(0,10);
+    const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
+    if(rec) total+=rec.steps;
+  }
+  const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.t3}}>Sun–{dayNames[dow]} this week</div></div>;
+}
+
+function SleepTileMetric({fitbitData}) {
+  const yesterday = new Date();yesterday.setDate(yesterday.getDate()-1);
+  const yDate = yesterday.toISOString().slice(0,10);
+  // Sleep date = the morning date (when you woke up)
+  const rec = (fitbitData.sleep||[]).find(s=>s.date===new Date().toISOString().slice(0,10))
+           || (fitbitData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(!rec) return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data</div></div>;
+  const h=Math.floor(rec.total/60),m=rec.total%60;
+  const col=rec.total>=420?C.tm:rec.total>=360?C.am:C.red;
+  const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+  const sub=todayNap?`${rec.deep}m deep · +${todayNap.total}m nap`:`${rec.deep}m deep · ${rec.rem}m REM`;
+  return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:col}}>{sub}</div></div>;
+}
+
+function StepsMetric({fitbitData}) {
+  const today = new Date().toISOString().slice(0,10);
+  const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
+  const steps = todayRec ? todayRec.steps : 0;
+  const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
+  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={s.mv}>{steps.toLocaleString()}</div><div style={{...s.ms,color:steps>=8000?C.tm:C.t3}}>{sub}</div></div>;
+}
+
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
-function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0}) {
+function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
@@ -192,7 +259,16 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     let cycleCtx = "Cycle not tracked";
     if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
     const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
-    return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain to shin (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TODAY: ${todayStr}. Fitbit last synced Sat 13Jun: steps 1102 early morning, last night Fri12 sleep 7h deep105min(25%) REM104min(25%) bedtime01:15, readiness 89/100 Great. Week: Fri yoga91min/99bpm, Thu run23min/119bpm+gym38min+elliptical24min, Mon gym25min+walk60min, Sun yoga60min, ~57k steps. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+    return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain to shin (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TODAY: ${todayStr}. ${(()=>{
+      const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
+      const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+      const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
+      const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m sleep, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: no data";
+      const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
+      const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
+      const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
+      return `Fitbit (live from Supabase): ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}.`;
+    })()} Week: Fri yoga91min/99bpm, Thu run23min/119bpm+gym38min+elliptical24min, Mon gym25min+walk60min, Sun yoga60min, ~57k steps. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
   }
 
   async function callAI(prompt) {
@@ -262,7 +338,6 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
   useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
   useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
 
-  const maxStep = Math.max(...STEPS.map(d=>d.s),1);
 
   return (
     <div>
@@ -270,20 +345,20 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
         <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
-          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.tm}}>89</div>
+          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.tm}}>80</div>
           <div style={{flex:1}}>
-            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"89%",height:"100%",background:C.tm,borderRadius:4}}/></div>
-            <div style={{fontSize:12,fontWeight:500,color:C.tm}}>Great</div>
+            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"80%",height:"100%",background:C.tm,borderRadius:4}}/></div>
+            <div style={{fontSize:12,fontWeight:500,color:C.tm}}>Good</div>
           </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
           {[
-            ["Sleep duration (7h)","25/30",C.tm],
-            ["Deep sleep (105min, 25%)","20/20",C.tm],
-            ["REM sleep (104min, 25%)","10/10",C.tm],
-            ["Training load (yoga day Fri)","18/20",C.tm],
-            ["Bedtime 01:15 (late)","5/10",C.am],
-            ["Protein hit yesterday","+8",C.tm],
+            ["Sleep duration (6h 42m)","22/30",C.am],
+            ["Deep sleep (92min, 23%)","20/20",C.tm],
+            ["REM sleep (96min, 24%)","10/10",C.tm],
+            ["Training load (rest day Sat)","20/20",C.tm],
+            ["Bedtime 01:16 (late)","5/10",C.am],
+            ["Protein yesterday","0",C.t3],
           ].map(([label,pts,col],i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
               <span style={{color:C.t2}}>{label}</span>
@@ -295,14 +370,14 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
             <span style={{fontWeight:600,color:C.teal}}>+3</span>
           </div>
         </div>
-        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Excellent night — deep 25% and REM 25%, both optimal. Late bedtime (01:15) cost 5 pts. Great shape today.</div>
+        <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>Rest day yesterday + deep/REM both solid. Main cost: sleep duration fell short (6h 42m) and another late bedtime (01:16). Full rest day today is well-timed for recovery.</div>
       </Card>
 
       <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Steps today" value="3,753" sub="and growing" subColor={C.t3}/>
-        <Metric label="Sleep last night" value="7h 0m" sub="105m deep · 104m REM" subColor={C.tm}/>
+        <StepsMetric fitbitData={fitbitData}/>
+        <SleepTileMetric fitbitData={fitbitData}/>
         <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={tp>=protTgt?C.tm:C.am}/>
         <CyclePhaseMetric cycleDates={cycleDates}/>
       </div>
@@ -322,22 +397,42 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
         {/* SLEEP LAST NIGHT */}
         <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Last night — Fri 12 Jun</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            <div><div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>7h 0m</div><div style={{fontSize:11,color:C.t3}}>bedtime 01:15</div></div>
-            <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>105m (25%)</span></div>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>104m (25%)</span></div>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#AFA9EC",fontWeight:500}}>Light</span><span>203m</span></div>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>9m</span></div>
-            </div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
+            Last night — {(()=>{const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];if(!r)return "—";const d=new Date(r.date);return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});})()}
           </div>
-          <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
-            <div style={{width:"25%",background:"#3C3489"}}/>
-            <div style={{width:"25%",background:"#7F77DD"}}/>
-            <div style={{width:"48%",background:"#AFA9EC"}}/>
-            <div style={{width:"2%",background:"#D3D1C7"}}/>
-          </div>
+          {(()=>{
+            const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+            if(!r) return <div style={{color:C.t3,fontSize:13}}>No sleep data</div>;
+            const h=Math.floor(r.total/60),m=r.total%60;
+            const tot=r.deep+r.rem+r.light+r.awake;
+            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+            return (<>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
+                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
+                </div>
+                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#AFA9EC",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
+                </div>
+              </div>
+              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
+                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#3C3489"}}/>
+                <div style={{width:Math.round(r.rem/tot*100)+"%",background:"#7F77DD"}}/>
+                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#AFA9EC"}}/>
+                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
+              </div>
+              {todayNap&&(
+                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:C.teal,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
+                  <span style={{color:C.teal}}>{todayNap.total}min · {todayNap.deep}m deep</span>
+                </div>
+              )}
+            </>);
+          })()}
         </Card>
 
         {/* PROTEIN */}
@@ -359,9 +454,9 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
       <SecLabel>This week — Sun 7 Jun – Sat 13 Jun</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Total steps" value="57,080" sub="Sun–Fri so far" subColor={C.tm}/>
-        <Metric label="Workouts" value="7" sub="2 gym · 2 yoga · 1 run · 1 walk · 1 elliptical" subColor={C.tm}/>
-        <Metric label="Avg sleep" value="7h 16m" sub="5 nights synced" subColor={C.t3}/>
+        <WeeklyStepsMetric fitbitData={fitbitData}/>
+        <Metric label="Workouts" value="0" sub="2 gym · 2 yoga · 1 run · 1 walk · 1 elliptical" subColor={C.tm}/>
+        <WeeklySleepMetric fitbitData={fitbitData}/>
         <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
@@ -382,61 +477,84 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
         <Card style={{marginBottom:0}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
           <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
-            {STEPS.map((d,i)=>{
-              const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
-              const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
-              const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
-              return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
-                <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
-                <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
-              </div>;
-            })}
+            {(()=>{
+              // Get current week's steps from fitbitData
+              const now=new Date();
+              const dow=now.getDay(); // 0=Sun
+              const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
+              const dayLabels=["S","M","T","W","T","F","S"];
+              const weekSteps=dayLabels.map((_,i)=>{
+                const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
+                const dateStr=d.toISOString().slice(0,10);
+                const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
+                const isFuture=d>now;
+                const isToday=dateStr===now.toISOString().slice(0,10);
+                return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
+              });
+              const maxStep=Math.max(...weekSteps.map(d=>d.s),1);
+              return weekSteps.map((d,i)=>{
+                const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
+                const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
+                const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
+                return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
+                  <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
+                  <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
+                </div>;
+              });
+            })()}
           </div>
         </Card>
         <Card style={{marginBottom:0}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep this week</div>
-          {SLEEP_WEEK.map((d,i)=>{
-            const tot=d.de+d.r+d.l+d.a;
-            const h=Math.floor(d.total/60),m=d.total%60;
-            return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
-              <span style={{width:38,color:C.t3,fontSize:10}}>{d.d}</span>
-              <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
-                <div style={{width:Math.round(d.de/tot*100)+"%",background:"#3C3489"}}/>
-                <div style={{width:Math.round(d.r/tot*100)+"%",background:"#7F77DD"}}/>
-                <div style={{width:Math.round(d.l/tot*100)+"%",background:"#AFA9EC"}}/>
-              </div>
-              <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
-            </div>;
-          })}
+          {(()=>{
+            // Last 7 sleep records from fitbitData
+            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7).reverse();
+            return recs.map((d,i)=>{
+              const tot=d.deep+d.rem+d.light+d.awake;
+              const h=Math.floor(d.total/60),m=d.total%60;
+              const dateObj=new Date(d.date);
+              const lbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+              return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+                <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
+                <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
+                  <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#3C3489"}}/>
+                  <div style={{width:Math.round(d.rem/tot*100)+"%",background:"#7F77DD"}}/>
+                  <div style={{width:Math.round(d.light/tot*100)+"%",background:"#AFA9EC"}}/>
+                </div>
+                <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
+              </div>;
+            });
+          })()}
         </Card>
       </div>
 
       {/* WORKOUTS LIST */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts this week</div>
-        {[
-          {label:"Yoga",bg:C.orl,col:C.or,day:"Fri 12 Jun",detail:"91 min · 99bpm · 23 AZM · 11:20–12:51"},
-          {label:"Run",bg:C.tl,col:C.teal,day:"Thu 11 Jun",detail:"23 min · 119bpm · 913m · 16 AZM"},
-          {label:"Gym",bg:C.pl,col:C.pu,day:"Thu 11 Jun",detail:"38 min · 94bpm · 10:08–10:46"},
-          {label:"Elliptical",bg:C.tl,col:C.teal,day:"Thu 11 Jun",detail:"24 min · 109bpm · 13 AZM"},
-          {label:"Walk",bg:C.tl,col:C.teal,day:"Mon 8 Jun",detail:"60 min · 3.1km · 99bpm · 31 AZM"},
-          {label:"Gym",bg:C.pl,col:C.pu,day:"Mon 8 Jun",detail:"25 min · 68bpm"},
-          {label:"Yoga",bg:C.orl,col:C.or,day:"Sun 7 Jun",detail:"60 min · 101bpm · 31 AZM"},
-        ].map((w,i)=>(
-          <div key={i} style={{...s.wi,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
-            <div><span style={{...s.badge(w.bg,w.col)}}>{w.label}</span><span style={{fontWeight:500}}>{w.day}</span></div>
-            <div style={{fontSize:12,color:C.t2}}>{w.detail}</div>
-          </div>
-        ))}
+        {(()=>{
+          const typeStyle={gym:[C.pl,C.pu],yoga:[C.orl,C.or],run:[C.tl,C.teal],elliptical:[C.tl,C.teal],walk:[C.tl,C.teal],pilates:[C.orl,C.or]};
+          const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
+          if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
+          return recent.map((w,i)=>{
+            const [bg,col]=typeStyle[w.type]||[C.s2,C.t2];
+            const dateObj=new Date(w.date);
+            const dayLbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+            const detail=[w.duration_min?w.duration_min+" min":null,w.avg_hr?w.avg_hr+"bpm":null].filter(Boolean).join(" · ")||"";
+            return <div key={i} style={{...s.wi,borderBottom:i<recent.length-1?`.5px solid ${C.bd}`:"none"}}>
+              <div><span style={{...s.badge(bg,col)}}>{w.type}</span><span style={{fontWeight:500}}>{dayLbl}</span></div>
+              <div style={{fontSize:12,color:C.t2}}>{detail}</div>
+            </div>;
+          });
+        })()}
       </Card>
 
       <hr style={s.hr}/>
       <SecLabel>Month — June 2026</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Active days" value="7" sub="target: 20/month" subColor={C.tm}/>
-        <Metric label="Gym sessions" value="2" sub="target: 12/month" subColor={C.t3}/>
+        <Metric label="Active days" value="0" sub="target: 20/month" subColor={C.tm}/>
+        <Metric label="Gym sessions" value="2" sub="target: 12/month" subColor={C.am}/>
         <Metric label="Movement sessions" value="3" sub="yoga & movement · target: 5" subColor={C.tm}/>
         <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
       </div>
@@ -444,7 +562,7 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
       {/* HEATMAP */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
-        <HeatmapGrid allFood={allFood} protTgt={protTgt}/>
+        <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
@@ -460,8 +578,8 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week — June 2026</div>
         {[
           {label:"Week 1",range:"Mon 1 – Sat 6 Jun",detail:"1 active day · yoga Fri 5 Jun (96min ★)",current:false},
-          {label:"Week 2 ← current",range:"Sun 7 – Sat 13 Jun",detail:"6 active days · 2 gym · 2 yoga · 1 run · 1 elliptical",current:true},
-          {label:"Week 3",range:"Sun 14 – Sat 20 Jun",detail:"",current:false},
+          {label:"Week 2 (complete)",range:"Sun 7 – Sat 13 Jun",detail:"57,030 steps · 2 gym · 2 yoga · 1 run · 1 elliptical",current:false},
+          {label:"Week 3 ← current",range:"Sun 14 – Sat 20 Jun",detail:"Day 1 · 595 steps so far",current:true},
           {label:"Week 4",range:"Sun 21 – Sat 27 Jun",detail:"",current:false},
         ].map((w,i)=>(
           <div key={i} style={{...s.wi,borderBottom:i<3?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
@@ -474,25 +592,44 @@ SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${pro
   );
 }
 
-function HeatmapGrid({allFood={}, protTgt=100}) {
-  const today = new Date().getDate();
-  const firstDay = new Date(2026,5,1).getDay(); // June 2026 starts on Monday=1
-  const days = ["S","M","T","W","T","F","S"];
-  const cells = [];
-  // day labels
+function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}}) {
+  const today = new Date();
+  const todayDay = today.getDate();
+  const firstDay = new Date(today.getFullYear(),today.getMonth(),1).getDay();
+  const daysInMonth = new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+  const month = today.getMonth()+1;
+  const year = today.getFullYear();
+  const pad = n=>String(n).padStart(2,"0");
+
+  // Build lookup maps from fitbitData
+  const stepsMap = {};
+  (fitbitData.steps||[]).forEach(s=>{stepsMap[s.date]=s.steps;});
+  const workoutMap = {};
+  (fitbitData.workouts||[]).forEach(w=>{
+    const k=w.date;
+    if(!workoutMap[k]) workoutMap[k]=[];
+    workoutMap[k].push(w.type);
+  });
+
+  const days=["S","M","T","W","T","F","S"];
+  const cells=[];
   days.forEach((d,i)=>cells.push(<div key={"lbl"+i} style={{fontSize:9,color:C.t3,textAlign:"center"}}>{d}</div>));
-  // padding
   for(let i=0;i<firstDay;i++) cells.push(<div key={"pad"+i}/>);
-  // days
-  for(let d=1;d<=30;d++){
-    const w=JUNE_WORKOUTS[d]||[];
-    const steps=JUNE_STEPS[d]||0;
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${year}-${pad(month)}-${pad(d)}`;
+    const w=workoutMap[dateStr]||[];
+    const steps=stepsMap[dateStr]||0;
     const isActive=steps>=8000||w.length>0;
-    const hasGym=w.includes("gym"),hasYoga=w.includes("yoga"),hasCardio=w.includes("walk")||w.includes("elliptical")||w.includes("run");
+    const hasGym=w.includes("gym");
+    const hasYoga=w.includes("yoga")||w.includes("pilates");
+    const hasCardio=w.includes("walk")||w.includes("elliptical")||w.includes("run");
+    const dayMeals=allFood[dateStr]||[];
+    const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);
+    const protHit=dayProt>=protTgt;
     cells.push(
-      <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===today?{outline:`2px solid ${C.tx}`}:{})}}>
+      <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===todayDay?{outline:`2px solid ${C.tx}`}:{})}}>
         {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
-        {(()=>{const dateStr=`2026-06-${String(d).padStart(2,"0")}`;const dayMeals=allFood[dateStr]||[];const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);return dayProt>=protTgt?<span style={{fontSize:7,fontWeight:700,color:C.tm,position:"absolute",top:2,left:2}}>P✓</span>:null;})()}
+        {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.tm,position:"absolute",top:2,left:2}}>P✓</span>}
         {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
         {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
         {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{w.includes("run")?"run":"cardio"}</div>}
@@ -1164,13 +1301,14 @@ function App() {
   const [logEntries, setLogEntries] = useState([]);
   const [cycleDates, setCycleDates] = useState([]);
   const [suppState, setSuppState] = useState({});
+  const [fitbitData, setFitbitData] = useState({sleep:[],steps:[],workouts:[]});
   const [showSett, setShowSett] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [syncStatus, setSyncStatus] = useState("Updated Sat 13 Jun 2026, 09:40");
+  const [syncStatus, setSyncStatus] = useState("Updated Sun 14 Jun 2026, 10:15");
   const [settKey, setSettKey] = useState(apiKey);
   const [settProt, setSettProt] = useState(protTgt);
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
@@ -1188,11 +1326,29 @@ function App() {
       }catch(e){}
       // Load data
       try{
-        const [food,log,cyc,supp]=await Promise.all([
+        // Upsert FITBIT_SEED to Supabase using merge resolution
+        try {
+          const upsertHdrs = {
+            "Content-Type":"application/json",
+            "apikey":SUPA_KEY,
+            "Authorization":"Bearer "+SUPA_KEY,
+            "Prefer":"resolution=merge-duplicates,return=minimal"
+          };
+          await fetch(SUPA_URL+"/rest/v1/fitness_cache",{
+            method:"POST",
+            headers:upsertHdrs,
+            mode:"cors",
+            credentials:"omit",
+            body:JSON.stringify({user_id:UID,data:FITBIT_SEED,synced_at:FITBIT_SEED.synced_at})
+          });
+        } catch(e){ console.log("Seed upsert:",e.message); }
+
+        const [food,log,cyc,supp,fitbit]=await Promise.all([
           supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc"),
           supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100"),
           supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc"),
           supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
+          supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
         ]);
         const foodMap={};
         (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
@@ -1203,6 +1359,12 @@ function App() {
         localStorage.setItem("jlog_backup",JSON.stringify(logData));
         setCycleDates((cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed})));
         const ss={};(supp||[]).forEach(r=>{if(r.taken)ss[r.supplement]=true;});setSuppState(ss);
+        // Load fitbit data from Supabase (falls back to seed if not loaded)
+        if(fitbit&&fitbit[0]&&fitbit[0].data){
+          setFitbitData(fitbit[0].data);
+        } else {
+          setFitbitData(FITBIT_SEED);
+        }
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
       }catch(e){
         const msg = e.message||String(e);
@@ -1211,6 +1373,8 @@ function App() {
         // Fall back to localStorage backup
         const backup=localStorage.getItem("jlog_backup");
         if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
+        // Use seed data as fallback
+        setFitbitData(FITBIT_SEED);
       }
     }
     load();
@@ -1276,7 +1440,7 @@ function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
-      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick}/>}
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData}/>}
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
