@@ -46,10 +46,13 @@ function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
 
 
 
-const STEPS = [
-  {d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},
-  {d:"Thu",s:13717},{d:"Fri",s:3719},{d:"Sat",s:1102,today:true}
-];
+// STEPS: update via sync session. todayIdx = 0-based index of today in the week.
+const STEPS_DATA = {
+  week: [{d:"Sun",s:7361},{d:"Mon",s:11972},{d:"Tue",s:8461},{d:"Wed",s:10033},{d:"Thu",s:13717},{d:"Fri",s:3719},{d:"Sat",s:3753}],
+  todayIdx: 6, // 0=Sun, 1=Mon ... 6=Sat
+  syncDate: "2026-06-13"
+};
+const STEPS = STEPS_DATA.week.map((d,i)=>({...d,today:i===STEPS_DATA.todayIdx,future:false}));
 const SLEEP_WEEK = [
   {d:"Sun 8",total:483,de:128,r:118,l:230,a:7},
   {d:"Tue 9",total:439,de:118,r:116,l:200,a:5},
@@ -58,7 +61,7 @@ const SLEEP_WEEK = [
   {d:"Fri 12",total:420,de:105,r:104,l:211,a:9}
 ];
 const JUNE_WORKOUTS = {5:["yoga"],7:["yoga"],8:["gym","walk"],11:["gym","elliptical","run","walk"],12:["yoga"]};
-const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719,13:1102};
+const JUNE_STEPS = {3:5473,4:5912,5:6964,6:6676,7:7361,8:11972,9:8461,10:10033,11:13717,12:3719,13:3753};
 
 // ── COLORS ────────────────────────────────────────────────────────────────
 const C = {
@@ -240,7 +243,10 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     if (!apiKey) return;
     setLoading(l=>({...l,[type]:true}));
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}. Rules: (1) Each section starts with emoji + CAPS LABEL on its own line. (2) First line = ACTION in bold using **text**. (3) Second line = brief why/context. (4) Sections: ACTIVITY, NUTRITION, RECOVERY. CRITICAL: if health log has any Pain or Post-workout entries from today or yesterday, show FLAG section first and make it the most prominent section - reference the specific pain described. (5) Be specific to today's actual data - reference real numbers including current protein logged. (6) Max 2 lines per section. No filler phrases. (7) If protein is already partially hit, acknowledge what's been eaten and what remains.`
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. 
+CRITICAL RULE: Scan the health log for any entries tagged [pain] or [postworkout] from TODAY. If found, you MUST: (a) show a 🚩 FLAG section as the VERY FIRST section, (b) recommend rest or very light activity only - NEVER recommend a workout session if pain is logged today, (c) reference the specific pain described in the log entry.
+FORMAT: Each section = emoji + CAPS LABEL on its own line. First line of section = **bold action**. Second line = brief why. Sections in order: FLAG (if pain today - mandatory first), ACTIVITY, NUTRITION, RECOVERY.
+SPECIFICS: Reference real numbers. Current protein logged: ${liveProt}g of ${protTgt}g target. If protein partially hit, say what remains. Max 2 lines per section. No filler.`
       : `Weekly coaching review. Rules: (1) Each section starts with emoji + CAPS LABEL. (2) First line = the ACTION or KEY INSIGHT in bold using **text**. (3) One sentence of context. (4) Sections: WELL DONE, MISSED, NEXT WEEK PRIORITY, FLAG (only if relevant). (5) Tight and actionable - no padding. Max 2 lines per section.`;
     try {
       const txt = await callAI(p);
@@ -496,8 +502,41 @@ function HeatmapGrid({allFood={}, protTgt=100}) {
   return <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>{cells}</div>;
 }
 
+// ── SUPPLEMENT CHECKLIST COMPONENT ───────────────────────────────────────
+const SUPPS = [
+  {id:"creatine",name:"Creatine",time:"Morning with food"},
+  {id:"omega3",name:"Omega-3",time:"With meal"},
+  {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
+  {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
+  {id:"collagen",name:"Collagen",time:"With vitamin C"},
+  {id:"multi",name:"Multivitamin",time:"With meal"},
+];
+
+function SupplementChecklist({suppState={}, setSupp}) {
+  const done = SUPPS.filter(s=>suppState[s.id]).length;
+  return (
+    <Card style={{marginTop:8}}>
+      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
+        Supplements today — {done}/{SUPPS.length} taken
+        {done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+        {SUPPS.map(sup=>{
+          const checked=!!suppState[sup.id];
+          return (
+            <div key={sup.id} onClick={()=>setSupp&&setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.s2,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"8px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}>
+              <div style={{width:16,height:16,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.t3}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,flexShrink:0}}>{checked?"✓":""}</div>
+              <div><div style={{fontSize:11,fontWeight:500,lineHeight:1.2}}>{sup.name}</div><div style={{fontSize:9,color:C.t3}}>{sup.time}</div></div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -521,30 +560,120 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged}) {
   function prevDay(){const d=new Date(foodDate);d.setDate(d.getDate()-1);setFoodDate(d.toISOString().slice(0,10));}
   function nextDay(){const d=new Date(foodDate);d.setDate(d.getDate()+1);if(d.toISOString().slice(0,10)<=tkey())setFoodDate(d.toISOString().slice(0,10));}
 
+  // Search Open Food Facts - returns best match or null
+  async function searchOpenFoodFacts(query) {
+    try {
+      // Try Israeli database first, then global
+      const urls = [
+        `https://il-en.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,quantity`,
+        `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,quantity`
+      ];
+      for(const url of urls) {
+        const res = await fetch(url);
+        if(!res.ok) continue;
+        const data = await res.json();
+        const products = data.products||[];
+        // Find first product with nutrition data
+        const match = products.find(p => {
+          const n = p.nutriments||{};
+          return (n["energy-kcal_100g"]||n["energy_100g"]) && n["proteins_100g"]!==undefined;
+        });
+        if(match) {
+          const n = match.nutriments||{};
+          const kcal100 = n["energy-kcal_100g"] || Math.round((n["energy_100g"]||0)/4.184);
+          const prot100 = n["proteins_100g"]||0;
+          const carb100 = n["carbohydrates_100g"]||0;
+          const fat100  = n["fat_100g"]||0;
+          // Parse quantity from user input (e.g. "200g", "1 cup 240ml", "5 spoons")
+          // Ask Claude to extract the serving size
+          return {
+            name: match.product_name||(match.brands+" product"),
+            brand: match.brands||"",
+            kcal100, prot100, carb100, fat100,
+            qty: match.quantity||"",
+            verified: true
+          };
+        }
+      }
+    } catch(e) { console.log("OFF error:", e.message); }
+    return null;
+  }
+
+  // Use Claude to parse serving size and calculate macros from per-100g data
+  async function calcFromOFF(offData, userInput) {
+    const prompt = `User logged: "${userInput}". The product is: ${offData.name}${offData.brand?" by "+offData.brand:""}. Per 100g: ${offData.prot100}g protein, ${offData.carb100}g carbs, ${offData.fat100}g fat, ${offData.kcal100} kcal. Extract the serving size from the user input and calculate total macros for that serving. Return ONLY valid JSON: {"n":"${offData.name}","det":"quantity description","p":0,"c":0,"f":0,"k":0,"serving_g":0}. All numbers integers.`;
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
+    });
+    const d = await res.json();
+    if(d.error) throw new Error(d.error.message);
+    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
+  }
+
+  // Claude fallback for foods not in Open Food Facts
+  async function calcFromClaude(input) {
+    const prompt = `Return ONLY valid JSON, no other text: {"n":"food name in English","det":"brief description with quantity","p":25,"c":30,"f":12,"k":330}. All numbers integers. Preserve exact quantity (e.g. 5 spoons, 150g). Translate non-English to English but keep quantities. Be as accurate as possible for the specific brand/product if mentioned. Input: ${input}`;
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
+    });
+    const d = await res.json();
+    if(d.error) throw new Error(d.error.message);
+    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
+  }
+
   async function analyseText() {
     if(!txtInput.trim()||!apiKey) return;
-    setAnalysing(true);setAiMsg("Analysing...");
+    setAnalysing(true);setAiMsg("Searching food database...");
     try {
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:300,messages:[{role:"user",content:`Return ONLY valid JSON, no other text: {"n":"food name in English","det":"brief description with quantity","p":25,"c":30,"f":12,"k":330}. All numbers integers. Preserve exact quantity (e.g. 5 spoons, 150g). Translate non-English to English. Input: ${txtInput}`}]})
-      });
-      const d=await res.json();
-      if(d.error) throw new Error(d.error.message);
-      const raw=d.content[0].text.trim();
-      const entry=JSON.parse(raw.replace(/```json|```/g,"").trim());
-      entry.time=mealTime;
+      let entry = null;
+      let source = "estimated";
+
+      // Step 1: Try Open Food Facts
+      setAiMsg("Checking Open Food Facts...");
+      const offMatch = await searchOpenFoodFacts(txtInput);
+      if(offMatch) {
+        setAiMsg("Found in database — calculating macros...");
+        try {
+          entry = await calcFromOFF(offMatch, txtInput);
+          entry.verified = true;
+          source = "verified";
+        } catch(e) {
+          // OFF found product but Claude couldn't parse serving - fall back
+          entry = null;
+        }
+      }
+
+      // Step 2: Fall back to Claude estimation
+      if(!entry) {
+        setAiMsg("Not in database — estimating macros...");
+        entry = await calcFromClaude(txtInput);
+        entry.verified = false;
+        source = "estimated";
+      }
+
+      entry.time = mealTime;
+      entry.source = source;
+
       // Save to Supabase
-      const targetDate=mealDate||foodDate;
+      const targetDate = mealDate||foodDate;
       try {
-        const rows=await supa("POST","food_log",{user_id:UID,log_date:targetDate,meal_time:mealTime,name:entry.n,detail:entry.det||null,protein:entry.p,carbs:entry.c,fat:entry.f,kcal:entry.k});
+        const rows = await supa("POST","food_log",{
+          user_id:UID,log_date:targetDate,meal_time:mealTime,
+          name:entry.n,detail:entry.det||null,
+          protein:entry.p,carbs:entry.c,fat:entry.f,kcal:entry.k,
+          source:source
+        });
         if(rows&&rows[0]) entry.dbid=rows[0].id;
       } catch(e) {}
+
       setAllFood(prev=>({...prev,[targetDate]:[...(prev[targetDate]||[]),entry]}));
-      setAiMsg(entry.n+" logged ✓");
+      const badge = source==="verified"?"✓ verified from label":"~ estimated";
+      setAiMsg(entry.n+" logged ("+badge+")");
       setTxtInput("");setShowTxt(false);
-      // Auto-refresh AI coach with updated nutrition
       if(onFoodLogged) onFoodLogged();
     } catch(e){setAiMsg("Error: "+e.message);}
     setAnalysing(false);
@@ -615,19 +744,33 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged}) {
       {food.length===0
         ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No meals logged{isToday?"":" for this day"}</strong>{isToday?"Tap Type to log your first meal.":""}</div>
         : food.map((e,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,marginBottom:6}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:500}}>{e.n}</div>
-              <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.det}</div>
-              {e.time&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>{e.time}</div>}
+          <div key={i} style={{background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,marginBottom:6,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"10px 14px"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:13,fontWeight:500}}>{e.n}</span>
+                  {e.source==="verified"
+                    ?<span style={{fontSize:9,fontWeight:600,color:C.tm,background:C.tl,padding:"1px 5px",borderRadius:10}}>✓ label</span>
+                    :e.source==="estimated"
+                    ?<span style={{fontSize:9,color:C.t3,background:C.s2,padding:"1px 5px",borderRadius:10}}>~ est.</span>
+                    :null}
+                </div>
+                <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.det}</div>
+                {e.time&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>{e.time}</div>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,marginRight:8}}>
+                <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{Math.round(e.k||0)} kcal</div>
+                <div style={{display:"flex",gap:4}}>
+                  <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>{Math.round(e.p||0)}g P</span>
+                  <span style={{...s.pill(C.al,C.am),fontSize:10}}>{Math.round(e.c||0)}g C</span>
+                  <span style={{...s.pill(C.pl,C.pu),fontSize:10}}>{Math.round(e.f||0)}g F</span>
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0)});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
+                <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
+              </div>
             </div>
-            <div style={{display:"flex",gap:6,fontSize:11,marginRight:8}}>
-              <span style={{...s.pill(C.tl,C.teal)}}>{Math.round(e.p||0)}g P</span>
-              <span style={{...s.pill(C.al,C.am)}}>{Math.round(e.c||0)}g C</span>
-              <span style={{...s.pill(C.pl,C.pu)}}>{Math.round(e.f||0)}g F</span>
-            </div>
-            <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0)});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11,marginRight:4}}>edit</button>
-            <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
           </div>
         ))
       }
@@ -650,6 +793,9 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged}) {
           </div>
         </div>
       )}
+
+      {/* SUPPLEMENTS CHECKLIST */}
+      <SupplementChecklist suppState={suppState} setSupp={setSupp}/>
 
       {/* EDIT MODAL */}
       {editIdx!==null&&(
@@ -944,7 +1090,8 @@ function TabProfile({suppState, setSupp}) {
 
       <SecLabel>Nutrition &amp; Supplements</SecLabel>
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplement checklist</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplements</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Stack below for reference.</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
         {SUPPS.map(sup=>{
           const checked=!!suppState[sup.id];
@@ -1130,7 +1277,7 @@ function App() {
       </div>
 
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp}/>}
