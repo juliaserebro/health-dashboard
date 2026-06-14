@@ -410,7 +410,20 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
         </div>
         {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
          : aiToday ? formatAI(aiToday)
-         : apiKey ? <button onClick={()=>genAI("today")} style={{fontSize:12,color:C.pu,background:C.pl,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}}>Generate today's briefing</button>
+         : apiKey ? <div>
+           <div style={{fontSize:12,color:C.t2,marginBottom:8}}>Ready to generate. Tap refresh above or the button below.</div>
+           <button onClick={async()=>{
+             try{
+               setLoading(l=>({...l,today:true}));
+               const ctx=buildCtx();
+               const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,messages:[{role:"user",content:ctx+"\n\nGenerate a brief coaching note for today. FORMAT: emoji + CAPS LABEL on own line, then bold **action**, then one sentence why. Sections: ACTIVITY, NUTRITION, RECOVERY. Max 2 lines each."}]})});
+               const d=await res.json();
+               if(d.error)throw new Error(d.error.message);
+               setAiToday(d.content[0].text.trim());
+             }catch(err){setAiToday("Error: "+err.message);}
+             finally{setLoading(l=>({...l,today:false}));}
+           }} style={{fontSize:12,color:C.pu,background:C.pl,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}}>Generate today&#39;s briefing</button>
+         </div>
          : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
       </div>
 
