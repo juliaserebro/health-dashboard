@@ -736,126 +736,40 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   function prevDay(){const d=new Date(foodDate);d.setDate(d.getDate()-1);setFoodDate(d.toISOString().slice(0,10));}
   function nextDay(){const d=new Date(foodDate);d.setDate(d.getDate()+1);if(d.toISOString().slice(0,10)<=tkey())setFoodDate(d.toISOString().slice(0,10));}
 
-  // Search Open Food Facts - returns best match or null
-  async function searchOpenFoodFacts(query) {
-    try {
-      // Try Israeli database first, then global
-      const urls = [
-        `https://il-en.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,quantity`,
-        `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,quantity`
-      ];
-      for(const url of urls) {
-        const res = await fetch(url);
-        if(!res.ok) continue;
-        const data = await res.json();
-        const products = data.products||[];
-        // Find first product with nutrition data
-        const match = products.find(p => {
-          const n = p.nutriments||{};
-          return (n["energy-kcal_100g"]||n["energy_100g"]) && n["proteins_100g"]!==undefined;
-        });
-        if(match) {
-          const n = match.nutriments||{};
-          const kcal100 = n["energy-kcal_100g"] || Math.round((n["energy_100g"]||0)/4.184);
-          const prot100 = n["proteins_100g"]||0;
-          const carb100 = n["carbohydrates_100g"]||0;
-          const fat100  = n["fat_100g"]||0;
-          // Parse quantity from user input (e.g. "200g", "1 cup 240ml", "5 spoons")
-          // Ask Claude to extract the serving size
-          return {
-            name: match.product_name||(match.brands+" product"),
-            brand: match.brands||"",
-            kcal100, prot100, carb100, fat100,
-            qty: match.quantity||"",
-            verified: true
-          };
-        }
-      }
-    } catch(e) { console.log("OFF error:", e.message); }
-    return null;
-  }
-
-  // Use Claude to parse serving size and calculate macros from per-100g data
-  async function calcFromOFF(offData, userInput) {
-    const prompt = `User logged: "${userInput}". The product is: ${offData.name}${offData.brand?" by "+offData.brand:""}. Per 100g: ${offData.prot100}g protein, ${offData.carb100}g carbs, ${offData.fat100}g fat, ${offData.kcal100} kcal. Extract the serving size from the user input and calculate total macros for that serving. Return ONLY valid JSON: {"n":"${offData.name}","det":"quantity description","p":0,"c":0,"f":0,"k":0,"serving_g":0}. All numbers integers.`;
-    const res = await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
-    });
-    const d = await res.json();
-    if(d.error) throw new Error(d.error.message);
-    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
-  }
-
-  // Claude fallback for foods not in Open Food Facts
-  async function calcFromClaude(input) {
-    const prompt = `Return ONLY valid JSON, no other text: {"n":"food name in English","det":"brief description with quantity","p":25,"c":30,"f":12,"k":330}. All numbers integers. Preserve exact quantity (e.g. 5 spoons, 150g). Translate non-English to English but keep quantities. Be as accurate as possible for the specific brand/product if mentioned. Input: ${input}`;
-    const res = await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
-    });
-    const d = await res.json();
-    if(d.error) throw new Error(d.error.message);
-    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
-  }
-
   async function analyseText() {
     if(!txtInput.trim()||!apiKey) return;
-    setAnalysing(true);setAiMsg("Searching food database...");
+    setAnalysing(true); setAiMsg("Analysing meal...");
     try {
-      let entry = null;
-      let source = "estimated";
-
-      // Step 1: Try Open Food Facts
-      setAiMsg("Checking Open Food Facts...");
-      const offMatch = await searchOpenFoodFacts(txtInput);
-      if(offMatch) {
-        setAiMsg("Found in database — calculating macros...");
-        try {
-          entry = await calcFromOFF(offMatch, txtInput);
-          entry.verified = true;
-          source = "verified";
-        } catch(e) {
-          // OFF found product but Claude couldn't parse serving - fall back
-          entry = null;
-        }
-      }
-
-      // Step 2: Fall back to Claude estimation
-      if(!entry) {
-        setAiMsg("Not in database — estimating macros...");
-        entry = await calcFromClaude(txtInput);
-        entry.verified = false;
-        source = "estimated";
-      }
-
+      const prompt = `Return ONLY valid JSON, no other text: {"n":"food name in English","det":"brief description with quantity","p":25,"c":30,"f":12,"k":330}. All numbers integers. Preserve exact quantity mentioned (e.g. 5 spoons, 150g, 2 eggs). Translate non-English to English but keep quantities. Be accurate for specific brands if mentioned. Input: ${txtInput}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body: JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
+      });
+      const d = await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const entry = JSON.parse(raw);
       entry.time = mealTime;
-      entry.source = source;
-
-      // Save to Supabase
-      const targetDate = mealDate||foodDate;
+      entry.source = "estimated";
+      const targetDate = mealDate || foodDate;
       try {
         const rows = await supa("POST","food_log",{
-          user_id:UID,log_date:targetDate,meal_time:mealTime,
-          name:entry.n,detail:entry.det||null,
-          protein:entry.p,carbs:entry.c,fat:entry.f,kcal:entry.k,
-          source:source
+          user_id:UID, log_date:targetDate, meal_time:mealTime,
+          name:entry.n, detail:entry.det||null,
+          protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
         });
-        if(rows&&rows[0]) entry.dbid=rows[0].id;
-      } catch(e) {}
-
+        if(rows&&rows[0]) entry.dbid = rows[0].id;
+      } catch(e) { console.log("Supabase save:", e.message); }
       setAllFood(prev=>{
-        const updated={...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
-        localStorage.setItem("jfood_backup",JSON.stringify(updated));
+        const updated = {...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
+        localStorage.setItem("jfood_backup", JSON.stringify(updated));
         return updated;
       });
-      const badge = source==="verified"?"✓ verified from label":"~ estimated";
-      setAiMsg(entry.n+" logged ("+badge+")");
-      setTxtInput("");setShowTxt(false);
+      setAiMsg(entry.n + " logged ✓");
+      setTxtInput(""); setShowTxt(false);
       if(onFoodLogged) onFoodLogged();
-    } catch(e){setAiMsg("Error: "+e.message);}
+    } catch(e) { setAiMsg("Error: " + e.message); }
     setAnalysing(false);
   }
 
@@ -929,11 +843,7 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span style={{fontSize:13,fontWeight:500}}>{e.n}</span>
-                  {e.source==="verified"
-                    ?<span style={{fontSize:9,fontWeight:600,color:C.tm,background:C.tl,padding:"1px 5px",borderRadius:10}}>✓ label</span>
-                    :e.source==="estimated"
-                    ?<span style={{fontSize:9,color:C.t3,background:C.s2,padding:"1px 5px",borderRadius:10}}>~ est.</span>
-                    :null}
+                  
                 </div>
                 <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.det}</div>
                 {e.time&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>{e.time}</div>}
@@ -1381,7 +1291,7 @@ function App() {
         } catch(e){ console.log("Seed upsert:",e.message); }
 
         const [food,log,cyc,supp,fitbit]=await Promise.all([
-          supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc"),
+          supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc&select=*"),
           supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100"),
           supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc"),
           supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
