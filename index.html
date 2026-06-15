@@ -325,6 +325,7 @@ async function ghGetSteps(startDate,endDate){
         "/users/me/dataTypes/steps/dataPoints",
         {filter:`steps.interval.civil_start_time >= "${dateStr}" AND steps.interval.civil_start_time < "${dateStr}T23:59:59"`,pageSize:100}
       );
+      if(dateStr===today&&data.dataPoints?.length>0) console.log("Steps today sample:",JSON.stringify(data.dataPoints[0]).slice(0,300));
       const total=(data.dataPoints||[]).reduce((s,pt)=>s+(pt.value?.steps?.count||0),0);
       if(total>0) results[dateStr]=total;
     }catch(e){if(e.message==="NOT_AUTHENTICATED")throw e;}
@@ -356,7 +357,9 @@ async function ghGetStepsRollup(startDate,endDate){
   }catch(e){
     // If rollup fails, try list endpoint with filter
     console.log("Rollup failed, trying list:", e.message);
-    return ghGetSteps(startDate,endDate);
+    const r = await ghGetSteps(startDate,endDate);
+    console.log("Steps list result:", JSON.stringify(r).slice(0,300));
+    return r;
   }
 }
 
@@ -433,6 +436,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
     try{
       const sleepPts=await ghGetSleep(twoWeeksAgo,today);
       console.log("Sleep points:",sleepPts.length);
+      if(sleepPts.length>0) console.log("Sleep sample:",JSON.stringify(sleepPts[0]).slice(0,500));
       const byDate={};
       sleepPts.forEach(pt=>{
         const parsed=parseSleepPoint(pt);
@@ -454,6 +458,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
     try{
       const exercises=await ghGetExercises(twoWeeksAgo,today);
       console.log("Exercises:",exercises.length);
+      if(exercises.length>0) console.log("Exercise sample:",JSON.stringify(exercises[0]).slice(0,500));
       const typeMap={WALK:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling",SWIMMING:"swimming"};
       exercises.forEach(ex=>{
         if(!ex.value) return;
@@ -591,7 +596,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   }
   async function genAIInner(type) {
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain] or [postworkout] entries from TODAY, show FLAG section FIRST and do NOT recommend workouts. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${liveProt}g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain] or [postworkout] entries from TODAY, show FLAG section FIRST and do NOT recommend workouts. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${(()=>{const tf=allFood[new Date().toISOString().slice(0,10)]||[];return Math.round(tf.reduce((s,e)=>s+(e.p||0),0));})()} g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
       : `Weekly coaching review. Israeli week = Sunday to Saturday. Week COMPLETED: Sun 7 Jun – Sat 13 Jun (57030 steps, 2 gym, 2 yoga, 1 run, 1 elliptical, avg sleep 7h). Current week started Sun 14 Jun. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. Sections: WELL DONE (last week), FOCUS THIS WEEK (targets), NEXT SESSION (what to do next). FORMAT: emoji + CAPS LABEL, bold **action**, one sentence why. Tight, no padding, max 2 lines each. Do not say next week - it already started.`
     try {
       const txt = await callAI(p);
