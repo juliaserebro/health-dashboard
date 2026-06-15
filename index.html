@@ -253,238 +253,244 @@ const GOOGLE_SCOPES = [
 ].join(" ");
 const GH_BASE = "https://health.googleapis.com/v4";
 
-function getGToken() {
-  try { return JSON.parse(localStorage.getItem("gtoken")||"null"); } catch { return null; }
-}
-function setGToken(tok) { localStorage.setItem("gtoken", JSON.stringify(tok)); }
-function clearGToken() { localStorage.removeItem("gtoken"); }
-function isGTokenValid(tok) {
+function getGToken(){try{return JSON.parse(localStorage.getItem("gtoken")||"null");}catch{return null;}}
+function setGToken(tok){localStorage.setItem("gtoken",JSON.stringify(tok));}
+function clearGToken(){localStorage.removeItem("gtoken");}
+function isGTokenValid(tok){
   if(!tok||!tok.access_token) return false;
-  return tok.expires_at > Date.now() + 60000;
+  return tok.expires_at > Date.now()+60000;
 }
 
-function startGoogleAuth() {
-  const params = new URLSearchParams({
-    client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: GOOGLE_REDIRECT_URI,
-    response_type: "token",
-    scope: GOOGLE_SCOPES,
-    include_granted_scopes: "true",
-    prompt: "consent"
+function startGoogleAuth(){
+  const params=new URLSearchParams({
+    client_id:GOOGLE_CLIENT_ID,
+    redirect_uri:GOOGLE_REDIRECT_URI,
+    response_type:"token",
+    scope:GOOGLE_SCOPES,
+    include_granted_scopes:"true",
+    prompt:"consent"
   });
-  window.location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
+  window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params.toString();
 }
 
-function handleGoogleCallback() {
-  const hash = window.location.hash.substring(1);
+function handleGoogleCallback(){
+  const hash=window.location.hash.substring(1);
   if(!hash) return false;
-  const params = new URLSearchParams(hash);
-  const access_token = params.get("access_token");
-  const expires_in = params.get("expires_in");
+  const params=new URLSearchParams(hash);
+  const access_token=params.get("access_token");
+  const expires_in=params.get("expires_in");
   if(!access_token) return false;
-  setGToken({access_token, expires_at: Date.now() + parseInt(expires_in||3600)*1000});
-  window.history.replaceState(null, "", window.location.pathname);
+  setGToken({access_token,expires_at:Date.now()+parseInt(expires_in||3600)*1000});
+  window.history.replaceState(null,"",window.location.pathname);
   return true;
 }
 
-// POST to Google Health API (dailyRollUp uses POST)
-async function ghPost(path, body) {
-  const tok = getGToken();
-  if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
-  const res = await fetch(GH_BASE + path, {
-    method: "POST",
-    headers: {"Authorization":"Bearer "+tok.access_token, "Content-Type":"application/json"},
-    body: JSON.stringify(body)
-  });
-  if(res.status===401){clearGToken();throw new Error("NOT_AUTHENTICATED");}
-  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,100));}
-  return res.json();
-}
-
 // GET from Google Health API
-async function ghGet(path) {
-  const tok = getGToken();
+async function ghGet(path,params={}){
+  const tok=getGToken();
   if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
-  const res = await fetch(GH_BASE + path, {
-    headers: {"Authorization":"Bearer "+tok.access_token}
+  const qs=Object.keys(params).length?"?"+new URLSearchParams(params).toString():"";
+  const res=await fetch(GH_BASE+path+qs,{
+    headers:{"Authorization":"Bearer "+tok.access_token}
   });
   if(res.status===401){clearGToken();throw new Error("NOT_AUTHENTICATED");}
-  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,100));}
+  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,150));}
   return res.json();
 }
 
-// Build CivilDateTime object from YYYY-MM-DD string
-function civilDate(dateStr) {
-  const [year,month,day] = dateStr.split("-").map(Number);
-  return {year, month, day, hours:0, minutes:0, seconds:0, nanos:0};
-}
-function civilDateEnd(dateStr) {
-  // End is exclusive - use next day
-  const d = new Date(dateStr);
-  d.setDate(d.getDate()+1);
-  const next = d.toISOString().slice(0,10);
-  const [year,month,day] = next.split("-").map(Number);
-  return {year, month, day, hours:0, minutes:0, seconds:0, nanos:0};
+// POST to Google Health API
+async function ghPost(path,body){
+  const tok=getGToken();
+  if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
+  const res=await fetch(GH_BASE+path,{
+    method:"POST",
+    headers:{"Authorization":"Bearer "+tok.access_token,"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(res.status===401){clearGToken();throw new Error("NOT_AUTHENTICATED");}
+  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,150));}
+  return res.json();
 }
 
-// Get daily steps for a date range
-async function ghGetStepsRange(startDate, endDate) {
-  const data = await ghPost("/users/me/dataTypes/steps/dataPoints:dailyRollUp", {
-    range: {start: civilDate(startDate), end: civilDateEnd(endDate)}
-  });
-  const results = {};
-  (data.rollupDataPoints||[]).forEach(pt => {
-    if(pt.steps && pt.civilStartTime) {
-      const d = pt.civilStartTime;
-      const dateStr = `${d.year}-${String(d.month).padStart(2,"0")}-${String(d.day).padStart(2,"0")}`;
-      results[dateStr] = pt.steps.count || 0;
-    }
-  });
+// Get steps for a date range using filter param
+async function ghGetSteps(startDate,endDate){
+  const results={};
+  // Use dailyRollUp with correct CivilDateTime format
+  // CivilDateTime is a string in ISO format YYYY-MM-DD
+  const d=new Date(startDate);
+  while(d.toISOString().slice(0,10)<=endDate){
+    const dateStr=d.toISOString().slice(0,10);
+    try{
+      const data=await ghGet(
+        "/users/me/dataTypes/steps/dataPoints",
+        {filter:`steps.interval.civil_start_time >= "${dateStr}" AND steps.interval.civil_start_time < "${dateStr}T23:59:59"`,pageSize:100}
+      );
+      const total=(data.dataPoints||[]).reduce((s,pt)=>s+(pt.value?.steps?.count||0),0);
+      if(total>0) results[dateStr]=total;
+    }catch(e){if(e.message==="NOT_AUTHENTICATED")throw e;}
+    d.setDate(d.getDate()+1);
+  }
   return results;
 }
 
-// Get daily sleep for a date range
-async function ghGetSleepRange(startDate, endDate) {
-  const data = await ghGet(`/users/me/dataTypes/sleep/dataPoints:dailyRollUp?` +
-    new URLSearchParams({
-      "range.start.year": startDate.slice(0,4),
-      "range.start.month": parseInt(startDate.slice(5,7)),
-      "range.start.day": parseInt(startDate.slice(8,10)),
-      "range.end.year": endDate.slice(0,4),
-      "range.end.month": parseInt(endDate.slice(5,7)),
-      "range.end.day": parseInt(endDate.slice(8,10)),
-    }).toString()
-  ).catch(()=>null);
-  // Actually sleep needs list endpoint
-  return [];
+// Get steps using dailyRollUp (more efficient for ranges)
+async function ghGetStepsRollup(startDate,endDate){
+  // dailyRollUp uses POST with range as civil date strings
+  const nextDay=(d)=>{const dt=new Date(d);dt.setDate(dt.getDate()+1);return dt.toISOString().slice(0,10);};
+  try{
+    const data=await ghPost("/users/me/dataTypes/steps/dataPoints:dailyRollUp",{
+      range:{
+        start:{year:parseInt(startDate.slice(0,4)),month:parseInt(startDate.slice(5,7)),day:parseInt(startDate.slice(8,10))},
+        end:{year:parseInt(nextDay(endDate).slice(0,4)),month:parseInt(nextDay(endDate).slice(5,7)),day:parseInt(nextDay(endDate).slice(8,10))}
+      }
+    });
+    const results={};
+    (data.rollupDataPoints||[]).forEach(pt=>{
+      if(pt.steps&&pt.civilStartTime){
+        const d=pt.civilStartTime;
+        const dateStr=`${d.year}-${String(d.month).padStart(2,"0")}-${String(d.day).padStart(2,"0")}`;
+        results[dateStr]=(pt.steps.count||0)+(pt.steps.stepSum||0);
+      }
+    });
+    return results;
+  }catch(e){
+    // If rollup fails, try list endpoint with filter
+    console.log("Rollup failed, trying list:", e.message);
+    return ghGetSteps(startDate,endDate);
+  }
 }
 
-// Get sleep via list endpoint
-async function ghGetSleepList(startDate, endDate) {
-  const startMs = new Date(startDate).getTime() * 1e6; // nanoseconds
-  const endMs = new Date(endDate).getTime() * 1e6;
-  const data = await ghGet(`/users/me/dataTypes/sleep/dataPoints?` +
-    new URLSearchParams({
-      startTimeNanos: String(startMs),
-      endTimeNanos: String(endMs),
-      pageSize: "50"
-    }).toString()
-  );
+// Get sleep sessions using correct filter format
+async function ghGetSleep(startDate,endDate){
+  // Sleep filter uses civil_end_time (wake date)
+  const data=await ghGet("/users/me/dataTypes/sleep/dataPoints",{
+    filter:`sleep.interval.civil_end_time >= "${startDate}" AND sleep.interval.civil_end_time < "${endDate}"`,
+    pageSize:25
+  });
   return data.dataPoints||[];
 }
 
-// Get exercises via list endpoint
-async function ghGetExercises(startDate, endDate) {
-  const startMs = new Date(startDate).getTime() * 1e6;
-  const endMs = new Date(endDate).getTime() * 1e6;
-  const data = await ghGet(`/users/me/dataTypes/exercise/dataPoints?` +
-    new URLSearchParams({
-      startTimeNanos: String(startMs),
-      endTimeNanos: String(endMs),
-      pageSize: "50"
-    }).toString()
-  ).catch(()=>({dataPoints:[]}));
+// Get exercises using correct filter format
+async function ghGetExercises(startDate,endDate){
+  const data=await ghGet("/users/me/dataTypes/exercise/dataPoints",{
+    filter:`exercise.interval.civil_start_time >= "${startDate}" AND exercise.interval.civil_start_time < "${endDate}"`,
+    pageSize:25
+  });
   return data.dataPoints||[];
 }
 
-// Full sync using correct API format
-async function ghFullSync(setSyncStatus, setFitbitData) {
+// Parse sleep data point into our format
+function parseSleepPoint(pt){
+  if(!pt.value) return null;
+  const v=pt.value;
+  // Get wake time for date
+  const wakeTime=pt.interval?.endTime||pt.interval?.civilEndTime;
+  let wakeDate=endDate;
+  if(pt.interval?.civilEndTime){
+    const ct=pt.interval.civilEndTime;
+    wakeDate=`${ct.year}-${String(ct.month).padStart(2,"0")}-${String(ct.day).padStart(2,"0")}`;
+  }
+  const totalMin=Math.round((v.duration||v.sleepDuration||0)/60);
+  if(totalMin<60) return null; // skip very short sessions
+  // Get bedtime
+  let bedtime="--:--";
+  if(pt.interval?.startTime){
+    bedtime=new Date(pt.interval.startTime).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Jerusalem"});
+  } else if(pt.interval?.civilStartTime){
+    const st=pt.interval.civilStartTime;
+    bedtime=`${String(st.hours||0).padStart(2,"0")}:${String(st.minutes||0).padStart(2,"0")}`;
+  }
+  return {
+    date:wakeDate,
+    bedtime,
+    total:totalMin,
+    deep:Math.round((v.deepSleepDuration||0)/60),
+    rem:Math.round((v.remSleepDuration||0)/60),
+    light:Math.round((v.lightSleepDuration||v.lightNremSleepDuration||0)/60),
+    awake:Math.round((v.awakeDuration||0)/60),
+  };
+}
+
+// Full sync
+async function ghFullSync(setSyncStatus,setFitbitData){
   setSyncStatus("Syncing from Google Health...");
-  try {
-    const now = new Date();
-    const today = now.toISOString().slice(0,10);
-    const twoWeeksAgo = new Date(now.getTime()-14*864e5).toISOString().slice(0,10);
+  try{
+    const now=new Date();
+    const today=now.toISOString().slice(0,10);
+    const twoWeeksAgo=new Date(now.getTime()-14*864e5).toISOString().slice(0,10);
 
-    // Steps - daily rollup for 14 days
-    let stepsMap = {};
-    try {
-      stepsMap = await ghGetStepsRange(twoWeeksAgo, today);
-    } catch(e) {
-      if(e.message==="NOT_AUTHENTICATED") throw e;
-      console.log("Steps error:", e.message);
-    }
-    const stepsArr = Object.entries(stepsMap)
-      .map(([date,steps])=>({date,steps}))
-      .filter(s=>s.steps>0)
-      .sort((a,b)=>a.date.localeCompare(b.date));
+    // Steps
+    let stepsArr=[];
+    try{
+      const stepsMap=await ghGetStepsRollup(twoWeeksAgo,today);
+      stepsArr=Object.entries(stepsMap).map(([date,steps])=>({date,steps})).filter(s=>s.steps>0).sort((a,b)=>a.date.localeCompare(b.date));
+      console.log("Steps fetched:",stepsArr.length,"days");
+    }catch(e){if(e.message==="NOT_AUTHENTICATED")throw e;console.log("Steps error:",e.message);}
 
-    // Sleep - list endpoint
-    const sleepArr = [];
-    try {
-      const sleepPts = await ghGetSleepList(twoWeeksAgo, today);
-      // Group by wake date, find main sleep sessions
-      const byDate = {};
-      sleepPts.forEach(pt => {
-        if(!pt.value) return;
-        const wakeMs = parseInt(pt.endTimeNanos)/1e6;
-        const wakeDate = new Date(wakeMs).toISOString().slice(0,10);
-        const totalMin = Math.round((pt.value.duration||0)/60);
-        if(totalMin < 30) return; // skip short naps/fragments
-        if(!byDate[wakeDate]||totalMin>byDate[wakeDate].total) {
-          const startMs = parseInt(pt.startTimeNanos)/1e6;
-          const bedtime = new Date(startMs).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Jerusalem"});
-          byDate[wakeDate] = {
-            date: wakeDate,
-            bedtime,
-            total: totalMin,
-            deep: Math.round((pt.value.deepSleepDuration||0)/60),
-            rem: Math.round((pt.value.remSleepDuration||0)/60),
-            light: Math.round((pt.value.lightSleepDuration||0)/60),
-            awake: Math.round((pt.value.awakeDuration||0)/60),
-          };
+    // Sleep
+    const sleepArr=[];
+    const napArr=[];
+    try{
+      const sleepPts=await ghGetSleep(twoWeeksAgo,today);
+      console.log("Sleep points:",sleepPts.length);
+      const byDate={};
+      sleepPts.forEach(pt=>{
+        const parsed=parseSleepPoint(pt);
+        if(!parsed) return;
+        if(parsed.total<120){
+          napArr.push({date:parsed.date,start:parsed.bedtime,total:parsed.total,deep:parsed.deep});
+        } else {
+          if(!byDate[parsed.date]||parsed.total>byDate[parsed.date].total){
+            byDate[parsed.date]=parsed;
+          }
         }
       });
-      Object.values(byDate).forEach(s=>{if(s.total>60)sleepArr.push(s);});
+      Object.values(byDate).forEach(s=>sleepArr.push(s));
       sleepArr.sort((a,b)=>b.date.localeCompare(a.date));
-    } catch(e){
-      if(e.message==="NOT_AUTHENTICATED") throw e;
-      console.log("Sleep error:", e.message);
-    }
+    }catch(e){if(e.message==="NOT_AUTHENTICATED")throw e;console.log("Sleep error:",e.message);}
 
     // Workouts
-    const workoutsArr = [];
-    try {
-      const exercises = await ghGetExercises(twoWeeksAgo, today);
-      const typeMap = {WALK:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling"};
-      exercises.forEach(ex => {
+    const workoutsArr=[];
+    try{
+      const exercises=await ghGetExercises(twoWeeksAgo,today);
+      console.log("Exercises:",exercises.length);
+      const typeMap={WALK:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling",SWIMMING:"swimming"};
+      exercises.forEach(ex=>{
         if(!ex.value) return;
-        const endMs = parseInt(ex.endTimeNanos)/1e6;
-        const date = new Date(endMs).toISOString().slice(0,10);
-        const rawType = ex.value.activityType||"WORKOUT";
-        const type = typeMap[rawType]||rawType.toLowerCase();
-        const durationMin = Math.round((ex.value.activeDuration||0)/60);
-        const avgHr = ex.value.averageHeartRate ? Math.round(ex.value.averageHeartRate) : null;
-        if(durationMin > 5) workoutsArr.push({date, type, duration_min:durationMin, avg_hr:avgHr});
+        let date=today;
+        if(ex.interval?.civilEndTime){const ct=ex.interval.civilEndTime;date=`${ct.year}-${String(ct.month).padStart(2,"0")}-${String(ct.day).padStart(2,"0")}`;}
+        else if(ex.interval?.endTime){date=new Date(ex.interval.endTime).toISOString().slice(0,10);}
+        const rawType=ex.value.activityType||"WORKOUT";
+        const type=typeMap[rawType]||rawType.toLowerCase().replace(/_/g," ");
+        const durationMin=Math.round((ex.value.activeDuration||ex.value.duration||0)/60);
+        const avgHr=ex.value.averageHeartRate?Math.round(ex.value.averageHeartRate):null;
+        if(durationMin>5) workoutsArr.push({date,type,duration_min:durationMin,avg_hr:avgHr});
       });
       workoutsArr.sort((a,b)=>b.date.localeCompare(a.date));
-    } catch(e){
-      if(e.message==="NOT_AUTHENTICATED") throw e;
-      console.log("Workouts error:", e.message);
-    }
+    }catch(e){if(e.message==="NOT_AUTHENTICATED")throw e;console.log("Workouts error:",e.message);}
 
-    const newData = {
-      sleep: sleepArr,
-      naps: [],
-      steps: stepsArr,
-      workouts: workoutsArr,
-      synced_at: new Date().toISOString()
+    const newData={
+      sleep:sleepArr,
+      naps:napArr,
+      steps:stepsArr,
+      workouts:workoutsArr,
+      synced_at:new Date().toISOString()
     };
-
     setFitbitData(newData);
 
     // Save to Supabase
-    try {
-      await fetch(SUPA_URL+"/rest/v1/fitness_cache", {
+    try{
+      await fetch(SUPA_URL+"/rest/v1/fitness_cache",{
         method:"POST",
         headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Prefer":"resolution=merge-duplicates,return=minimal"},
         body:JSON.stringify({user_id:UID,data:newData,synced_at:newData.synced_at})
       });
-    } catch(e){ console.log("Supabase save:", e.message); }
+    }catch(e){console.log("Supabase save:",e.message);}
 
-    const syncTime = new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-    setSyncStatus("Synced "+syncTime+" · "+stepsArr.length+" days steps · "+sleepArr.length+" nights sleep · "+workoutsArr.length+" workouts");
+    const t=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    setSyncStatus(`Synced ${t} · ${stepsArr.length} days · ${sleepArr.length} nights · ${workoutsArr.length} workouts`);
     return newData;
-  } catch(e) {
+  }catch(e){
     if(e.message==="NOT_AUTHENTICATED") setSyncStatus("Google Health: tap Sync to reconnect");
     else setSyncStatus("Sync error: "+e.message.slice(0,40));
     throw e;
@@ -1573,13 +1579,20 @@ function App() {
         ]);
         const foodMap={};
         (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
-        setAllFood(foodMap);
+        if(Object.keys(foodMap).length>0){
+          setAllFood(foodMap);
+          localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
+        }
         const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
         setLogEntries(logData);
         // Keep localStorage in sync as backup
         localStorage.setItem("jlog_backup",JSON.stringify(logData));
         setCycleDates((cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed})));
-        const ss={};(supp||[]).forEach(r=>{if(r.taken)ss[r.supplement]=true;});setSuppState(ss);
+        // Only load supplements for TODAY - reset daily
+        const todayKey2=new Date().toISOString().slice(0,10);
+        const ss={};
+        (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
+        setSuppState(ss);
         // Load fitbit data from Supabase (falls back to seed if not loaded)
         if(fitbit&&fitbit[0]&&fitbit[0].data){
           setFitbitData(fitbit[0].data);
