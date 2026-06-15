@@ -233,7 +233,7 @@ function SleepTileMetric({fitbitData}) {
 }
 
 function StepsMetric({fitbitData}) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
   const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
   const steps = todayRec ? todayRec.steps : 0;
   const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
@@ -301,7 +301,7 @@ async function ghGetStepsForDate(dateStr){
     pageSize:1000
   });
   // Sum all step intervals for the day
-  return (data.dataPoints||[]).reduce((sum,pt)=>sum+(pt.steps?.count||pt.value?.steps?.count||0),0);
+  return (data.dataPoints||[]).reduce((sum,pt)=>sum+parseInt(pt.steps?.count||pt.value?.steps?.count||0),0);
 }
 
 // Sleep: parse from actual API response format
@@ -569,21 +569,64 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
         <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
-          <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:C.tm}}>80</div>
-          <div style={{flex:1}}>
-            <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:"80%",height:"100%",background:C.tm,borderRadius:4}}/></div>
-            <div style={{fontSize:12,fontWeight:500,color:C.tm}}>Good</div>
-          </div>
+          {(()=>{
+          const now2=new Date();
+          const yDate2=new Date(now2.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+          const ls=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+          const yw=(fitbitData.workouts||[]).filter(w=>w.date===yDate2);
+          const yF=allFood[yDate2]||[];
+          const yP=Math.round(yF.reduce((s,e)=>s+(e.p||0),0));
+          const sScore=ls?Math.min(30,Math.round(ls.total/420*30)):0;
+          const dPct=ls&&ls.total>0?Math.round(ls.deep/ls.total*100):0;
+          const rPct=ls&&ls.total>0?Math.round(ls.rem/ls.total*100):0;
+          const dScore=dPct>=20?20:dPct>=15?15:10;
+          const rScore=rPct>=20?10:rPct>=15?7:5;
+          const bHour=ls?parseInt(ls.bedtime.split(":")[0]):0;
+          const bScore=bHour<=23&&bHour>=22?8:bHour<=0?5:bHour<=1?3:2;
+          const lScore=yw.length===0?20:yw.some(w=>w.type==="gym"||w.type==="run")?12:16;
+          const pScore=yP>=protTgt?8:yP>=protTgt*0.7?4:0;
+          const score=sScore+dScore+rScore+bScore+lScore+pScore;
+          const col=score>=85?C.tm:score>=70?C.am:C.red;
+          const label=score>=85?"Great":score>=70?"Good":"Low";
+          return (<>
+            <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:col}}>{score}</div>
+            <div style={{flex:1}}>
+              <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:score+"%",height:"100%",background:col,borderRadius:4}}/></div>
+              <div style={{fontSize:12,fontWeight:500,color:col}}>{label}</div>
+            </div>
+          </>);
+        })()}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
-          {[
-            ["Sleep duration (6h 42m)","22/30",C.am],
-            ["Deep sleep (92min, 23%)","20/20",C.tm],
-            ["REM sleep (96min, 24%)","10/10",C.tm],
-            ["Training load (rest day Sat)","20/20",C.tm],
-            ["Bedtime 01:16 (late)","5/10",C.am],
-            ["Protein yesterday","0",C.t3],
-          ].map(([label,pts,col],i)=>(
+          {(()=>{
+            const now=new Date();
+            const yDate=new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+            const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+            const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
+            const yFood=allFood[yDate]||[];
+            const yProt=Math.round(yFood.reduce((s,e)=>s+(e.p||0),0));
+            const h=lastSleep?Math.floor(lastSleep.total/60):0;
+            const m=lastSleep?lastSleep.total%60:0;
+            const deepPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.deep/lastSleep.total*100):0;
+            const remPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.rem/lastSleep.total*100):0;
+            const sleepScore=lastSleep?Math.min(30,Math.round(lastSleep.total/420*30)):0;
+            const deepScore=deepPct>=20?20:deepPct>=15?15:10;
+            const remScore=remPct>=20?10:remPct>=15?7:5;
+            const bedtimeHour=lastSleep?parseInt(lastSleep.bedtime.split(":")[0]):0;
+            const bedtimeScore=bedtimeHour<=23&&bedtimeHour>=22?8:bedtimeHour<=0?5:bedtimeHour<=1?3:2;
+            const loadScore=yWorkouts.length===0?20:yWorkouts.some(w=>w.type==="gym"||w.type==="run")?12:16;
+            const protScore=yProt>=protTgt?8:yProt>=protTgt*0.7?4:0;
+            const total=sleepScore+deepScore+remScore+bedtimeScore+loadScore+protScore;
+            const rows=[
+              [`Sleep duration (${h}h ${m}m)`,`${sleepScore}/30`,sleepScore>=25?C.tm:sleepScore>=20?C.am:C.red],
+              [`Deep sleep (${lastSleep?.deep||0}m, ${deepPct}%)`,`${deepScore}/20`,deepScore>=18?C.tm:C.am],
+              [`REM sleep (${lastSleep?.rem||0}m, ${remPct}%)`,`${remScore}/10`,remScore>=9?C.tm:C.am],
+              [`Training load yesterday`,`${loadScore}/20`,loadScore>=18?C.tm:loadScore>=14?C.am:C.red],
+              [`Bedtime ${lastSleep?.bedtime||"--:--"}`,`${bedtimeScore}/10`,bedtimeScore>=7?C.tm:bedtimeScore>=4?C.am:C.red],
+              [`Protein yesterday (${yProt}g)`,`+${protScore}`,protScore>0?C.tm:C.t3],
+            ];
+            return rows;
+          })().map(([label,pts,col],i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
               <span style={{color:C.t2}}>{label}</span>
               <span style={{fontWeight:600,color:col}}>{pts}</span>
@@ -736,10 +779,11 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
               const dayLabels=["S","M","T","W","T","F","S"];
               const weekSteps=dayLabels.map((_,i)=>{
                 const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
-                const dateStr=d.toISOString().slice(0,10);
+                const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
                 const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
                 const isFuture=d>now;
-                const isToday=dateStr===now.toISOString().slice(0,10);
+                const todayStr=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+                const isToday=dateStr===todayStr;
                 return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
               });
               const maxStep=Math.max(...weekSteps.map(d=>d.s),1);
