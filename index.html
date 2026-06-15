@@ -158,6 +158,31 @@ function ProteinAvgMetric({allFood, protTgt}) {
   return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
 }
 
+function MonthlyMetrics({fitbitData, allFood, protTgt}) {
+  const now=new Date();
+  const month=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}).slice(0,7); // "2026-06"
+  // Active days = 8k+ steps OR workout
+  const monthSteps=(fitbitData.steps||[]).filter(s=>s.date.startsWith(month));
+  const monthWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(month));
+  const workoutDates=new Set(monthWorkouts.map(w=>w.date));
+  const activeDates=new Set([
+    ...monthSteps.filter(s=>s.steps>=8000).map(s=>s.date),
+    ...workoutDates
+  ]);
+  const gymCount=monthWorkouts.filter(w=>w.type==="gym").length;
+  const movCount=monthWorkouts.filter(w=>w.type==="yoga"||w.type==="pilates"||w.type==="walk"||w.type==="hiking").length;
+  const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
+    if(!date.startsWith(month)) return false;
+    return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
+  }).length;
+  return (<>
+    <Metric label="Active days" value={activeDates.size} sub={"target: 20/month"} subColor={activeDates.size>=15?C.tm:C.am}/>
+    <Metric label="Gym sessions" value={gymCount} sub={"target: 12/month"} subColor={gymCount>=8?C.tm:C.am}/>
+    <Metric label="Movement sessions" value={movCount} sub={"yoga & walks · target: 5"} subColor={movCount>=5?C.tm:C.t3}/>
+    <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
+  </>);
+}
+
 function ProteinDaysMetric({allFood, protTgt}) {
   const daysHit = Object.entries(allFood).filter(([date, meals]) => {
     const total = meals.reduce((s,e)=>s+(e.p||0),0);
@@ -178,11 +203,12 @@ function ProteinDaysMetric({allFood, protTgt}) {
 function WeeklySleepMetric({fitbitData}) {
   const now=new Date();
   const dow=now.getDay();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
-  weekStart.setHours(0,0,0,0);
-  const weekSleep=(fitbitData.sleep||[]).filter(s=>{
-    const d=new Date(s.date);return d>=weekStart&&d<=now;
-  });
+  const weekDates=[];
+  for(let i=0;i<=dow;i++){
+    const d=new Date(now.getTime()-i*864e5);
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+  }
+  const weekSleep=(fitbitData.sleep||[]).filter(s=>weekDates.includes(s.date));
   if(!weekSleep.length) return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data this week</div></div>;
   const avg=Math.round(weekSleep.reduce((s,r)=>s+r.total,0)/weekSleep.length);
   const h=Math.floor(avg/60),m=avg%60;
@@ -192,25 +218,25 @@ function WeeklySleepMetric({fitbitData}) {
 
 function WeeklyWorkoutsMetric({fitbitData}) {
   const now=new Date();
-  const dow=now.getDay();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
-  weekStart.setHours(0,0,0,0);
-  const weekWorkouts=(fitbitData.workouts||[]).filter(w=>{
-    const d=new Date(w.date);return d>=weekStart&&d<=now;
-  });
+  const dow=now.getDay(); // 0=Sun, Israeli week starts Sun
+  const weekDates=[];
+  for(let i=0;i<=dow;i++){
+    const d=new Date(now.getTime()-i*864e5);
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+  }
+  const weekWorkouts=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
   const types=[...new Set(weekWorkouts.map(w=>w.type))];
-  const sub=types.length?types.join(" · "):"rest week so far";
+  const sub=types.length?types.join(" · "):"rest so far";
   return <div style={s.mc}><div style={s.ml}>Workouts</div><div style={{...s.mv,color:weekWorkouts.length>0?C.tm:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.t3}}>{sub}</div></div>;
 }
 
 function WeeklyStepsMetric({fitbitData}) {
   const now=new Date();
   const dow=now.getDay();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-dow);
   let total=0;
   for(let i=0;i<=dow;i++){
-    const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
-    const dateStr=d.toISOString().slice(0,10);
+    const d=new Date(now.getTime()-i*864e5);
+    const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
     const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
     if(rec) total+=rec.steps;
   }
@@ -294,13 +320,14 @@ async function ghGet(path,params={}){
 
 // Steps: use list with civil_start_time filter - returns step intervals
 async function ghGetStepsForDate(dateStr){
-  const nextDay=new Date(dateStr);nextDay.setDate(nextDay.getDate()+1);
-  const nextStr=nextDay.toISOString().slice(0,10);
+  // Add 1 day to civil date string directly (no Date object to avoid timezone issues)
+  const parts=dateStr.split("-");
+  const d=new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2])+1);
+  const nextStr=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const data=await ghGet("/users/me/dataTypes/steps/dataPoints",{
     filter:`steps.interval.civil_start_time >= "${dateStr}" AND steps.interval.civil_start_time < "${nextStr}"`,
     pageSize:1000
   });
-  // Sum all step intervals for the day
   return (data.dataPoints||[]).reduce((sum,pt)=>sum+parseInt(pt.steps?.count||pt.value?.steps?.count||0),0);
 }
 
@@ -469,7 +496,13 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   let cycleCtx = "Cycle not tracked";
   if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
-  const jArr = logEntries.slice(0,12).map(e=>"["+e.tag+"] "+e.txt);
+  // Include all entries but mark with date so AI knows which are recent
+  const jArr = logEntries.slice(0,12).map(e=>{
+    const entryDate=e.dt?e.dt.slice(0,10):"unknown";
+    const daysAgo=e.dt?Math.floor((now-new Date(e.dt))/864e5):99;
+    const recency=daysAgo===0?"TODAY":daysAgo===1?"YESTERDAY":`${daysAgo}d ago`;
+    return `[${e.tag}|${recency}] ${e.txt}`;
+  });
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
   const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
   const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
@@ -547,7 +580,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   }
   async function genAIInner(type) {
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain] or [postworkout] entries from TODAY, show FLAG section FIRST and do NOT recommend workouts. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${(()=>{const tf=allFood[new Date().toISOString().slice(0,10)]||[];return Math.round(tf.reduce((s,e)=>s+(e.p||0),0));})()} g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain|TODAY] or [postworkout|TODAY] entries, show FLAG section FIRST and do NOT recommend workouts. Entries marked with dates like "3d ago" are old and should NOT trigger FLAG. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${(()=>{const tf=allFood[new Date().toISOString().slice(0,10)]||[];return Math.round(tf.reduce((s,e)=>s+(e.p||0),0));})()} g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
       : `Weekly coaching review. Israeli week = Sunday to Saturday. Week COMPLETED: Sun 7 Jun – Sat 13 Jun (57030 steps, 2 gym, 2 yoga, 1 run, 1 elliptical, avg sleep 7h). Current week started Sun 14 Jun. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. Sections: WELL DONE (last week), FOCUS THIS WEEK (targets), NEXT SESSION (what to do next). FORMAT: emoji + CAPS LABEL, bold **action**, one sentence why. Tight, no padding, max 2 lines each. Do not say next week - it already started.`
     try {
       const txt = await callAI(p);
@@ -848,9 +881,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
       <SecLabel>Month — June 2026</SecLabel>
 
       <div style={s.mg}>
-        <Metric label="Active days" value="0" sub="target: 20/month" subColor={C.tm}/>
-        <Metric label="Gym sessions" value="2" sub="target: 12/month" subColor={C.am}/>
-        <Metric label="Movement sessions" value="3" sub="yoga & movement · target: 5" subColor={C.tm}/>
+        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt}/>
         <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
