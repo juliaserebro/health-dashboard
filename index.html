@@ -1077,9 +1077,8 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
   (fitbitData.steps||[]).forEach(s=>{stepsMap[s.date]=s.steps;});
   const workoutMap = {};
   (fitbitData.workouts||[]).forEach(w=>{
-    const k=w.date;
-    if(!workoutMap[k]) workoutMap[k]=[];
-    workoutMap[k].push(w.type);
+    if(!workoutMap[w.date]) workoutMap[w.date]=[];
+    workoutMap[w.date].push(w);
   });
 
   const days=["S","M","T","W","T","F","S"];
@@ -1088,12 +1087,15 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
   for(let i=0;i<firstDay;i++) cells.push(<div key={"pad"+i}/>);
   for(let d=1;d<=daysInMonth;d++){
     const dateStr=`${year}-${pad(month)}-${pad(d)}`;
-    const w=workoutMap[dateStr]||[];
+    const wObjs=workoutMap[dateStr]||[];
     const steps=stepsMap[dateStr]||0;
-    const isActive=steps>=8000||w.length>0;
-    const hasGym=w.includes("gym");
-    const hasYoga=w.includes("yoga")||w.includes("pilates");
-    const hasCardio=w.includes("walk")||w.includes("elliptical")||w.includes("run");
+    // Walks without a logged duration are auto-detected by Fitbit — don't count as active
+    const intentional=wObjs.filter(w=>w.type!=="walk"||(w.duration_min!=null&&w.duration_min>0));
+    const isActive=steps>=8000||intentional.length>0;
+    const types=wObjs.map(w=>w.type);
+    const hasGym=types.includes("gym");
+    const hasYoga=types.includes("yoga")||types.includes("pilates");
+    const hasCardio=types.includes("walk")||types.includes("elliptical")||types.includes("run");
     const dayMeals=allFood[dateStr]||[];
     const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);
     const protHit=dayProt>=protTgt;
@@ -1787,17 +1789,24 @@ function App() {
           console.log("✓ Fitness data loaded from Supabase, synced_at:",fitbit[0].synced_at);
           const supaData=fitbit[0].data;
           // Merge: use Supabase data but fill gaps with seed (seed may have newer dates)
-          const mergeArrays=(supaArr,seedArr,key)=>{
+          const mergeByDate=(supaArr,seedArr)=>{
             const m={};
-            (seedArr||[]).forEach(x=>{m[x[key]]=x;});
-            (supaArr||[]).forEach(x=>{m[x[key]]=x;}); // Supabase overwrites seed
+            (seedArr||[]).forEach(x=>{m[x.date]=x;});
+            (supaArr||[]).forEach(x=>{m[x.date]=x;});
+            return Object.values(m);
+          };
+          const mergeWorkouts=(supaArr,seedArr)=>{
+            // Use date|type composite key so multiple workouts per day are all kept
+            const m={};
+            (seedArr||[]).forEach(w=>{m[w.date+'|'+w.type]=w;});
+            (supaArr||[]).forEach(w=>{m[w.date+'|'+w.type]=w;});
             return Object.values(m);
           };
           setFitbitData({
-            sleep: mergeArrays(supaData.sleep,FITBIT_SEED.sleep,'date').sort((a,b)=>b.date.localeCompare(a.date)),
+            sleep: mergeByDate(supaData.sleep,FITBIT_SEED.sleep).sort((a,b)=>b.date.localeCompare(a.date)),
             naps: supaData.naps||FITBIT_SEED.naps||[],
-            steps: mergeArrays(supaData.steps,FITBIT_SEED.steps,'date').sort((a,b)=>a.date.localeCompare(b.date)),
-            workouts: mergeArrays(supaData.workouts,FITBIT_SEED.workouts,'date').sort((a,b)=>b.date.localeCompare(a.date)),
+            steps: mergeByDate(supaData.steps,FITBIT_SEED.steps).sort((a,b)=>a.date.localeCompare(b.date)),
+            workouts: mergeWorkouts(supaData.workouts,FITBIT_SEED.workouts).sort((a,b)=>b.date.localeCompare(a.date)),
             synced_at: supaData.synced_at
           });
         } else {
