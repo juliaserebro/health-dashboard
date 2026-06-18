@@ -414,7 +414,7 @@ function parseExercise(pt){
   const startTime=ex.interval.startTime;
   if(!endTime) return null;
   const date=new Date(endTime).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-  const typeMap={WALK:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",
+  const typeMap={WALK:"walk",WALKING:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",
     CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling",HIKING:"walk",
     SPORT:"gym",SPINNING:"cycling",PILATES:"pilates"};
   const rawType=ex.exerciseType||"WORKOUT";
@@ -1068,8 +1068,8 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     const wObjs=workoutMap[dateStr]||[];
     const steps=stepsMap[dateStr]||0;
     // Walks without a logged duration are auto-detected by Fitbit — don't count as active
-    const intentional=wObjs.filter(w=>w.type!=="walk"||(w.duration_min!=null&&w.duration_min>0));
-    if(dateStr==="2026-06-16") console.log("DEBUG Jun16: steps="+steps+" workouts="+JSON.stringify(wObjs)+" intentional="+intentional.length);
+    // Walks are auto-detected by Fitbit and too ambiguous — step count already captures movement
+    const intentional=wObjs.filter(w=>w.type!=="walk"&&w.type!=="walking");
     const isActive=steps>=8000||intentional.length>0;
     const types=wObjs.map(w=>w.type);
     const hasGym=types.includes("gym");
