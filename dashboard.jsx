@@ -1074,7 +1074,7 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     const types=wObjs.map(w=>w.type);
     const hasGym=types.includes("gym");
     const hasYoga=types.includes("yoga")||types.includes("pilates");
-    const hasCardio=types.includes("walk")||types.includes("elliptical")||types.includes("run");
+    const hasCardio=types.includes("elliptical")||types.includes("run")||types.includes("cycling");
     const dayMeals=allFood[dateStr]||[];
     const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);
     const protHit=dayProt>=protTgt;
