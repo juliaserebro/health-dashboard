@@ -139,6 +139,15 @@ print("✓ Israeli week check complete")
 dow_patterns = re.findall(r'const dowIL[^;]+;', jsx)
 print(f"✓ Found {len(dow_patterns)} dowIL calculations")
 
+# ── 13. HEATMAP VARIABLE CONSISTENCY ─────────────────────────────────────
+heatmap_start = jsx.find("function HeatmapGrid")
+heatmap_end = jsx.find("\nfunction ", heatmap_start+1)
+heatmap_body = jsx[heatmap_start:heatmap_end]
+# If workoutMap stores objects, w.includes() is wrong — should be types.includes()
+if "w.includes(" in heatmap_body:
+    fail("HeatmapGrid uses w.includes() but w is now an array of objects — use types.includes()")
+print("✓ Heatmap variable consistency OK")
+
 # ── RESULTS ──────────────────────────────────────────────────────────────
 print("\n" + "="*50)
 if ERRORS:
