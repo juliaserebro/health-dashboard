@@ -1,0 +1,1997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Health Coach</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', -apple-system, sans-serif; background: #f5f4f0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// React loaded via CDN
+
+// ── LIVE DATA (Fri 12 Jun 2026, 14:20 Israel) ─────────────────────────────
+const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
+const UID = "julia";
+
+async function supa(method, table, body, query) {
+  let url, hdrs, fetchOpts;
+  if (method === "GET") {
+    const q = [query, "apikey="+SUPA_KEY].filter(Boolean).join("&");
+    url = SUPA_URL + "/rest/v1/" + table + "?" + q;
+    hdrs = {"Accept": "application/json"};
+    fetchOpts = {method:"GET", headers:hdrs};
+  } else {
+    url = SUPA_URL + "/rest/v1/" + table + (query ? "?" + query : "");
+    hdrs = {
+      "Content-Type": "application/json",
+      "apikey": SUPA_KEY,
+      "Authorization": "Bearer " + SUPA_KEY,
+      "Accept": "application/json"
+    };
+    // Use merge-duplicates for upserts (on_conflict), return=minimal to avoid large responses
+    if (query&&query.includes("on_conflict")) {
+      hdrs["Prefer"] = "resolution=merge-duplicates,return=minimal";
+    } else if (method==="POST"||method==="PATCH") {
+      hdrs["Prefer"] = "return=representation";
+    }
+    fetchOpts = {method, headers:hdrs, body:body?JSON.stringify(body):undefined, mode:"cors", credentials:"omit"};
+  }
+  let res;
+  try {
+    res = await fetch(url, fetchOpts);
+  } catch(networkErr) {
+    throw new Error("Network/CORS: " + networkErr.message);
+  }
+  if (!res.ok) { const e=await res.text(); throw new Error(table+" "+res.status+": "+e.slice(0,80)); }
+  if (res.status===204||method==="DELETE") return null;
+  return res.json();
+}
+
+function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
+
+
+
+
+// ── FITBIT SEED DATA ─────────────────────────────────────────────────────
+// Updated: 2026-06-14. Auto-upserts to Supabase fitness_cache on load.
+// Each sync session: only this block changes. App reads from Supabase state.
+const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503,"deep":112,"rem":97,"light":294,"awake":0},{"date":"2026-06-15","bedtime":"00:44","total":447,"deep":106,"rem":107,"light":234,"awake":0},{"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},{"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},{"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},{"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},{"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},{"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},{"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},{"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},{"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},{"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},{"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},{"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10}],"naps":[{"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9}],"steps":[{"date":"2026-06-03","steps":5473},{"date":"2026-06-04","steps":5912},{"date":"2026-06-05","steps":6964},{"date":"2026-06-06","steps":6676},{"date":"2026-06-07","steps":7361},{"date":"2026-06-08","steps":11972},{"date":"2026-06-09","steps":8461},{"date":"2026-06-10","steps":10033},{"date":"2026-06-11","steps":13717},{"date":"2026-06-12","steps":3719},{"date":"2026-06-13","steps":6574},{"date":"2026-06-14","steps":7649},{"date":"2026-06-15","steps":7915},{"date":"2026-06-16","steps":6400}],"workouts":[{"date":"2026-06-15","type":"gym","duration_min":50,"avg_hr":79},{"date":"2026-06-14","type":"yoga","duration_min":60,"avg_hr":99},{"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99},{"date":"2026-06-11","type":"gym","duration_min":38,"avg_hr":94},{"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},{"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},{"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},{"date":"2026-06-08","type":"gym","duration_min":25,"avg_hr":68},{"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},{"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},{"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null}],"synced_at":"2026-06-16T23:05:00+03:00"};
+
+
+
+// ── COLORS ────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#f5f4f0", sf:"#fff", s2:"#f0ede8",
+  tx:"#1a1917", t2:"#6b6860", t3:"#a09d98",
+  teal:"#0f7b5f", tl:"#e0f4ed", tm:"#1D9E75",
+  pu:"#4a42b0", pl:"#eeedf8",
+  am:"#a05f0a", al:"#fdf3e3",
+  red:"#c0392b", rl:"#fdf0ee",
+  pi:"#993556", pil:"#fbeaf0",
+  or:"#b35a1f", orl:"#fdebd0",
+  bd:"rgba(0,0,0,.08)"
+};
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────
+// ── STYLES ────────────────────────────────────────────────────────────────
+const s = {
+  shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 80px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
+  card:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"16px 18px",marginBottom:14},
+  hdr:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,gap:10,flexWrap:"wrap"},
+  h1:{fontSize:19,fontWeight:600,letterSpacing:"-.3px",margin:0},
+  tabs:{display:"flex",gap:2,marginBottom:20,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"},
+  tb:(active)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,color:active?C.tx:C.t2,background:"none",border:"none",cursor:"pointer",padding:"8px 14px",borderBottom:active?`2px solid ${C.tx}`:"2px solid transparent",marginBottom:-1,whiteSpace:"nowrap",flexShrink:0}),
+  mg:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14},
+  mg2:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14},
+  mc:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"14px 16px"},
+  ml:{fontSize:11,color:C.t2,marginBottom:4},
+  mv:{fontSize:21,fontWeight:600,letterSpacing:"-.5px",lineHeight:1.1},
+  ms:{fontSize:11,marginTop:3},
+  secLbl:{fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:16,display:"flex",alignItems:"center",gap:8},
+  secLine:{flex:1,height:1,background:C.s2},
+  hr:{border:"none",borderTop:`2px solid ${C.s2}`,margin:"28px 0 24px"},
+  aiCard:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,borderLeft:`3px solid ${C.pu}`,padding:"16px 18px",marginBottom:14},
+  aiLbl:{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:10,display:"flex",alignItems:"center",gap:6},
+  btn:(v)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,padding:"8px 18px",borderRadius:8,cursor:"pointer",border:"none",...(v==="p"?{background:C.tx,color:"#fff"}:{background:C.sf,color:C.t2,border:`.5px solid ${C.bd}`})}),
+  btnSm:{padding:"5px 12px",fontSize:12},
+  input:{width:"100%",padding:"8px 12px",border:`.5px solid ${C.bd}`,borderRadius:8,fontFamily:"inherit",fontSize:13,background:C.s2,color:C.tx,boxSizing:"border-box"},
+  pill:(bg,color)=>({fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:color}),
+  wi:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:`.5px solid ${C.bd}`,fontSize:12},
+  badge:(bg,color)=>({fontSize:10,fontWeight:500,padding:"2px 8px",borderRadius:20,background:bg,color,marginRight:8}),
+  pb:{height:6,borderRadius:3,background:C.s2,overflow:"hidden",margin:"5px 0 3px"},
+  pf:(w,bg)=>({height:"100%",borderRadius:3,width:w+"%",background:bg}),
+  mo:{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
+  modal:{background:C.sf,borderRadius:12,padding:24,width:400,maxWidth:"100%"},
+};
+
+// ── MINI COMPONENTS ───────────────────────────────────────────────────────
+function Card({children, style={}}) {
+  return <div style={{...s.card,...style}}>{children}</div>;
+}
+function SecLabel({children}) {
+  return <div style={s.secLbl}>{children}<div style={s.secLine}/></div>;
+}
+function Metric({label,value,sub,subColor}) {
+  return (
+    <div style={s.mc}>
+      <div style={s.ml}>{label}</div>
+      <div style={s.mv}>{value}</div>
+      {sub && <div style={{...s.ms,color:subColor||C.t3}}>{sub}</div>}
+    </div>
+  );
+}
+function Spinner() {
+  return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
+}
+
+function CyclePhaseMetric({cycleDates}) {
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  if(!conf.length) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
+  const last = new Date(conf[0].d);
+  const now = new Date(); now.setHours(0,0,0,0);
+  const day = Math.floor((now-last)/864e5)+1;
+  const cd = ((day-1)%28)+1;
+  const ph = cd<=5?"Menstrual":cd<=13?"Follicular":cd<=16?"Ovulatory":"Luteal";
+  const col = cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
+  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:col}}>{ph}</div><div style={{...s.ms,color:col}}>Day {cd} of cycle</div></div>;
+}
+
+// ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
+function ProteinAvgMetric({allFood, protTgt}) {
+  const entries = Object.entries(allFood).filter(([,meals])=>meals.length>0);
+  if(!entries.length) return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>log meals to track</div></div>;
+  const totals = entries.map(([,meals])=>meals.reduce((s,e)=>s+(e.p||0),0));
+  const avg = Math.round(totals.reduce((a,b)=>a+b,0)/totals.length);
+  const col = avg>=protTgt?C.tm:avg>=protTgt*.75?C.am:C.red;
+  return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
+}
+
+function MonthlyMetrics({fitbitData, allFood, protTgt}) {
+  const now=new Date();
+  const month=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}).slice(0,7); // "2026-06"
+  // Active days = 8k+ steps OR workout
+  const monthSteps=(fitbitData.steps||[]).filter(s=>s.date.startsWith(month));
+  const monthWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(month));
+  const workoutDates=new Set(monthWorkouts.map(w=>w.date));
+  const activeDates=new Set([
+    ...monthSteps.filter(s=>s.steps>=8000).map(s=>s.date),
+    ...workoutDates
+  ]);
+  const gymCount=monthWorkouts.filter(w=>w.type==="gym"||w.type==="pilates"||w.type==="circuit"||w.type==="strength training").length;
+  const yogaCount=monthWorkouts.filter(w=>w.type==="yoga").length;
+  const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
+    if(!date.startsWith(month)) return false;
+    return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
+  }).length;
+  return (<>
+    <Metric label="Active days" value={activeDates.size} sub={"target: 20/month"} subColor={activeDates.size>=15?C.tm:C.am}/>
+    <Metric label="Workout sessions" value={gymCount} sub={"gym/pilates · target: 12/month"} subColor={gymCount>=8?C.tm:C.am}/>
+    <Metric label="Yoga sessions" value={yogaCount} sub={"target: 4/month"} subColor={yogaCount>=4?C.tm:yogaCount>=2?C.am:C.t3}/>
+  </>);
+}
+
+function ProteinDaysMetric({allFood, protTgt}) {
+  const daysHit = Object.entries(allFood).filter(([date, meals]) => {
+    const total = meals.reduce((s,e)=>s+(e.p||0),0);
+    return total >= protTgt;
+  }).length;
+  const totalDaysLogged = Object.keys(allFood).length;
+  return (
+    <div style={s.mc}>
+      <div style={s.ml}>Protein days hit</div>
+      <div style={{...s.mv,color:daysHit>0?C.tm:C.t3}}>{daysHit>0?daysHit:"—"}</div>
+      <div style={{...s.ms,color:daysHit>0?C.tm:C.t3}}>
+        {daysHit>0?`of ${totalDaysLogged} days logged`:"log meals to track"}
+      </div>
+    </div>
+  );
+}
+
+function WeeklySleepMetric({fitbitData}) {
+  const now=new Date();
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  // Parse date parts directly to avoid timezone issues with getDay()
+  const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
+  const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
+  const weekDates=[];
+  for(let i=0;i<=dowIL;i++){
+    const d=new Date(now.getTime()-i*864e5);
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+  }
+  const weekSleep=(fitbitData.sleep||[]).filter(s=>weekDates.includes(s.date));
+  if(!weekSleep.length) return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data this week</div></div>;
+  const avg=Math.round(weekSleep.reduce((s,r)=>s+r.total,0)/weekSleep.length);
+  const h=Math.floor(avg/60),m=avg%60;
+  const col=avg>=420?C.tm:avg>=360?C.am:C.red;
+  return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:C.t3}}>{weekSleep.length} night{weekSleep.length!==1?"s":""} this week</div></div>;
+}
+
+function WeeklyWorkoutsMetric({fitbitData}) {
+  const now=new Date();
+  // Compute day-of-week from Israel timezone, not browser local time
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  // Parse date parts directly to avoid timezone issues with getDay()
+  const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
+  const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon... // 0=Sun in Israel
+  const weekDates=[];
+  for(let i=0;i<=dowIL;i++){
+    const d=new Date(now.getTime()-i*864e5);
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+  }
+  const weekWorkouts=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
+  const weekWorkouts_=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
+  console.log("WeeklyWorkouts: weekDates=",weekDates,"workouts=",fitbitData.workouts?.map(w=>w.date),"matched=",weekWorkouts_.length);
+  const types=[...new Set(weekWorkouts.map(w=>w.type))];
+  const sub=types.length?types.join(" · "):"rest so far";
+  // Also compute last 7 days for context
+  const last7Dates=[];
+  for(let i=0;i<7;i++){const d=new Date(now.getTime()-i*864e5);last7Dates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));}
+  const last7Count=(fitbitData.workouts||[]).filter(w=>last7Dates.includes(w.date)).length;
+  return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.tm:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.t3}}>{sub}{last7Count>weekWorkouts.length?` · ${last7Count} last 7d`:""}</div></div>;
+}
+
+function WeeklyStepsMetric({fitbitData}) {
+  const now=new Date();
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  // Parse date parts directly to avoid timezone issues with getDay()
+  const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
+  const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
+  let total=0;
+  for(let i=0;i<=dowIL;i++){
+    const d=new Date(now.getTime()-i*864e5);
+    const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+    const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
+    if(rec) total+=rec.steps;
+  }
+  const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.t3}}>Sun–{dayNames[dowIL]} this week</div></div>;
+}
+
+function SleepTileMetric({fitbitData}) {
+  const yesterday = new Date();yesterday.setDate(yesterday.getDate()-1);
+  const yDate = yesterday.toISOString().slice(0,10);
+  // Sleep date = the morning date (when you woke up)
+  const rec = (fitbitData.sleep||[]).find(s=>s.date===new Date().toISOString().slice(0,10))
+           || (fitbitData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(!rec) return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data</div></div>;
+  const h=Math.floor(rec.total/60),m=rec.total%60;
+  const col=rec.total>=420?C.tm:rec.total>=360?C.am:C.red;
+  const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+  const sub=todayNap?`${rec.deep}m deep · +${todayNap.total}m nap`:`${rec.deep}m deep · ${rec.rem}m REM`;
+  return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:col}}>{sub}</div></div>;
+}
+
+function StepsMetric({fitbitData}) {
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
+  const steps = todayRec ? todayRec.steps : 0;
+  const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
+  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={s.mv}>{steps.toLocaleString()}</div><div style={{...s.ms,color:steps>=8000?C.tm:C.t3}}>{sub}</div></div>;
+}
+
+// ── DASHBOARD TAB ─────────────────────────────────────────────────────────
+
+// ── GOOGLE HEALTH API ─────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = "749607035074-b06qae2bs7o4cfn7dlbbg0772eg7cntf.apps.googleusercontent.com";
+const GOOGLE_REDIRECT_URI = "https://juliaserebro.github.io/health-dashboard/";
+const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+  "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+  "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+  "https://www.googleapis.com/auth/googlehealth.profile.readonly"
+].join(" ");
+const GH_BASE = "https://health.googleapis.com/v4";
+
+function getGToken(){try{return JSON.parse(localStorage.getItem("gtoken")||"null");}catch{return null;}}
+function setGToken(tok){localStorage.setItem("gtoken",JSON.stringify(tok));}
+function clearGToken(){localStorage.removeItem("gtoken");}
+function isGTokenValid(tok){
+  if(!tok||!tok.access_token) return false;
+  return tok.expires_at>Date.now()+60000;
+}
+
+function startGoogleAuth(){
+  const params=new URLSearchParams({
+    client_id:GOOGLE_CLIENT_ID,redirect_uri:GOOGLE_REDIRECT_URI,
+    response_type:"token",scope:GOOGLE_SCOPES,
+    include_granted_scopes:"true",prompt:"consent"
+  });
+  window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params.toString();
+}
+
+function handleGoogleCallback(){
+  const hash=window.location.hash.substring(1);
+  if(!hash) return false;
+  const params=new URLSearchParams(hash);
+  const access_token=params.get("access_token");
+  const expires_in=params.get("expires_in");
+  if(!access_token) return false;
+  setGToken({access_token,expires_at:Date.now()+parseInt(expires_in||3600)*1000});
+  window.history.replaceState(null,"",window.location.pathname);
+  return true;
+}
+
+async function ghGet(path,params={}){
+  const tok=getGToken();
+  if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
+  const qs=Object.keys(params).length?"?"+new URLSearchParams(params).toString():"";
+  const res=await fetch(GH_BASE+path+qs,{headers:{"Authorization":"Bearer "+tok.access_token}});
+  if(res.status===401){clearGToken();throw new Error("NOT_AUTHENTICATED");}
+  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,200));}
+  return res.json();
+}
+
+async function ghPost(path,body){
+  const tok=getGToken();
+  if(!tok||!isGTokenValid(tok)) throw new Error("NOT_AUTHENTICATED");
+  const res=await fetch(GH_BASE+path,{
+    method:"POST",
+    headers:{"Authorization":"Bearer "+tok.access_token,"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(res.status===401){clearGToken();throw new Error("NOT_AUTHENTICATED");}
+  if(!res.ok){const e=await res.text();throw new Error("GH "+res.status+": "+e.slice(0,200));}
+  return res.json();
+}
+
+// Parse date string "2026-06-15" to CivilDateTime object {year,month,day}
+function toCivil(dateStr){
+  const [y,m,d]=dateStr.split("-").map(Number);
+  return {year:y,month:m,day:d};
+}
+
+// Add N days to a date string
+function addDays(dateStr,n){
+  const [y,m,d]=dateStr.split("-").map(Number);
+  const dt=new Date(y,m-1,d+n);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+}
+
+// Get steps via list - one call per day to avoid double-counting across midnight
+async function ghGetStepsRollup(startDate,endDate){
+  // Single range request - same approach as sleep/exercise which work correctly
+  // Parse civilStartTime from each dataPoint to group by Israel date
+  const results={};
+  try{
+    const data=await ghGet("/users/me/dataTypes/steps/dataPoints",{
+      filter:`steps.interval.civil_start_time >= "${startDate}" AND steps.interval.civil_start_time < "${addDays(endDate,1)}"`,
+      pageSize:2000
+    });
+    const pts=data.dataPoints||[];
+    console.log("Steps raw: total intervals=",pts.length,"sample=",JSON.stringify(pts[0]).slice(0,200));
+    // Only use Fitbit device data, not phone pedometer (avoids double-counting)
+    const fitbitPts=pts.filter(pt=>pt.dataSource?.platform==="FITBIT"||pt.dataSource?.device?.displayName==="Charge 6");
+    console.log("Steps: total=",pts.length,"fitbit only=",fitbitPts.length);
+    fitbitPts.forEach(pt=>{
+      const startTime=pt.steps?.interval?.startTime;
+      const utcOffset=pt.steps?.interval?.startUtcOffset;
+      if(!startTime) return;
+      const count=parseInt(pt.steps?.count||0);
+      if(count<=0) return;
+      const offsetSeconds=parseInt(utcOffset||"10800")||10800;
+      const localMs=new Date(startTime).getTime()+(offsetSeconds*1000);
+      const localDate=new Date(localMs);
+      const dateStr=localDate.getUTCFullYear()+"-"+
+        String(localDate.getUTCMonth()+1).padStart(2,"0")+"-"+
+        String(localDate.getUTCDate()).padStart(2,"0");
+      results[dateStr]=(results[dateStr]||0)+count;
+    });
+    Object.keys(results).forEach(d=>{
+      console.log(`Steps ${d}: ${results[d]}`);
+    });
+  }catch(e){
+    if(e.message==="NOT_AUTHENTICATED") throw e;
+    console.log("Steps range error:",e.message);
+  }
+  console.log("Steps fetched:",Object.keys(results).length,"days. Sample:",JSON.stringify(Object.entries(results).slice(-3)));
+  return results;
+}
+
+// Parse sleep data point from list endpoint
+function parseSleepPoint(pt){
+  const sleep=pt.sleep;
+  if(!sleep||!sleep.interval) return null;
+  const startTime=sleep.interval.startTime;
+  const endTime=sleep.interval.endTime;
+  if(!startTime||!endTime) return null;
+  // Wake date in Israel timezone
+  const wakeDate=new Date(endTime).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  // Bedtime in Israel timezone
+  const bedtime=new Date(startTime).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Jerusalem"});
+  // Duration from stages
+  let deepMin=0,remMin=0,lightMin=0,awakeMin=0;
+  (sleep.stages||[]).forEach(stage=>{
+    const mins=Math.round((new Date(stage.endTime)-new Date(stage.startTime))/60000);
+    if(stage.type==="DEEP") deepMin+=mins;
+    else if(stage.type==="REM") remMin+=mins;
+    else if(stage.type==="LIGHT"||stage.type==="LIGHT_NREM") lightMin+=mins;
+    else if(stage.type==="AWAKE") awakeMin+=mins;
+  });
+  // Total asleep = full interval minus awake
+  const totalMins=Math.round((new Date(endTime)-new Date(startTime))/60000);
+  const asleepMin=totalMins-awakeMin;
+  if(asleepMin<60) return null; // too short
+  return {date:wakeDate,bedtime,total:asleepMin,deep:deepMin,rem:remMin,light:lightMin,awake:awakeMin};
+}
+
+// Parse exercise data point
+function parseExercise(pt){
+  const ex=pt.exercise;
+  if(!ex||!ex.interval) return null;
+  const endTime=ex.interval.endTime;
+  const startTime=ex.interval.startTime;
+  if(!endTime) return null;
+  const date=new Date(endTime).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const typeMap={WALK:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",
+    CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling",HIKING:"walk",
+    SPORT:"gym",SPINNING:"cycling",PILATES:"pilates"};
+  const rawType=ex.exerciseType||"WORKOUT";
+  const type=typeMap[rawType]||rawType.toLowerCase().replace(/_/g," ");
+  const durationMin=startTime?Math.round((new Date(endTime)-new Date(startTime))/60000):null;
+  const avgHr=ex.metricsSummary?.averageHeartRateBeatsPerMinute
+    ?Math.round(parseFloat(ex.metricsSummary.averageHeartRateBeatsPerMinute)):null;
+  if(durationMin&&durationMin<5) return null;
+  return {date,type,duration_min:durationMin,avg_hr:avgHr};
+}
+
+// Full sync
+async function ghFullSync(setSyncStatus,setFitbitData){
+  setSyncStatus("Syncing from Google Health...");
+  try{
+    const now=new Date();
+    const today=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+    const twoWeeksAgo=addDays(today,-14);
+    const tomorrow=addDays(today,1);
+
+    // ── STEPS via dailyRollUp ──────────────────────────────────────────────
+    let stepsArr=[];
+    try{
+      const stepsMap=await ghGetStepsRollup(twoWeeksAgo,today);
+      stepsArr=Object.entries(stepsMap)
+        .map(([date,steps])=>({date,steps}))
+        .filter(s=>s.steps>0)
+        .sort((a,b)=>a.date.localeCompare(b.date));
+      console.log("Steps parsed:",stepsArr.length,"days. Last 3:",stepsArr.slice(-3));
+    }catch(e){
+      if(e.message==="NOT_AUTHENTICATED") throw e;
+      console.log("Steps error:",e.message);
+    }
+
+    // ── SLEEP via list ─────────────────────────────────────────────────────
+    const sleepArr=[];
+    const napArr=[];
+    try{
+      const sleepData=await ghGet("/users/me/dataTypes/sleep/dataPoints",{
+        filter:`sleep.interval.civil_end_time >= "${twoWeeksAgo}" AND sleep.interval.civil_end_time < "${tomorrow}"`,
+        pageSize:30
+      });
+      const sleepPts=sleepData.dataPoints||[];
+      console.log("Sleep points:",sleepPts.length);
+      const byDate={};
+      sleepPts.forEach(pt=>{
+        const parsed=parseSleepPoint(pt);
+        if(!parsed) return;
+        if(parsed.total<90){
+          napArr.push({date:parsed.date,start:parsed.bedtime,total:parsed.total,deep:parsed.deep});
+        } else {
+          if(!byDate[parsed.date]||parsed.total>byDate[parsed.date].total) byDate[parsed.date]=parsed;
+        }
+      });
+      Object.values(byDate).forEach(s=>sleepArr.push(s));
+      sleepArr.sort((a,b)=>b.date.localeCompare(a.date));
+      console.log("Sleep parsed:",sleepArr.length,"nights. Latest:",sleepArr[0]);
+    }catch(e){
+      if(e.message==="NOT_AUTHENTICATED") throw e;
+      console.log("Sleep error:",e.message);
+    }
+
+    // ── EXERCISES via list ─────────────────────────────────────────────────
+    const workoutsArr=[];
+    try{
+      const exData=await ghGet("/users/me/dataTypes/exercise/dataPoints",{
+        filter:`exercise.interval.civil_start_time >= "${twoWeeksAgo}" AND exercise.interval.civil_start_time < "${tomorrow}"`,
+        pageSize:25
+      });
+      (exData.dataPoints||[]).forEach(pt=>{
+        const parsed=parseExercise(pt);
+        if(parsed) workoutsArr.push(parsed);
+      });
+      workoutsArr.sort((a,b)=>b.date.localeCompare(a.date));
+      console.log("Workouts parsed:",workoutsArr.length,workoutsArr[0]);
+    }catch(e){
+      if(e.message==="NOT_AUTHENTICATED") throw e;
+      console.log("Workouts error:",e.message);
+    }
+
+    // Only replace each field if we got actual data - never wipe with empty
+    setFitbitData(prev=>{
+      const merged={
+        sleep: sleepArr.length>0 ? sleepArr : prev.sleep||[],
+        naps: napArr.length>0 ? napArr : prev.naps||[],
+        steps: (()=>{
+        // Merge: for each date, keep the HIGHER value (seed vs sync)
+        // This prevents sync from overwriting known-correct seed values with wrong API values
+        const seedMap={};
+        (prev.steps||[]).forEach(s=>{seedMap[s.date]=s.steps;});
+        const syncMap={};
+        stepsArr.forEach(s=>{syncMap[s.date]=s.steps;});
+        // All dates from both sources
+        const allDates=new Set([...Object.keys(seedMap),...Object.keys(syncMap)]);
+        const merged=[];
+        allDates.forEach(date=>{
+          const seedVal=seedMap[date]||0;
+          const syncVal=syncMap[date]||0;
+          // For today and recent days, trust sync more if it's reasonable
+          // For older dates where seed has verified values, keep seed if sync is suspiciously low
+          const val=syncVal>0&&syncVal>seedVal*0.5?syncVal:seedVal>0?seedVal:syncVal;
+          if(val>0) merged.push({date,steps:val});
+        });
+        return merged.sort((a,b)=>a.date.localeCompare(b.date));
+      })(),
+        workouts: workoutsArr.length>0 ? workoutsArr : prev.workouts||[],
+        synced_at: new Date().toISOString()
+      };
+      // Save merged data to Supabase
+      fetch(SUPA_URL+"/rest/v1/fitness_cache?on_conflict=user_id",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Prefer":"resolution=merge-duplicates,return=minimal"},
+        mode:"cors",credentials:"omit",
+        body:JSON.stringify({user_id:UID,data:merged,synced_at:merged.synced_at})
+      }).then(r=>{if(r.ok)console.log("✓ Fitness data saved to Supabase");else r.text().then(t=>console.log("Supabase save error:",t));})
+        .catch(e=>console.log("Supabase save error:",e.message));
+      return merged;
+    });
+    const newData={steps:stepsArr,sleep:sleepArr,workouts:workoutsArr};
+
+
+
+    const t=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    setSyncStatus(`Synced ${t} · ${stepsArr.length}d steps · ${sleepArr.length} nights · ${workoutsArr.length} workouts`);
+    return newData;
+  }catch(e){
+    if(e.message==="NOT_AUTHENTICATED") setSyncStatus("Tap Sync to reconnect Google Health");
+    else setSyncStatus("Sync error: "+e.message.slice(0,40));
+    throw e;
+  }
+}
+
+// ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
+function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const todayKey = now.toISOString().slice(0,10);
+  const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+  const todayFood = allFood[todayKey]||[];
+  const liveProt = Math.round(todayFood.reduce((s,e)=>s+(e.p||0),0));
+  const liveKcal = Math.round(todayFood.reduce((s,e)=>s+(e.k||0),0));
+  const liveCarbs = Math.round(todayFood.reduce((s,e)=>s+(e.c||0),0));
+  const liveFat = Math.round(todayFood.reduce((s,e)=>s+(e.f||0),0));
+  const mealNames = todayFood.map(e=>e.n).join(", ")||"nothing logged yet";
+  const yAlcohol = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  let cycleCtx = "Cycle not tracked";
+  if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
+  // Include all entries but mark with date so AI knows which are recent
+  const jArr = logEntries.slice(0,12).map(e=>{
+    const entryDate=e.dt?e.dt.slice(0,10):"unknown";
+    const daysAgo=e.dt?Math.floor((now-new Date(e.dt))/864e5):99;
+    const recency=daysAgo===0?"TODAY":daysAgo===1?"YESTERDAY":`${daysAgo}d ago`;
+    return `[${e.tag}|${recency}] ${e.txt}`;
+  });
+  const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
+  const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
+  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: no data";
+  const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
+  const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
+  const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
+  const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yKey);
+  const ySteps=(fitbitData.steps||[]).find(s=>s.date===yKey);
+  const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day, no workout logged";
+  const yStepsNote=ySteps?ySteps.steps.toLocaleString()+" steps":"steps unknown";
+  return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+}
+
+function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}}) {
+  const [aiToday, setAiToday] = useState(null);
+  const [aiWeek, setAiWeek] = useState(null);
+  const [loading, setLoading] = useState({today:false,week:false});
+
+  const todayFood = allFood[tkey()]||[];
+  const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
+
+  function buildCtx() {
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
+  }
+
+  async function callAI(prompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:buildCtx()+"\n\n"+prompt}]})
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message);
+    return d.content[0].text.trim();
+  }
+
+  function renderBold(text) {
+    const parts = text.split(/\*\*([^*]+)\*\*/g);
+    return parts.map((p,i)=>i%2===1?<strong key={i}>{p}</strong>:p);
+  }
+  function formatAI(txt) {
+    const lines = txt.split("\n").filter(l=>l.trim());
+    const result = [];
+    let i = 0;
+    while(i < lines.length) {
+      const line = lines[i];
+      const m = line.match(/^([^\w\s]{0,3}\s*)([A-Z][A-Z\s\-]{2,}[A-Z]):\s*(.*)/);
+      if(m && m[2].trim().length>=3) {
+        const label = m[1].trim()+" "+m[2].trim();
+        const actionLine = m[3];
+        // Next line is context if it doesn't start a new section
+        const nextLine = lines[i+1];
+        const isNextSection = nextLine && nextLine.match(/^[^\w\s]{0,3}\s*[A-Z][A-Z\s\-]{2,}[A-Z]:/);
+        const contextLine = (!isNextSection && nextLine) ? lines[++i] : null;
+        result.push(
+          <div key={i} style={{marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:600,letterSpacing:".06em",color:C.pu,marginBottom:3}}>{label}</div>
+            {actionLine&&<div style={{fontSize:13,color:C.tx,lineHeight:1.5,marginBottom:contextLine?2:0}}>{renderBold(actionLine)}</div>}
+            {contextLine&&<div style={{fontSize:12,color:C.t2,lineHeight:1.5}}>{renderBold(contextLine)}</div>}
+          </div>
+        );
+      } else {
+        result.push(<div key={i} style={{fontSize:12,color:C.t2,lineHeight:1.5,marginBottom:3}}>{renderBold(line)}</div>);
+      }
+      i++;
+    }
+    return result;
+  }
+
+  async function genAI(type) {
+    if (!apiKey) return;
+    setLoading(l=>({...l,[type]:true}));
+    try { await genAIInner(type); } finally { setLoading(l=>({...l,[type]:false})); }
+  }
+  async function genAIInner(type) {
+    const p = type==="today"
+      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain|TODAY] or [postworkout|TODAY] entries, show FLAG section FIRST and do NOT recommend workouts. Entries marked with dates like "3d ago" are old and should NOT trigger FLAG. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${(()=>{const tf=allFood[new Date().toISOString().slice(0,10)]||[];return Math.round(tf.reduce((s,e)=>s+(e.p||0),0));})()} g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
+      : `Weekly coaching review. Israeli week = Sunday to Saturday. Week COMPLETED: last week Sun–Sat (see workout and step data in context below). Current week started this past Sunday. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. Sections: WELL DONE (last week), FOCUS THIS WEEK (targets), NEXT SESSION (what to do next). FORMAT: emoji + CAPS LABEL, bold **action**, one sentence why. Tight, no padding, max 2 lines each. Do not say next week - it already started.`
+    try {
+      const txt = await callAI(p);
+      if (type==="today") setAiToday(txt);
+      else setAiWeek(txt);
+    } catch(e) {
+      if (type==="today") setAiToday("Error: "+e.message);
+      else setAiWeek("Error: "+e.message);
+    }
+  }
+
+  useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
+  useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
+
+
+  return (
+    <div>
+      {/* READINESS */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
+          {(()=>{
+          const now2=new Date();
+          const yDate2=new Date(now2.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+          const ls=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+          const yw=(fitbitData.workouts||[]).filter(w=>w.date===yDate2);
+          const yF=allFood[yDate2]||[];
+          const yP=Math.round(yF.reduce((s,e)=>s+(e.p||0),0));
+          const sScore=ls?Math.min(30,Math.round(ls.total/420*30)):0;
+          const dPct=ls&&ls.total>0?Math.round(ls.deep/ls.total*100):0;
+          const rPct=ls&&ls.total>0?Math.round(ls.rem/ls.total*100):0;
+          const dScore=dPct>=20?20:dPct>=15?15:10;
+          const rScore=rPct>=20?10:rPct>=15?7:5;
+          const bHour=ls?parseInt(ls.bedtime.split(":")[0]):0;
+          const bScore=bHour<=23&&bHour>=22?8:bHour<=0?5:bHour<=1?3:2;
+          const lScore=yw.length===0?20:yw.some(w=>w.type==="gym"||w.type==="run")?12:16;
+          const pScore=yP>=protTgt?8:yP>=protTgt*0.7?4:0;
+          const score=sScore+dScore+rScore+bScore+lScore+pScore;
+          const col=score>=85?C.tm:score>=70?C.am:C.red;
+          const label=score>=85?"Great":score>=70?"Good":"Low";
+          return (<>
+            <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:col}}>{score}</div>
+            <div style={{flex:1}}>
+              <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:score+"%",height:"100%",background:col,borderRadius:4}}/></div>
+              <div style={{fontSize:12,fontWeight:500,color:col}}>{label}</div>
+            </div>
+          </>);
+        })()}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+          {(()=>{
+            const now=new Date();
+            const yDate=new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+            const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+            const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
+            const yFood=allFood[yDate]||[];
+            const yProt=Math.round(yFood.reduce((s,e)=>s+(e.p||0),0));
+            const h=lastSleep?Math.floor(lastSleep.total/60):0;
+            const m=lastSleep?lastSleep.total%60:0;
+            const deepPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.deep/lastSleep.total*100):0;
+            const remPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.rem/lastSleep.total*100):0;
+            const sleepScore=lastSleep?Math.min(30,Math.round(lastSleep.total/420*30)):0;
+            const deepScore=deepPct>=20?20:deepPct>=15?15:10;
+            const remScore=remPct>=20?10:remPct>=15?7:5;
+            const bedtimeHour=lastSleep?parseInt(lastSleep.bedtime.split(":")[0]):0;
+            const bedtimeScore=bedtimeHour<=23&&bedtimeHour>=22?8:bedtimeHour<=0?5:bedtimeHour<=1?3:2;
+            const loadScore=yWorkouts.length===0?20:yWorkouts.some(w=>w.type==="gym"||w.type==="run")?12:16;
+            const protScore=yProt>=protTgt?8:yProt>=protTgt*0.7?4:0;
+            const total=sleepScore+deepScore+remScore+bedtimeScore+loadScore+protScore;
+            const rows=[
+              [`Sleep duration (${h}h ${m}m)`,`${sleepScore}/30`,sleepScore>=25?C.tm:sleepScore>=20?C.am:C.red],
+              [`Deep sleep (${lastSleep?.deep||0}m, ${deepPct}%)`,`${deepScore}/20`,deepScore>=18?C.tm:C.am],
+              [`REM sleep (${lastSleep?.rem||0}m, ${remPct}%)`,`${remScore}/10`,remScore>=9?C.tm:C.am],
+              [`Training load yesterday`,`${loadScore}/20`,loadScore>=18?C.tm:loadScore>=14?C.am:C.red],
+              [`Bedtime ${lastSleep?.bedtime||"--:--"}`,`${bedtimeScore}/10`,bedtimeScore>=7?C.tm:bedtimeScore>=4?C.am:C.red],
+              [`Protein yesterday (${yProt}g)`,`+${protScore}`,protScore>0?C.tm:C.t3],
+            ];
+            return rows;
+          })().map(([label,pts,col],i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
+              <span style={{color:C.t2}}>{label}</span>
+              <span style={{fontWeight:600,color:col}}>{pts}</span>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.tl}}>
+            {(()=>{
+              const ls2=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+              if(!ls2) return null;
+              // Efficiency = (deep + REM) / total sleep — quality metric
+              const qualityPct=Math.round((ls2.deep+ls2.rem)/ls2.total*100);
+              const bonus=qualityPct>=45?5:qualityPct>=35?3:qualityPct>=25?1:0;
+              const col=qualityPct>=45?C.teal:qualityPct>=35?C.am:C.t3;
+              return (<>
+                <span style={{color:col}}>✨ Sleep quality ({qualityPct}% deep+REM)</span>
+                <span style={{fontWeight:600,color:col}}>{bonus>0?`+${bonus}`:"+0"}</span>
+              </>);
+            })()}
+          </div>
+        </div>
+        {(()=>{
+          const now=new Date();
+          const yDate=new Date(now.getTime()-864e5).toISOString().slice(0,10);
+          const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
+          const ySteps=(fitbitData.steps||[]).find(s=>s.date===yDate);
+          const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+          const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day";
+          const stepNote=ySteps&&ySteps.steps>=8000?"active ("+ySteps.steps.toLocaleString()+" steps)":ySteps?"low steps ("+ySteps.steps.toLocaleString()+")":"";
+          const sleepNote=lastSleep?`${Math.floor(lastSleep.total/60)}h ${lastSleep.total%60}m sleep (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m), bedtime ${lastSleep.bedtime}`:"";
+          const costNote=lastSleep&&lastSleep.total<420?"Sleep duration is the main cost today.":lastSleep&&lastSleep.bedtime>"01:00"?"Late bedtime is the main cost today.":"";
+          return <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>
+            Yesterday: {yActivity}{stepNote?" · "+stepNote:""}. Last night: {sleepNote}. {costNote}
+          </div>;
+        })()}
+      </Card>
+
+      <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
+
+      <div style={s.mg}>
+        <StepsMetric fitbitData={fitbitData}/>
+        <SleepTileMetric fitbitData={fitbitData}/>
+        <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={tp>=protTgt?C.tm:C.am}/>
+        <CyclePhaseMetric cycleDates={cycleDates}/>
+      </div>
+
+      {/* AI TODAY */}
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+          AI coach — today
+          <button onClick={()=>genAI("today")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+        </div>
+        {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
+         : aiToday ? formatAI(aiToday)
+         : apiKey ? <div>
+           <div style={{fontSize:12,color:C.t2,marginBottom:8}}>Ready to generate. Tap refresh above or the button below.</div>
+           <button onClick={async()=>{
+             try{
+               setLoading(l=>({...l,today:true}));
+               const ctx=buildCtx();
+               const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,messages:[{role:"user",content:ctx+"\n\nGenerate a brief coaching note for today. FORMAT: emoji + CAPS LABEL on own line, then bold **action**, then one sentence why. Sections: ACTIVITY, NUTRITION, RECOVERY. Max 2 lines each."}]})});
+               const d=await res.json();
+               if(d.error)throw new Error(d.error.message);
+               setAiToday(d.content[0].text.trim());
+             }catch(err){setAiToday("Error: "+err.message);}
+             finally{setLoading(l=>({...l,today:false}));}
+           }} style={{fontSize:12,color:C.pu,background:C.pl,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}}>Generate today&#39;s briefing</button>
+         </div>
+         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {/* SLEEP LAST NIGHT */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
+            Last night — {(()=>{const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];if(!r)return "—";const d=new Date(r.date);return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});})()}
+          </div>
+          {(()=>{
+            const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+            if(!r) return <div style={{color:C.t3,fontSize:13}}>No sleep data</div>;
+            const h=Math.floor(r.total/60),m=r.total%60;
+            const tot=r.deep+r.rem+r.light+r.awake;
+            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+            return (<>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
+                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
+                </div>
+                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#3C3489",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7F77DD",fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#AFA9EC",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
+                </div>
+              </div>
+              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
+                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#3C3489"}}/>
+                <div style={{width:Math.round(r.rem/tot*100)+"%",background:"#7F77DD"}}/>
+                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#AFA9EC"}}/>
+                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
+              </div>
+              {todayNap&&(
+                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:C.teal,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
+                  <span style={{color:C.teal}}>{todayNap.total}min · {todayNap.deep}m deep</span>
+                </div>
+              )}
+            </>);
+          })()}
+        </Card>
+
+        {/* PROTEIN */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Protein goal today</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+            <span style={{fontWeight:500}}>{Math.round(tp)}g logged</span>
+            <span style={{color:C.t2}}>{protTgt}g target</span>
+          </div>
+          <div style={s.pb}><div style={s.pf(Math.min(100,Math.round(tp/protTgt*100)),tp>=protTgt?C.teal:C.tm)}/></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
+            <span>{Math.min(100,Math.round(tp/protTgt*100))}%</span>
+            <span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
+          </div>
+        </Card>
+      </div>
+
+      <hr style={s.hr}/>
+      <SecLabel>{(()=>{
+        const now=new Date();
+        const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+        const [wy,wm,wd]=todayIL.split("-").map(Number);
+        const wdow=new Date(wy,wm-1,wd).getDay();
+        const sun=new Date(wy,wm-1,wd-wdow);
+        const sat=new Date(wy,wm-1,wd-wdow+6);
+        const fmt=(d)=>d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+        return `This week — ${fmt(sun)} – ${fmt(sat)}`;
+      })()}</SecLabel>
+
+      <div style={s.mg}>
+        <WeeklyStepsMetric fitbitData={fitbitData}/>
+        <WeeklyWorkoutsMetric fitbitData={fitbitData}/>
+        <WeeklySleepMetric fitbitData={fitbitData}/>
+        <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
+      </div>
+
+      {/* AI WEEK */}
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+          AI coach — weekly review
+          <button onClick={()=>genAI("week")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+        </div>
+        {loading.week ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
+         : aiWeek ? formatAI(aiWeek)
+         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
+      </div>
+
+      {/* STEP BARS */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
+            {(()=>{
+              // Get current week's steps from fitbitData
+              const now=new Date();
+              const nowILStr=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const [nowY,nowM,nowD2]=nowILStr.split("-").map(Number);
+              const dow=new Date(nowY,nowM-1,nowD2).getDay(); // 0=Sun
+              // Compute Sunday of this week using date strings to avoid timezone mutation bugs
+              const todayStrBar=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const todayPartsBar=todayStrBar.split("-").map(Number);
+              const dowILBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]).getDay();
+              const sundayBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]-dowILBar);
+              const dayLabels=["S","M","T","W","T","F","S"];
+              const weekSteps=dayLabels.map((_,i)=>{
+                const d=new Date(sundayBar.getFullYear(),sundayBar.getMonth(),sundayBar.getDate()+i);
+                const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+                const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
+                const isFuture=d>now;
+                const todayStr=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+                const isToday=dateStr===todayStr;
+                return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
+              });
+              const maxStep=Math.max(...weekSteps.map(d=>d.s),1);
+              return weekSteps.map((d,i)=>{
+                const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
+                const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
+                const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
+                return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
+                  <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
+                  <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
+                </div>;
+              });
+            })()}
+          </div>
+        </Card>
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep — last 7 days</div>
+          {(()=>{
+            // Last 7 sleep records from fitbitData
+            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7).reverse();
+            return recs.map((d,i)=>{
+              const tot=d.deep+d.rem+d.light+d.awake;
+              const h=Math.floor(d.total/60),m=d.total%60;
+              const dateObj=new Date(d.date);
+              const lbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+              return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+                <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
+                <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
+                  <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#3C3489"}}/>
+                  <div style={{width:Math.round(d.rem/tot*100)+"%",background:"#7F77DD"}}/>
+                  <div style={{width:Math.round(d.light/tot*100)+"%",background:"#AFA9EC"}}/>
+                </div>
+                <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
+              </div>;
+            });
+          })()}
+        </Card>
+      </div>
+
+      {/* WORKOUTS LIST */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
+        {(()=>{
+          const typeStyle={gym:[C.pl,C.pu],yoga:[C.orl,C.or],run:[C.tl,C.teal],elliptical:[C.tl,C.teal],walk:[C.tl,C.teal],pilates:[C.orl,C.or]};
+          const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
+          if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
+          return recent.map((w,i)=>{
+            const [bg,col]=typeStyle[w.type]||[C.s2,C.t2];
+            const dateObj=new Date(w.date);
+            const dayLbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+            const detail=[w.duration_min?w.duration_min+" min":null,w.avg_hr?w.avg_hr+"bpm":null].filter(Boolean).join(" · ")||"";
+            return <div key={i} style={{...s.wi,borderBottom:i<recent.length-1?`.5px solid ${C.bd}`:"none"}}>
+              <div><span style={{...s.badge(bg,col)}}>{w.type}</span><span style={{fontWeight:500}}>{dayLbl}</span></div>
+              <div style={{fontSize:12,color:C.t2}}>{detail}</div>
+            </div>;
+          });
+        })()}
+      </Card>
+
+      <hr style={s.hr}/>
+      <SecLabel>Month — June 2026</SecLabel>
+
+      <div style={s.mg}>
+        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt}/>
+        <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
+      </div>
+
+      {/* HEATMAP */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
+        <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData}/>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
+          <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
+          <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
+          <span><span style={{fontWeight:700,color:C.tm,fontSize:9}}>P✓</span> protein goal hit</span>
+        </div>
+      </Card>
+
+      {/* WEEK BY WEEK */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week — June 2026</div>
+        {[
+          {label:"Week 1",range:"Mon 1 – Sat 6 Jun",detail:"1 active day · yoga Fri 5 Jun (96min ★)",current:false},
+          ...(()=>{
+            const now2=new Date();
+            const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+            const [y2,m2,d2]=todayStr2.split("-").map(Number);
+            const dow2=new Date(y2,m2-1,d2).getDay();
+            const tp2=todayStr2.split("-").map(Number);
+            // Current week Sunday (Israeli week starts Sunday)
+            const currSun=new Date(tp2[0],tp2[1]-1,tp2[2]-dow2);
+            const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+            const fmtRange=(sun)=>{const sat=new Date(sun);sat.setDate(sun.getDate()+6);return `${fmt(sun)} – ${fmt(sat)}`;};
+            const weeks=[];
+            for(let w=-2;w<=2;w++){
+              const sun=new Date(currSun);sun.setDate(currSun.getDate()+w*7);
+              const sat=new Date(sun);sat.setDate(sun.getDate()+6);
+              const sunStr=sun.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const satStr=sat.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const isCurr=w===0;
+              const isPast=w<0;
+              // Count workouts and steps for this week
+              const wWorkouts=(fitbitData.workouts||[]).filter(wo=>wo.date>=sunStr&&wo.date<=satStr);
+              const wSteps=(fitbitData.steps||[]).filter(s=>s.date>=sunStr&&s.date<=satStr);
+              const totalSteps=wSteps.reduce((s,d)=>s+d.steps,0);
+              const woTypes=[...new Set(wWorkouts.map(wo=>wo.type))];
+              let detail="";
+              if(isCurr){
+                const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayStr2);
+                detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
+              } else if(isPast&&totalSteps>0){
+                detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
+              }
+              weeks.push({label:`Week${isCurr?" ← current":""}`,range:fmtRange(sun),detail,current:isCurr});
+            }
+            return weeks;
+          })(),
+        ].map((w,i)=>(
+          <div key={i} style={{...s.wi,borderBottom:i<3?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
+            <div><strong style={{fontSize:12,color:w.current?C.teal:C.tx}}>{w.label}</strong><span style={{fontSize:12,color:w.current?C.teal:C.t2,marginLeft:8}}>{w.range}</span></div>
+            <div style={{fontSize:12,color:w.current?C.teal:C.t2}}>{w.detail}</div>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}}) {
+  const today = new Date();
+  const todayDay = today.getDate();
+  const firstDay = new Date(today.getFullYear(),today.getMonth(),1).getDay();
+  const daysInMonth = new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+  const month = today.getMonth()+1;
+  const year = today.getFullYear();
+  const pad = n=>String(n).padStart(2,"0");
+
+  // Build lookup maps from fitbitData
+  const stepsMap = {};
+  (fitbitData.steps||[]).forEach(s=>{stepsMap[s.date]=s.steps;});
+  const workoutMap = {};
+  (fitbitData.workouts||[]).forEach(w=>{
+    const k=w.date;
+    if(!workoutMap[k]) workoutMap[k]=[];
+    workoutMap[k].push(w.type);
+  });
+
+  const days=["S","M","T","W","T","F","S"];
+  const cells=[];
+  days.forEach((d,i)=>cells.push(<div key={"lbl"+i} style={{fontSize:9,color:C.t3,textAlign:"center"}}>{d}</div>));
+  for(let i=0;i<firstDay;i++) cells.push(<div key={"pad"+i}/>);
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${year}-${pad(month)}-${pad(d)}`;
+    const w=workoutMap[dateStr]||[];
+    const steps=stepsMap[dateStr]||0;
+    const isActive=steps>=8000||w.length>0;
+    const hasGym=w.includes("gym");
+    const hasYoga=w.includes("yoga")||w.includes("pilates");
+    const hasCardio=w.includes("walk")||w.includes("elliptical")||w.includes("run");
+    const dayMeals=allFood[dateStr]||[];
+    const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);
+    const protHit=dayProt>=protTgt;
+    cells.push(
+      <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive&&d!==todayDay?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===todayDay?{outline:`2px solid ${C.tx}`,background:isActive?C.tl:C.s2}:{})}}>
+        {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
+        {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.tm,position:"absolute",top:2,left:2}}>P✓</span>}
+        {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
+        {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
+        {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{w.includes("run")?"run":"cardio"}</div>}
+      </div>
+    );
+  }
+  return <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>{cells}</div>;
+}
+
+// ── SUPPLEMENT CHECKLIST COMPONENT ───────────────────────────────────────
+const SUPPS = [
+  {id:"creatine",name:"Creatine",time:"Morning with food"},
+  {id:"omega3",name:"Omega-3",time:"With meal"},
+  {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
+  {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
+  {id:"collagen",name:"Collagen",time:"With vitamin C"},
+  {id:"multi",name:"Multivitamin",time:"With meal"},
+];
+
+function SupplementChecklist({suppState={}, setSupp}) {
+  const done = SUPPS.filter(s=>suppState[s.id]).length;
+  return (
+    <Card style={{marginTop:8}}>
+      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
+        Supplements today — {done}/{SUPPS.length} taken
+        {done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+        {SUPPS.map(sup=>{
+          const checked=!!suppState[sup.id];
+          return (
+            <div key={sup.id} onClick={()=>setSupp&&setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.s2,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"8px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}>
+              <div style={{width:16,height:16,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.t3}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,flexShrink:0}}>{checked?"✓":""}</div>
+              <div><div style={{fontSize:11,fontWeight:500,lineHeight:1.2}}>{sup.name}</div><div style={{fontSize:9,color:C.t3}}>{sup.time}</div></div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// ── FOOD TAB ──────────────────────────────────────────────────────────────
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp}) {
+  const [foodDate, setFoodDate] = useState(tkey());
+  const [showTxt, setShowTxt] = useState(false);
+  const [txtInput, setTxtInput] = useState("");
+  const [mealDate, setMealDate] = useState(tkey());
+  const [mealTime, setMealTime] = useState(new Date().toTimeString().slice(0,5));
+  const [analysing, setAnalysing] = useState(false);
+  const [aiMsg, setAiMsg] = useState("");
+  const [editIdx, setEditIdx] = useState(null);
+  const [editEntry, setEditEntry] = useState({});
+
+  const food = allFood[foodDate]||[];
+  const tp=food.reduce((s,e)=>s+(e.p||0),0);
+  const tc=food.reduce((s,e)=>s+(e.c||0),0);
+  const tf=food.reduce((s,e)=>s+(e.f||0),0);
+  const tk=food.reduce((s,e)=>s+(e.k||0),0);
+  const pct=Math.min(100,Math.round(tp/protTgt*100));
+
+  const isToday = foodDate===tkey();
+  const dateLabel = isToday?"Today":new Date(foodDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"});
+
+  function prevDay(){const d=new Date(foodDate);d.setDate(d.getDate()-1);setFoodDate(d.toISOString().slice(0,10));}
+  function nextDay(){const d=new Date(foodDate);d.setDate(d.getDate()+1);if(d.toISOString().slice(0,10)<=tkey())setFoodDate(d.toISOString().slice(0,10));}
+
+  async function analyseText() {
+    if(!txtInput.trim()||!apiKey) return;
+    setAnalysing(true); setAiMsg("Analysing meal...");
+    try {
+      const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
+
+Rules:
+- Preserve exact quantities mentioned (e.g. "2 bowls", "150g", "5 spoons")
+- If quantity is vague (e.g. "bowl", "plate"), assume a realistic serving size and state it in det
+- Be accurate — do not overestimate protein. Most soups have 5-15g protein per bowl unless protein-rich (lentil, chicken, bean)
+- For Israeli foods or brands, use accurate Israeli nutritional values
+- Translate non-English to English but keep all quantities
+- The det field should state your assumptions (e.g. "2 x 350ml bowls, estimated lentil soup")
+
+Return format: {"n":"food name in English","det":"description with quantity and assumptions","p":12,"c":30,"f":4,"k":200}
+All macro values must be integers representing TOTAL for the full entry (not per 100g).
+
+Input: ${txtInput}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body: JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:prompt}]})
+      });
+      const d = await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const entry = JSON.parse(raw);
+      entry.time = mealTime;
+      entry.source = "estimated";
+      const targetDate = mealDate || foodDate;
+      try {
+        const rows = await supa("POST","food_log",{
+          user_id:UID, log_date:targetDate, meal_time:mealTime,
+          name:entry.n, detail:entry.det||null,
+          protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+        });
+        if(rows&&rows[0]) entry.dbid = rows[0].id;
+      } catch(e) { console.log("Supabase save:", e.message); }
+      setAllFood(prev=>{
+        const updated = {...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
+        localStorage.setItem("jfood_backup", JSON.stringify(updated));
+        return updated;
+      });
+      setAiMsg(entry.n + " logged ✓");
+      setTxtInput(""); setShowTxt(false);
+      if(onFoodLogged) onFoodLogged();
+    } catch(e) { setAiMsg("Error: " + e.message); }
+    setAnalysing(false);
+  }
+
+  async function delFood(i) {
+    const entry=food[i];
+    if(entry?.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}
+    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].filter((_,j)=>j!==i)}));
+  }
+
+  async function saveEdit() {
+    const newP=parseFloat(editEntry.p)||0,newC=parseFloat(editEntry.c)||0,newF=parseFloat(editEntry.f)||0;
+    const newK=Math.round(newP*4+newC*4+newF*9);
+    const updated={...food[editIdx],n:editEntry.n,p:newP,c:newC,f:newF,k:newK};
+    if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,protein:newP,carbs:newC,fat:newF,kcal:newK},"id=eq."+updated.dbid);}catch(e){}}
+    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)}));
+    setEditIdx(null);
+  }
+
+  const feedbackMsg = ()=>{
+    if(tk===0) return "";
+    const msgs=[];
+    if(tp>=protTgt) msgs.push("Protein goal hit ✅");
+    else msgs.push(`${Math.round(protTgt-tp)}g protein to go`);
+    if(tc>250) msgs.push("carbs above range");
+    if(tf>80) msgs.push("fat above range");
+    if(tk>2200) msgs.push("calories above range");
+    return msgs.join(" · ");
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <button onClick={prevDay} style={{...s.btn("s"),...s.btnSm}}>←</button>
+        <span style={{flex:1,textAlign:"center",fontSize:13,fontWeight:500}}>{dateLabel}</span>
+        <button onClick={nextDay} disabled={isToday} style={{...s.btn("s"),...s.btnSm,opacity:isToday?.5:1}}>→</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[["kcal",Math.round(tk),""],["protein",Math.round(tp)+"g",C.tm],["carbs",Math.round(tc)+"g",C.am],["fat",Math.round(tf)+"g",C.pu]].map(([l,v,col])=>(
+          <div key={l} style={{background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontSize:18,fontWeight:600,color:col||C.tx}}>{v}</div>
+            <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+          <span style={{fontWeight:500}}>Daily protein goal</span>
+          <span style={{color:C.t2}}>{Math.round(tp)}g / {protTgt}g</span>
+        </div>
+        <div style={s.pb}><div style={s.pf(pct,pct>=90?C.teal:C.tm)}/></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3,marginBottom:feedbackMsg()?8:0}}>
+          <span>{pct}%</span><span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
+        </div>
+        {feedbackMsg()&&<div style={{fontSize:11,color:tp>=protTgt?C.tm:C.am,textAlign:"center",paddingTop:8,borderTop:`.5px solid ${C.bd}`}}>{feedbackMsg()}</div>}
+      </Card>
+
+      {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
+
+      <button onClick={()=>{setMealDate(tkey());setMealTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
+        📝 Log a meal
+      </button>
+
+      {/* FOOD ENTRIES */}
+      {food.length===0
+        ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No meals logged{isToday?"":" for this day"}</strong>{isToday?"Tap Type to log your first meal.":""}</div>
+        : food.map((e,i)=>(
+          <div key={i} style={{background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,marginBottom:6,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"10px 14px"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:13,fontWeight:500}}>{e.n}</span>
+                  
+                </div>
+                <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.det}</div>
+                {e.time&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>{e.time}</div>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,marginRight:8}}>
+                <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{Math.round(e.k||0)} kcal</div>
+                <div style={{display:"flex",gap:4}}>
+                  <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>{Math.round(e.p||0)}g P</span>
+                  <span style={{...s.pill(C.al,C.am),fontSize:10}}>{Math.round(e.c||0)}g C</span>
+                  <span style={{...s.pill(C.pl,C.pu),fontSize:10}}>{Math.round(e.f||0)}g F</span>
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0)});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
+                <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
+              </div>
+            </div>
+          </div>
+        ))
+      }
+
+      {/* TYPE MODAL */}
+      {showTxt&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowTxt(false);}}>
+          <div style={s.modal}>
+            <h3 style={{marginBottom:6,fontSize:16,fontWeight:600}}>Describe your meal</h3>
+            <p style={{fontSize:13,color:C.t2,marginBottom:16}}>Type what you ate and how much.</p>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label><input type="date" value={mealDate} onChange={e=>setMealDate(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Time</label><input type="time" value={mealTime} onChange={e=>setMealTime(e.target.value)} style={s.input}/></div>
+            </div>
+            <textarea value={txtInput} onChange={e=>setTxtInput(e.target.value)} placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style={{...s.input,resize:"vertical",minHeight:72,marginBottom:16}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowTxt(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={analyseText} disabled={analysing||!txtInput.trim()} style={{...s.btn("p"),opacity:analysing||!txtInput.trim()?.6:1}}>{analysing?"Analysing...":"Analyse"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUPPLEMENTS CHECKLIST */}
+      <SupplementChecklist suppState={suppState} setSupp={setSupp}/>
+
+      {/* EDIT MODAL */}
+      {editIdx!==null&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setEditIdx(null);}}>
+          <div style={s.modal}>
+            <h3 style={{marginBottom:16,fontSize:16,fontWeight:600}}>Edit food entry</h3>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Food name</label>
+            <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
+                <div key={k} style={{flex:1}}>
+                  <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
+                  <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setEditIdx(null)} style={s.btn("s")}>Cancel</button>
+              <button onClick={saveEdit} style={s.btn("p")}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CYCLE TAB ─────────────────────────────────────────────────────────────
+function TabCycle({cycleDates, setCycleDates}) {
+  const [dateInput, setDateInput] = useState("");
+
+  const confirmed = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+
+  function cycleInfo(){
+    if(!confirmed.length) return null;
+    const last=new Date(confirmed[0].d);
+    const now=new Date();now.setHours(0,0,0,0);
+    const day=Math.floor((now-last)/864e5)+1;
+    const phase=day<=5?"menstrual":day<=13?"follicular":day<=16?"ovulatory":"luteal";
+    return {day:((day-1)%28)+1,phase};
+  }
+
+  const info=cycleInfo();
+  const PHASES={
+    menstrual:{n:"Menstrual",days:"Days 1-5",c:C.red,bg:C.rl},
+    follicular:{n:"Follicular",days:"Days 6-13",c:C.teal,bg:C.tl},
+    ovulatory:{n:"Ovulatory",days:"Days 14-16",c:C.am,bg:C.al},
+    luteal:{n:"Luteal",days:"Days 17-28",c:C.pu,bg:C.pl},
+  };
+
+  async function addDate(){
+    if(!dateInput) return;
+    if(cycleDates.find(x=>x.d===dateInput)) return;
+    const newEntry={d:dateInput,ok:true,id:Date.now()};
+    try {
+      const rows=await supa("POST","cycle_dates",{user_id:UID,date:dateInput,confirmed:true});
+      if(rows&&rows[0]) newEntry.id=rows[0].id;
+      console.log("Cycle saved to Supabase:",dateInput);
+      localStorage.setItem("jcycle_backup",JSON.stringify([...cycleDates,newEntry]));
+    } catch(e){
+      console.error("Cycle save error:",e.message);
+      // Still save locally even if Supabase fails
+      localStorage.setItem("jcycle_backup",JSON.stringify([...cycleDates,newEntry]));
+    }
+    setCycleDates(prev=>[...prev,newEntry]);
+    setDateInput("");
+  }
+
+  async function delDate(id){
+    setCycleDates(prev=>prev.filter(x=>x.id!==id));
+    try{await supa("DELETE","cycle_dates",null,"id=eq."+id);}catch(e){}
+  }
+
+  const phase=info?PHASES[info.phase]:null;
+
+  return (
+    <div>
+      <div style={{background:phase?phase.bg:C.pil,borderRadius:12,padding:"16px 18px",border:`.5px solid ${phase?phase.c+"33":C.pi+"33"}`,marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Current phase</div>
+        <div style={{fontSize:18,fontWeight:600,color:phase?phase.c:C.pi,marginBottom:4}}>
+          {phase?phase.n+" — "+phase.days:"Add your cycle dates to get started"}
+        </div>
+        <div style={{fontSize:12,color:C.t2}}>{phase?"Day "+info.day+" of cycle":"Enter your last period start date below."}</div>
+      </div>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
+        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date as it happens. The app calculates your current phase from your most recent confirmed date.</p>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
+          <button onClick={addDate} style={{...s.btn("p"),...s.btnSm}}>Add</button>
+        </div>
+        {confirmed.length===0
+          ? <div style={{textAlign:"center",padding:"12px 0",color:C.t3,fontSize:13}}><strong style={{display:"block",color:C.t2}}>No dates added yet</strong>Add your most recent period start date above.</div>
+          : confirmed.map((e,i)=>(
+            <div key={e.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:i<confirmed.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
+              <strong>{new Date(e.d).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"})}</strong>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Confirmed</span>
+                <button onClick={()=>delDate(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
+              </div>
+            </div>
+          ))
+        }
+      </Card>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Phase guide</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {Object.entries(PHASES).map(([key,p])=>(
+            <div key={key} style={{padding:10,background:p.bg,borderRadius:8}}>
+              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()} · {p.days}</div>
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>
+                {key==="menstrual"?"Lower intensity. Gentle yoga, walking. Iron-rich foods. Rest is productive.":
+                 key==="follicular"?"Rising energy. Best window for new challenges and heavier strength work.":
+                 key==="ovulatory"?"Peak strength. Ideal for gym sessions. High protein supports performance.":
+                 "Fatigue rises. Higher protein and magnesium. Scale back from day 22."}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── LOG TAB ───────────────────────────────────────────────────────────────
+const TAGS=["pain","medical","feedback","postworkout","mood","life","sleep","correction","spine"];
+const TAG_LABELS={pain:"Pain",medical:"Medical update",feedback:"Exercise feedback",postworkout:"Post-workout",mood:"Energy / mood",life:"Life context",sleep:"Sleep note",correction:"Correct AI",spine:"Spine update"};
+const TAG_STYLE={pain:[C.rl,C.red],medical:[C.tl+"88",C.teal],feedback:[C.tl,C.teal],postworkout:[C.orl,C.or],mood:[C.al,C.am],life:[C.pl,C.pu],sleep:["#f1efe8",C.t2],correction:[C.pil,C.pi],spine:["#e6f1fb","#185FA5"]};
+
+function TabLog({logEntries, setLogEntries}) {
+  const [selTag, setSelTag] = useState("pain");
+  const [txt, setTxt] = useState("");
+
+  async function addEntry(){
+    if(!txt.trim()) return;
+    const newEntry={id:Date.now(),dt:new Date().toISOString(),tag:selTag,txt:txt.trim()};
+    try {
+      const rows=await supa("POST","journal_entries",{user_id:UID,tag:selTag,txt:txt.trim()});
+      if(rows&&rows[0]){newEntry.id=rows[0].id;newEntry.dt=rows[0].created_at;}
+    }catch(e){}
+    setLogEntries(prev=>{
+      const updated=[newEntry,...prev];
+      localStorage.setItem("jlog_backup",JSON.stringify(updated));
+      return updated;
+    });
+    setTxt("");
+  }
+
+  async function delEntry(id){
+    setLogEntries(prev=>prev.filter(e=>e.id!==id));
+    try{await supa("DELETE","journal_entries",null,"id=eq."+id);}catch(e){}
+  }
+
+  return (
+    <div>
+      <div style={s.aiCard}>
+        <div style={s.aiLbl}><div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>How the AI coach uses this log</div>
+        <div style={{fontSize:12,color:C.tx,lineHeight:1.65}}>Every entry is read before generating recommendations. Log pain, medical updates, physio notes, post-workout feel, energy, mood, or corrections. The coach adjusts based on what you log here.</div>
+      </div>
+
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Add entry</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+          {TAGS.map(tag=>{
+            const [bg,col]=TAG_STYLE[tag]||[C.s2,C.t2];
+            const active=selTag===tag;
+            return <button key={tag} onClick={()=>setSelTag(tag)} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",background:bg,color:col,border:`1.5px solid ${active?col:"transparent"}`,opacity:active?1:.55}}>{TAG_LABELS[tag]}</button>;
+          })}
+        </div>
+        <textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Be specific — e.g. left glute sore after hip thrusts, 4/10, faded by evening." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:10}}/>
+        <button onClick={addEntry} style={s.btn("p")}>Save entry</button>
+      </Card>
+
+      <SecLabel>Spine history</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div style={{...s.card,borderLeft:`3px solid ${C.am}`,marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.am,marginBottom:8}}>L4-L5 disc herniation</div>
+          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Onset:</strong> Feb–Mar 2025. Radicular pain, nerve compression.</div>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>May 2025:</strong> Significant leg pain reduction.</div>
+            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Current:</strong> Left glute pain to outer shin. MRI and physio pending.</div>
+            <span style={{...s.pill(C.al,C.am),fontSize:10}}>Monitoring — physio pending</span>
+          </div>
+        </div>
+        <div style={{...s.card,borderLeft:`3px solid #185FA5`,marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:"#185FA5",marginBottom:8}}>T9-T10 surgery</div>
+          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
+            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Surgery:</strong> T9-T10 decompression ~March 2026.</div>
+            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Status:</strong> Cleared for full activity. Follow-up MRI due Sep 2026.</div>
+            <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Cleared — MRI due Sep 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <SecLabel>All entries</SecLabel>
+      {logEntries.length===0
+        ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No entries yet</strong>Start logging to build your health history.</div>
+        : logEntries.map(e=>{
+          const [bg,col]=TAG_STYLE[e.tag]||[C.s2,C.t2];
+          const d=new Date(e.dt);
+          const ds=d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+          return (
+            <div key={e.id} style={{...s.card,marginBottom:8,padding:"12px 14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{...s.pill(bg,col),fontSize:10}}>{TAG_LABELS[e.tag]}</span>
+                  <span style={{fontSize:10,color:C.t3}}>{ds}</span>
+                </div>
+                <button onClick={()=>delEntry(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14,padding:2}}>×</button>
+              </div>
+              <div style={{fontSize:12,lineHeight:1.6}}>{e.txt}</div>
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+}
+
+// ── PROFILE TAB ───────────────────────────────────────────────────────────
+function TabProfile({suppState, setSupp}) {
+  const SUPPS=[
+    {id:"creatine",name:"Creatine",time:"Morning with food"},
+    {id:"omega3",name:"Omega-3",time:"With meal"},
+    {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
+    {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
+    {id:"collagen",name:"Collagen",time:"With vitamin C"},
+    {id:"multi",name:"Multivitamin",time:"With meal"},
+  ];
+  const done=Object.values(suppState).filter(Boolean).length;
+
+  return (
+    <div>
+      <SecLabel>Personal info</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+        {[["Name","Julia Serebro"],["Date of birth","29 Nov 1985"],["Height","166 cm"],["Age","40"]].map(([l,v])=>(
+          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>InBody baseline — 8 June 2026</SecLabel>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
+        {[["Weight","57.6 kg",null],["Skeletal muscle","24.9 kg",C.tl],["Body fat","12.2 kg",C.al],["Body fat %","21.2%",null]].map(([l,v,bg])=>(
+          <div key={l} style={{background:bg||C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:18,fontWeight:600}}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+        {[["BMI","20.9"],["InBody score","78 / 100"],["Visceral fat","Level 5 ✓"],["BMR","1,350 kcal"]].map(([l,v])=>(
+          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>Goals</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>The 4 main goals</div>
+        {[
+          ["1. Build glute and leg muscle mass","Increase skeletal muscle from 24.9 kg baseline through progressive lower body resistance training."],
+          ["2. Improve upper body strength","Build from ~5 consecutive push-ups to 10 by September, 15 by December."],
+          ["3. Strengthen lower back","Spinal stability post T9-T10 surgery and L4-L5 herniation. Deep core, glute activation, progressive loading within physio guidelines."],
+          ["4. Develop cardiovascular fitness","Build sustained aerobic capacity. Targets set progressively based on injury progress and physio clearance."],
+        ].map(([title,desc])=>(
+          <div key={title} style={{paddingBottom:10,marginBottom:10,borderBottom:`.5px solid ${C.bd}`}}>
+            <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{title}</div>
+            <div style={{fontSize:12,color:C.t2,lineHeight:1.6}}>{desc}</div>
+          </div>
+        ))}
+        <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingBottom:0}}>
+          <strong style={{color:C.tx}}>Next InBody scan:</strong> September 2026 — 3-month check-in against targets below.
+        </div>
+      </Card>
+      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Measurable targets</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {[
+          {title:"3 months — September 2026",color:C.tm,items:[["Weight","57-58 kg"],["Skeletal muscle","25.5 kg (+0.6)"],["Body fat","11.5 kg (-0.7)"],["Body fat %","19.8%"],["InBody score","82+"],["Push-ups","10 consecutive"]]},
+          {title:"6 months — December 2026",color:C.pu,items:[["Weight","57-59 kg"],["Skeletal muscle","26.9 kg (+2.0)"],["Body fat","10.2 kg (-2.0)"],["Body fat %","17.5%"],["InBody score","85+"],["Push-ups","15 consecutive"]]},
+        ].map(g=>(
+          <div key={g.title} style={{...s.card,borderLeft:`3px solid ${g.color}`,marginBottom:0}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>{g.title}</div>
+            {g.items.map(([l,v])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`.5px solid ${C.bd}`}}>
+                <span style={{color:C.t2}}>{l}</span><span style={{fontWeight:500}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <SecLabel>Nutrition &amp; Supplements</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplements</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Stack below for reference.</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
+        {SUPPS.map(sup=>{
+          const checked=!!suppState[sup.id];
+          return (
+            <div key={sup.id} onClick={()=>setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.sf,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"10px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all .15s"}}>
+              <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.bd}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,flexShrink:0}}>{checked?"✓":""}</div>
+              <div><div style={{fontSize:12,fontWeight:500}}>{sup.name}</div><div style={{fontSize:10,color:C.t3,marginTop:1}}>{sup.time}</div></div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:11,color:C.t3,marginBottom:14}}>
+        {done===0?"Tap each supplement when you take it. Resets daily.":done===SUPPS.length?"All supplements taken today ✅":`${done} of ${SUPPS.length} taken today`}
+      </div>
+      </Card>
+
+      <SecLabel>Workout plan</SecLabel>
+      <Card>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+          {[["GYM · 3x/week",C.pl,C.pu,"Lower body + upper body + core. Progressive overload."],["CARDIO · 2x/week",C.tl,C.teal,"Walking, hiking, elliptical. Adjusted by injury and cycle phase."],["YOGA · 2x/week",C.orl,C.or,"Ashtanga primary minus backbends. Mobility and recovery."]].map(([t,bg,col,desc])=>(
+            <div key={t} style={{padding:12,background:bg,borderRadius:8}}>
+              <div style={{fontSize:11,fontWeight:600,color:col,marginBottom:4}}>{t}</div>
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>{desc}</div>
+            </div>
+          ))}
+        </div>
+        {[
+          ["Glutes and legs",[["Hip thrust / glute bridge","Primary glute builder · start bodyweight"],["Romanian deadlift","Glutes + hamstrings · start light"],["Goblet squat","Quads + glutes · safer for lower back"],["Step-ups","Single-leg glute activation · low spinal load"],["Lateral band walks","Glute medius · knee and hip stability"],["Leg press (machine)","Compound · reduces spinal load"]]],
+          ["Upper body",[["Push-ups (progressive)","Baseline ~5 · incline then standard then decline"],["Dumbbell row","Upper back + biceps · bench support"],["Seated shoulder press","Deltoids · seated reduces lumbar strain"],["Lat pulldown","Back width and posture"],["Chest press (machine)","Pecs + triceps · machine if back discomfort"]]],
+          ["Core and spinal stability",[["Dead bug","Deep core · safest for post-surgery spine"],["Bird dog","Core + glutes · recommended for L4-L5"],["Forearm plank","Neutral spine endurance · build 20s to 60s"],["Pallof press","Anti-rotation core · spine-safe"],["Clamshell with band","Glute medius · directly supports L4-L5"]]],
+        ].map(([cat,exercises])=>(
+          <div key={cat}>
+            <div style={{fontSize:12,fontWeight:600,color:C.tx,marginBottom:8,paddingBottom:4,borderBottom:`.5px solid ${C.bd}`,marginTop:14}}>{cat}</div>
+            {exercises.map(([name,note])=>(
+              <div key={name} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:`.5px solid ${C.s2}`,fontSize:12}}>
+                <span style={{fontWeight:500,flex:1}}>{name}</span>
+                <span style={{color:C.t2,fontSize:11}}>{note}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{padding:10,background:C.s2,borderRadius:8,fontSize:11,color:C.t2,marginTop:10}}>
+          <strong style={{color:C.tx}}>Pending physio clearance:</strong> Back squats, deadlifts from floor, loaded spinal flexion, high-impact cardio.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function CycleHeaderPill({cycleDates, onPress}) {
+  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  let label="cycle", bg=C.pil, col=C.pi;
+  if(conf.length){
+    const last=new Date(conf[0].d);const now=new Date();now.setHours(0,0,0,0);
+    const cd=((Math.floor((now-last)/864e5))%28)+1;
+    const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";
+    label=`Day ${cd} · ${ph}`;
+    bg=cd<=5?C.rl:cd<=13?C.tl:cd<=16?C.al:C.pl;
+    col=cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
+  }
+  return <button onClick={onPress} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:col,border:"none",cursor:"pointer",fontFamily:"inherit"}}>{label}</button>;
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState("dash");
+  const [apiKey, setApiKey] = useState(()=>localStorage.getItem("jkey")||"");
+  const [protTgt, setProtTgt] = useState(()=>parseInt(localStorage.getItem("jprot")||"100"));
+
+  const [cycleDates, setCycleDates] = useState(()=>{
+    try{const b=localStorage.getItem("jcycle_backup");return b?JSON.parse(b):[]}catch{return [];}
+  });
+  const [suppState, setSuppState] = useState({});
+  const [fitbitData, setFitbitData] = useState(FITBIT_SEED); // starts with seed, Supabase overwrites
+  // Pre-load from localStorage immediately so data shows before Supabase responds
+  const [allFood, setAllFood] = useState(()=>{
+    try{const b=localStorage.getItem("jfood_backup");return b?JSON.parse(b):{}}catch{return {};}
+  });
+  const [logEntries, setLogEntries] = useState(()=>{
+    try{const b=localStorage.getItem("jlog_backup");return b?JSON.parse(b):[]}catch{return [];}
+  });
+  const [showSett, setShowSett] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const [ghConnected, setGhConnected] = useState(()=>isGTokenValid(getGToken()));
+  const [ghSyncing, setGhSyncing] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([{role:"ai",txt:"Hi Julia! I have full context on your sleep, workouts, nutrition and health log. What would you like to know?"}]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("Updated Mon 15 Jun 2026, 10:15");
+  const [settKey, setSettKey] = useState(apiKey);
+  const [settProt, setSettProt] = useState(protTgt);
+  const [aiRefreshTick, setAiRefreshTick] = useState(0);
+
+  useEffect(()=>{
+    // Handle Google OAuth callback (token in URL hash)
+    if(window.location.hash.includes("access_token")) {
+      const handled = handleGoogleCallback();
+      if(handled) {
+        setGhConnected(true);
+        // Auto-sync after connecting
+        setTimeout(()=>ghFullSync(setSyncStatus, setFitbitData).catch(()=>{}), 500);
+      }
+    }
+    async function load(){
+      setSyncStatus("syncing...");
+      // Load settings first
+      try{
+        const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
+        if(rows&&rows.length){
+          if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
+          if(rows[0].protein_target){setProtTgt(rows[0].protein_target);localStorage.setItem("jprot",String(rows[0].protein_target));}
+        }
+      }catch(e){}
+      // Load data
+      try{
+        const [food,log,cyc,supp,fitbit]=await Promise.all([
+          supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc&select=*"),
+          supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100"),
+          supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc"),
+          supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
+          supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
+        ]);
+        const foodMap={};
+        (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
+        if(Object.keys(foodMap).length>0){
+          setAllFood(foodMap);
+          localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
+        }
+        const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
+        setLogEntries(logData);
+        // Keep localStorage in sync as backup
+        localStorage.setItem("jlog_backup",JSON.stringify(logData));
+        const cycleParsed=(cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed}));
+        console.log("Cycle from Supabase:",cycleParsed.length,"entries");
+        if(cycleParsed.length>0){
+          setCycleDates(cycleParsed);
+          localStorage.setItem("jcycle_backup",JSON.stringify(cycleParsed));
+        }
+        // Always try localStorage backup as safety net
+        if(cycleParsed.length===0){
+          const cb=localStorage.getItem("jcycle_backup");
+          if(cb){try{const parsed=JSON.parse(cb);if(parsed.length>0){setCycleDates(parsed);console.log("Cycle from localStorage backup:",parsed.length,"entries");}}catch(ex){}}
+        }
+        // Only load supplements for TODAY - reset daily
+        const todayKey2=new Date().toISOString().slice(0,10);
+        const ss={};
+        (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
+        setSuppState(ss);
+        // Load fitbit data from Supabase (falls back to seed if not loaded)
+        if(fitbit&&fitbit[0]&&fitbit[0].data){
+          console.log("✓ Fitness data loaded from Supabase, synced_at:",fitbit[0].synced_at);
+          const supaData=fitbit[0].data;
+          // Merge: use Supabase data but fill gaps with seed (seed may have newer dates)
+          const mergeArrays=(supaArr,seedArr,key)=>{
+            const m={};
+            (seedArr||[]).forEach(x=>{m[x[key]]=x;});
+            (supaArr||[]).forEach(x=>{m[x[key]]=x;}); // Supabase overwrites seed
+            return Object.values(m);
+          };
+          setFitbitData({
+            sleep: mergeArrays(supaData.sleep,FITBIT_SEED.sleep,'date').sort((a,b)=>b.date.localeCompare(a.date)),
+            naps: supaData.naps||FITBIT_SEED.naps||[],
+            steps: mergeArrays(supaData.steps,FITBIT_SEED.steps,'date').sort((a,b)=>a.date.localeCompare(b.date)),
+            workouts: mergeArrays(supaData.workouts,FITBIT_SEED.workouts,'date').sort((a,b)=>b.date.localeCompare(a.date)),
+            synced_at: supaData.synced_at
+          });
+        } else {
+          console.log("⚠ No fitness_cache in Supabase, using FITBIT_SEED");
+          setFitbitData(FITBIT_SEED);
+        }
+        setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+      // Auto-sync Google Health if token is valid
+      if(isGTokenValid(getGToken())) {
+        ghFullSync(setSyncStatus, setFitbitData).catch(e=>console.log("Auto-sync:",e.message));
+      }
+      }catch(e){
+        const msg = e.message||String(e);
+        setSyncStatus("sync error: "+msg.slice(0,40));
+        console.error("Supabase load error:", e);
+        // Fall back to localStorage backup
+        const backup=localStorage.getItem("jlog_backup");
+        if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
+        const foodBackup=localStorage.getItem("jfood_backup");
+        if(foodBackup) try{setAllFood(JSON.parse(foodBackup));}catch(ex){}
+        const cycleBackup=localStorage.getItem("jcycle_backup");
+        if(cycleBackup) try{setCycleDates(JSON.parse(cycleBackup));}catch(ex){}
+        // Use seed data as fallback
+        setFitbitData(FITBIT_SEED);
+      }
+    }
+    load();
+  },[]);
+
+  async function syncGoogleHealth() {
+    if(!isGTokenValid(getGToken())) {
+      // Need to authenticate first
+      startGoogleAuth();
+      return;
+    }
+    setGhSyncing(true);
+    try {
+      await ghFullSync(setSyncStatus, setFitbitData);
+      setAiRefreshTick(t=>t+1);
+    } catch(e){}
+    setGhSyncing(false);
+  }
+
+  async function saveSett(){
+    localStorage.setItem("jkey",settKey);
+    localStorage.setItem("jprot",String(settProt));
+    setApiKey(settKey);setProtTgt(settProt);
+    try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey,protein_target:settProt},"on_conflict=user_id");}catch(e){}
+    setShowSett(false);
+  }
+
+  async function setSupp(id,val){
+    setSuppState(p=>({...p,[id]:val}));
+    try{await supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:id,taken:val},"on_conflict=user_id,log_date,supplement");}catch(e){}
+  }
+
+  function buildCtxForChat(){
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
+  }
+
+  async function sendChat(){
+    if(!chatInput.trim()||!apiKey) return;
+    const msg=chatInput.trim();setChatInput("");setChatLoading(true);
+    setChatMsgs(p=>[...p,{role:"user",txt:msg}]);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:buildCtxForChat()+"\n\nAs Julia's AI health coach, answer this: "+msg}]})
+      });
+      const d=await res.json();
+      const reply=d.content?.[0]?.text||"Error";
+      setChatMsgs(p=>[...p,{role:"ai",txt:reply}]);
+    }catch(e){setChatMsgs(p=>[...p,{role:"ai",txt:"Error: "+e.message}]);}
+    setChatLoading(false);
+  }
+
+  const TABS=[{id:"dash",label:"Dashboard"},{id:"food",label:"Food"},{id:"log",label:"Log"},{id:"profile",label:"Profile"},{id:"cycle",label:"Cycle"}];
+
+  const isViewOnly = new URLSearchParams(window.location.search).get("view")==="1";
+
+  return (
+    <div style={s.shell}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`}</style>
+      {isViewOnly&&<div style={{background:"#e8f4fd",color:"#1a6896",fontSize:11,textAlign:"center",padding:"6px 12px",fontWeight:500,borderBottom:"1px solid #b8d9ee"}}>
+        View-only mode — showing last synced data &nbsp;|&nbsp; <a href={window.location.pathname} style={{color:"#1a6896"}}>Open full app</a>
+      </div>}
+
+      <div style={s.hdr}>
+        <div>
+          <h1 style={s.h1}>Health Coach</h1>
+          <div style={{fontSize:12,color:C.t2,marginTop:2}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
+          <CycleHeaderPill cycleDates={cycleDates} onPress={()=>setTab("cycle")}/>
+          <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
+          <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+        </div>
+      </div>
+
+      <div style={s.tabs}>
+        {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
+      </div>
+
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp}/>}
+      {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
+      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
+      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp}/>}
+
+      {/* COACH CHAT BUTTON */}
+      <button onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
+        💬 Ask your coach
+      </button>
+
+      {/* CHAT MODAL */}
+      {showChat&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowChat(false);}}>
+          <div style={{...s.modal,width:440,maxHeight:"80vh",display:"flex",flexDirection:"column",padding:0,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",borderBottom:`.5px solid ${C.bd}`}}>
+              <div>
+                <h3 style={{fontSize:15,fontWeight:600,margin:0}}>Your AI health coach</h3>
+                <p style={{fontSize:11,color:C.t3,margin:"2px 0 0"}}>Asks about your actual data</p>
+              </div>
+              <button onClick={()=>setShowChat(false)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.t3}}>×</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
+              {chatMsgs.map((m,i)=>(
+                <div key={i} style={{maxWidth:"88%",padding:"9px 12px",borderRadius:12,fontSize:13,lineHeight:1.55,alignSelf:m.role==="user"?"flex-end":"flex-start",background:m.role==="user"?C.pu:C.s2,color:m.role==="user"?"#fff":C.tx}}>{m.txt}</div>
+              ))}
+              {chatLoading&&<div style={{alignSelf:"flex-start",background:C.s2,padding:"9px 12px",borderRadius:12,fontSize:13,color:C.t3}}><Spinner/>Thinking...</div>}
+            </div>
+            <div style={{display:"flex",gap:8,padding:"12px 14px",borderTop:`.5px solid ${C.bd}`}}>
+              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Ask anything about your health..." style={{...s.input,flex:1,borderRadius:20}}/>
+              <button onClick={sendChat} style={{...s.btn("p"),borderRadius:20,padding:"9px 16px"}}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SYNC MODAL */}
+      {showSync&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSync(false);}}>
+          <div style={s.modal}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:8}}>🔄 Sync health data</h3>
+            {ghConnected ? (
+              <div>
+                <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Connected to Google Health. Tap sync to fetch your latest steps, sleep, and workouts from the last 14 days.</p>
+                <button onClick={()=>{setShowSync(false);syncGoogleHealth();}} style={{...s.btn("p"),width:"100%",padding:12,fontSize:14,marginBottom:12}}>
+                  {ghSyncing?"Syncing...":"Sync now →"}
+                </button>
+                <button onClick={()=>{clearGToken();setGhConnected(false);}} style={{...s.btn("s"),width:"100%",fontSize:12}}>Disconnect Google Health</button>
+              </div>
+            ) : (
+              <div>
+                <p style={{fontSize:13,color:C.t2,marginBottom:16,lineHeight:1.6}}>Connect your Google account to automatically sync steps, sleep, and workouts from your Fitbit Charge 6 — on any device, no Claude Desktop needed.</p>
+                <button onClick={()=>{setShowSync(false);syncGoogleHealth();}} style={{...s.btn("p"),width:"100%",padding:12,fontSize:14,marginBottom:12}}>
+                  Connect Google Health →
+                </button>
+                <p style={{fontSize:11,color:C.t3,lineHeight:1.6}}>You will be redirected to Google to grant permission, then returned to the app automatically.</p>
+              </div>
+            )}
+            <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
+              <button onClick={()=>setShowSync(false)} style={s.btn("s")}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SETTINGS MODAL */}
+      {showSett&&!isViewOnly&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSett(false);}}>
+          <div style={{...s.modal,width:420}}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:16}}>Settings</h3>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
+            <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
+            <p style={{fontSize:11,color:C.t3,marginBottom:12}}>Stored locally in your browser only.</p>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Daily protein target (g)</label>
+            <input type="number" value={settProt} onChange={e=>setSettProt(parseInt(e.target.value)||100)} min={50} max={200} style={{...s.input,marginBottom:16}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowSett(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={saveSett} style={s.btn("p")}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
