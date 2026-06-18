@@ -1069,7 +1069,7 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     const steps=stepsMap[dateStr]||0;
     // Walks without a logged duration are auto-detected by Fitbit — don't count as active
     const intentional=wObjs.filter(w=>w.type!=="walk"||(w.duration_min!=null&&w.duration_min>0));
-    if(wObjs.length>0) console.log("Heatmap workouts",dateStr,JSON.stringify(wObjs),"intentional:",intentional.length);
+    if(dateStr==="2026-06-16") console.log("DEBUG Jun16: steps="+steps+" workouts="+JSON.stringify(wObjs)+" intentional="+intentional.length);
     const isActive=steps>=8000||intentional.length>0;
     const types=wObjs.map(w=>w.type);
     const hasGym=types.includes("gym");
