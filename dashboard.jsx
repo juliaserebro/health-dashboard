@@ -164,9 +164,9 @@ function MonthlyMetrics({fitbitData, allFood, protTgt}) {
     return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
   }).length;
   return (<>
-    <Metric label="Active days" value={activeDates.size} sub={"target: 20/month"} subColor={activeDates.size>=15?C.tm:C.am}/>
-    <Metric label="Workout sessions" value={gymCount} sub={"gym/pilates · target: 12/month"} subColor={gymCount>=8?C.tm:C.am}/>
-    <Metric label="Yoga sessions" value={yogaCount} sub={"target: 4/month"} subColor={yogaCount>=4?C.tm:yogaCount>=2?C.am:C.t3}/>
+    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={"target: 20/month"} subColor={activeDates.size>=15?C.tm:C.am}/>
+    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: 12/month"} subColor={gymCount>=8?C.tm:C.am}/>
+    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"target: 4/month"} subColor={yogaCount>=4?C.tm:yogaCount>=2?C.am:C.t3}/>
   </>);
 }
 
@@ -244,7 +244,7 @@ function WeeklyStepsMetric({fitbitData}) {
     if(rec) total+=rec.steps;
   }
   const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.t3}}>Sun–{dayNames[dowIL]} this week</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.t3}}>Sun–{dayNames[dowIL]} this week</div></div>;
 }
 
 function SleepTileMetric({fitbitData}) {
@@ -266,7 +266,7 @@ function StepsMetric({fitbitData}) {
   const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
   const steps = todayRec ? todayRec.steps : 0;
   const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
-  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={{...s.mv,color:steps>=8000?C.teal:C.tx}}>{steps.toLocaleString()}</div><div style={{...s.ms,color:steps>=8000?C.tm:C.t3}}>{sub}</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={{...s.mv,color:C.teal}}>{steps.toLocaleString()}</div><div style={{...s.ms,color:steps>=8000?C.tm:C.t3}}>{sub}</div></div>;
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
@@ -635,7 +635,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
         const contextLine = (!isNextSection && nextLine) ? lines[++i] : null;
         result.push(
           <div key={i} style={{marginBottom:10}}>
-            <div style={{fontSize:11,fontWeight:600,letterSpacing:".06em",color:C.pu,marginBottom:3}}>{label}</div>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",color:C.t2,marginBottom:3}}>{label}</div>
             {actionLine&&<div style={{fontSize:13,color:C.tx,lineHeight:1.5,marginBottom:contextLine?2:0}}>{renderBold(actionLine)}</div>}
             {contextLine&&<div style={{fontSize:12,color:C.t2,lineHeight:1.5}}>{renderBold(contextLine)}</div>}
           </div>
@@ -769,9 +769,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             const protScore=yProt>=protTgt?8:yProt>=protTgt*0.7?4:0;
             const total=sleepScore+deepScore+remScore+bedtimeScore+loadScore+protScore;
             const rows=[
-              [`Sleep duration (${h}h ${m}m)`,`${sleepScore}/30`,sleepScore>=25?C.sl:sleepScore>=20?C.slm:C.red],
-              [`Deep sleep (${lastSleep?.deep||0}m, ${deepPct}%)`,`${deepScore}/20`,deepScore>=18?C.sl:C.slm],
-              [`REM sleep (${lastSleep?.rem||0}m, ${remPct}%)`,`${remScore}/10`,remScore>=9?C.sl:C.slm],
+              [`Sleep duration (${h}h ${m}m)`,`${sleepScore}/30`,sleepScore>=25?C.tm:sleepScore>=20?C.am:C.red],
+              [`Deep sleep (${lastSleep?.deep||0}m, ${deepPct}%)`,`${deepScore}/20`,deepScore>=18?C.tm:C.am],
+              [`REM sleep (${lastSleep?.rem||0}m, ${remPct}%)`,`${remScore}/10`,remScore>=9?C.tm:C.am],
               [`Training load yesterday`,`${loadScore}/20`,loadScore>=18?C.tm:loadScore>=14?C.am:C.red],
               [`Bedtime ${lastSleep?.bedtime||"--:--"}`,`${bedtimeScore}/10`,bedtimeScore>=7?C.tm:bedtimeScore>=4?C.am:C.red],
               [`Protein yesterday (${yProt}g)`,`+${protScore}`,protScore>0?C.tm:C.t3],
@@ -790,7 +790,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               // Efficiency = (deep + REM) / total sleep — quality metric
               const qualityPct=Math.round((ls2.deep+ls2.rem)/ls2.total*100);
               const bonus=qualityPct>=45?5:qualityPct>=35?3:qualityPct>=25?1:0;
-              const col=qualityPct>=45?C.sl:qualityPct>=35?C.slm:C.t3;
+              const col=qualityPct>=45?C.teal:qualityPct>=35?C.am:C.t3;
               return (<>
                 <span style={{color:col}}>✨ Sleep quality ({qualityPct}% deep+REM)</span>
                 <span style={{fontWeight:600,color:col}}>{bonus>0?`+${bonus}`:"+0"}</span>
@@ -819,7 +819,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <div style={s.mg}>
         <StepsMetric fitbitData={fitbitData}/>
         <SleepTileMetric fitbitData={fitbitData}/>
-        <Metric label="Protein today" value={Math.round(tp)+"g"} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={C.am}/>
+        <Metric label="Protein today" value={<span style={{color:C.am}}>{Math.round(tp)}g</span>} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={C.am}/>
         <CyclePhaseMetric cycleDates={cycleDates}/>
       </div>
 
