@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Health Coach</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,400;1,600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -90,19 +90,19 @@ const C = {
 // ── STYLES ────────────────────────────────────────────────────────────────
 const s = {
   shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 80px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
-  card:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"16px 18px",marginBottom:14},
+  card:{background:C.sf,borderRadius:14,border:`1px solid rgba(0,0,0,.07)`,padding:"16px 18px",marginBottom:14},
   hdr:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,gap:10,flexWrap:"wrap"},
-  h1:{fontSize:19,fontWeight:600,letterSpacing:"-.3px",margin:0},
+  h1:{fontSize:32,fontWeight:600,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",letterSpacing:"-.5px",margin:0,lineHeight:1.1},
   tabs:{display:"flex",gap:2,marginBottom:20,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"},
   tb:(active)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,color:active?C.tx:C.t2,background:"none",border:"none",cursor:"pointer",padding:"8px 14px",borderBottom:active?`2px solid ${C.tx}`:"2px solid transparent",marginBottom:-1,whiteSpace:"nowrap",flexShrink:0}),
   mg:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14},
   mg2:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14},
-  mc:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,padding:"14px 16px"},
-  ml:{fontSize:11,color:C.t2,marginBottom:4},
+  mc:{background:C.sf,borderRadius:12,border:`1px solid rgba(0,0,0,.07)`,padding:"14px 16px"},
+  ml:{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.t3,marginBottom:5},
   mv:{fontSize:21,fontWeight:600,letterSpacing:"-.5px",lineHeight:1.1},
   ms:{fontSize:11,marginTop:3},
-  secLbl:{fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:16,display:"flex",alignItems:"center",gap:8},
-  secLine:{flex:1,height:1,background:C.s2},
+  secLbl:{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:C.t3,marginBottom:16,display:"flex",alignItems:"center",gap:8},
+  secLine:{flex:1,height:1,background:"linear-gradient(to right,rgba(0,0,0,.08),transparent)"},
   hr:{border:"none",borderTop:`2px solid ${C.s2}`,margin:"28px 0 24px"},
   aiCard:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,borderLeft:`3px solid ${C.pu}`,padding:"16px 18px",marginBottom:14},
   aiLbl:{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:10,display:"flex",alignItems:"center",gap:6},
@@ -1899,7 +1899,7 @@ function App() {
       <div style={s.hdr}>
         <div>
           <h1 style={s.h1}>Health Coach</h1>
-          <div style={{fontSize:12,color:C.t2,marginTop:2}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+          <div style={{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.t3,marginTop:6}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
