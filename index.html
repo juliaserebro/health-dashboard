@@ -668,9 +668,31 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     try { await genAIInner(type); } finally { setLoading(l=>({...l,[type]:false})); }
   }
   async function genAIInner(type) {
+    const now = new Date();
+    const todayKey = now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+    const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay(); // 0=Sun
+    const isSunday = dowIL === 0;
+    // Cycle phase from context
+    const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+    let cyclePhase = "unknown cycle phase";
+    let cycleDay = null;
+    if(confDates.length){const last=new Date(confDates[0].d);const day=Math.floor((now-last)/864e5)+1;cycleDay=((day-1)%28)+1;const ph=cycleDay<=5?"menstrual":cycleDay<=13?"follicular":cycleDay<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cycleDay} (${ph} phase)`;}
+    // Today's nutrition
+    const tf = allFood[now.toISOString().slice(0,10)]||[];
+    const liveProt = Math.round(tf.reduce((s,e)=>s+(e.p||0),0));
+    const liveCarbs = Math.round(tf.reduce((s,e)=>s+(e.c||0),0));
+    // This week's food summary (Sun–today)
+    const weekFoodLines = [];
+    for(let i=0;i<dowIL+1;i++){
+      const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dowIL+i);
+      const dk=d.toISOString().slice(0,10);
+      const meals=allFood[dk]||[];
+      if(meals.length){const p=Math.round(meals.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(meals.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(meals.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${dk}: ${p}g prot, ${c}g carb, ${k}kcal`);}
+    }
+    const weekFoodSummary = weekFoodLines.join(" | ")||"no food logged this week";
     const p = type==="today"
-      ? `Generate a coaching briefing for ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. CRITICAL RULE: if health log has any [pain|TODAY] or [postworkout|TODAY] entries, show FLAG section FIRST and do NOT recommend workouts. Entries marked with dates like "3d ago" are old and should NOT trigger FLAG. FORMAT: emoji + CAPS LABEL, then bold **action**, then brief why. Sections: FLAG (if pain today), ACTIVITY, NUTRITION, RECOVERY. Use real numbers: protein ${(()=>{const tf=allFood[new Date().toISOString().slice(0,10)]||[];return Math.round(tf.reduce((s,e)=>s+(e.p||0),0));})()} g of ${protTgt}g logged so far. Max 2 lines per section. No filler.`
-      : `Weekly coaching review. Israeli week = Sunday to Saturday. Week COMPLETED: last week Sun–Sat (see workout and step data in context below). Current week started this past Sunday. Today is ${new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}. Sections: WELL DONE (last week), FOCUS THIS WEEK (targets), NEXT SESSION (what to do next). FORMAT: emoji + CAPS LABEL, bold **action**, one sentence why. Tight, no padding, max 2 lines each. Do not say next week - it already started.`
+      ? `Coaching briefing for today (${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}). Julia is on ${cyclePhase} — factor this into every section. PAIN RULE: if log has [pain|TODAY] show FLAG first and skip workout advice. FORMAT: emoji + CAPS LABEL: **bold action.** one short why sentence. Sections: FLAG (only if pain today), ACTIVITY, NUTRITION, RECOVERY. 1–2 lines each. Be specific and short — no generic advice. Protein so far: ${liveProt}g of ${protTgt}g. Carbs today: ${liveCarbs}g.`
+      : `Weekly coaching for Julia. Israeli week = Sunday–Saturday. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} (${cyclePhase}). ${isSunday?"Include a WELL DONE section reviewing last week's performance.":"Do NOT reference or review last week at all — that chapter is closed."} Focus only on this week's actual data. This week food log: ${weekFoodSummary}. FORMAT: emoji + CAPS LABEL: **bold action.** one short sentence. Sections: ${isSunday?"WELL DONE (last week highlights), ":""}THIS WEEK (patterns you see in her actual data this week — nutrition trends, sleep, activity — reference her cycle phase), NEXT SESSION (specific next workout). No generic targets, no obvious advice. Be direct and insightful.`;
     try {
       const txt = await callAI(p);
       if (type==="today") setAiToday(txt);
@@ -681,8 +703,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     }
   }
 
-  useEffect(()=>{ if(apiKey){genAI("today");} },[apiKey, aiRefreshTick]);
-  useEffect(()=>{ if(apiKey){genAI("week");} },[apiKey]);
+  useEffect(()=>{ if(apiKey){genAI("today");genAI("week");} },[apiKey, aiRefreshTick]);
 
 
   return (
