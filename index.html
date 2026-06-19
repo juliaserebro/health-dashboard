@@ -670,29 +670,50 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   async function genAIInner(type) {
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-    const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay(); // 0=Sun
+    const hourIL = parseInt(now.toLocaleString("en-CA",{timeZone:"Asia/Jerusalem",hour:"numeric",hour12:false}));
+    const isEvening = hourIL >= 19;
+    const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
-    // Cycle phase from context
+    // Cycle phase
     const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
-    let cyclePhase = "unknown cycle phase";
-    let cycleDay = null;
-    if(confDates.length){const last=new Date(confDates[0].d);const day=Math.floor((now-last)/864e5)+1;cycleDay=((day-1)%28)+1;const ph=cycleDay<=5?"menstrual":cycleDay<=13?"follicular":cycleDay<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cycleDay} (${ph} phase)`;}
-    // Today's nutrition
-    const tf = allFood[now.toISOString().slice(0,10)]||[];
+    let cyclePhase = "cycle phase unknown";
+    let cyclePhaseName = "unknown";
+    if(confDates.length){const last=new Date(confDates[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;cyclePhaseName=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cd}/28, ${cyclePhaseName} phase`;}
+    // Today nutrition
+    const todayFoodKey = now.toISOString().slice(0,10);
+    const tf = allFood[todayFoodKey]||[];
     const liveProt = Math.round(tf.reduce((s,e)=>s+(e.p||0),0));
     const liveCarbs = Math.round(tf.reduce((s,e)=>s+(e.c||0),0));
-    // This week's food summary (Sun–today)
-    const weekFoodLines = [];
-    for(let i=0;i<dowIL+1;i++){
-      const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dowIL+i);
-      const dk=d.toISOString().slice(0,10);
-      const meals=allFood[dk]||[];
-      if(meals.length){const p=Math.round(meals.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(meals.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(meals.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${dk}: ${p}g prot, ${c}g carb, ${k}kcal`);}
-    }
-    const weekFoodSummary = weekFoodLines.join(" | ")||"no food logged this week";
+    const liveKcal = Math.round(tf.reduce((s,e)=>s+(e.k||0),0));
+    // Yesterday alcohol from log
+    const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+    const yAlc = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&/wine|alcohol|beer|drink/i.test(e.txt||"")).map(e=>e.txt).join("; ");
+    // Last sleep
+    const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:"no sleep data";
+    // Today workouts
+    const todayWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===todayKey);
+    const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
+    // Today pain/mood log
+    const todayLog = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===todayFoodKey).map(e=>`[${e.tag}] ${e.txt}`).join("; ");
+    // This week food per day
+    const weekFoodLines=[];
+    for(let i=0;i<=dowIL;i++){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dowIL+i);const dk=d.toISOString().slice(0,10);const m=allFood[dk]||[];if(m.length){const p=Math.round(m.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(m.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(m.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${d.toLocaleDateString("en-GB",{weekday:"short"})}: ${p}g prot ${c}g carb ${k}kcal`);}}
+    const weekFoodSummary=weekFoodLines.join(" | ")||"no food logged";
+    // This week sleep
+    const weekSleep=(fitbitData.sleep||[]).filter(s=>s.date>=todayKey.slice(0,7)+"-"+(parseInt(todayKey.slice(8))-dowIL).toString().padStart(2,"0")&&s.date<=todayKey).map(s=>`${s.date.slice(5)}: ${Math.floor(s.total/60)}h${s.total%60}m`).join(", ");
     const p = type==="today"
-      ? `Coaching briefing for today (${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}). Julia is on ${cyclePhase} — factor this into every section. PAIN RULE: if log has [pain|TODAY] show FLAG first and skip workout advice. FORMAT: emoji + CAPS LABEL: **bold action.** one short why sentence. Sections: FLAG (only if pain today), ACTIVITY, NUTRITION, RECOVERY. 1–2 lines each. Be specific and short — no generic advice. Protein so far: ${liveProt}g of ${protTgt}g. Carbs today: ${liveCarbs}g.`
-      : `Weekly coaching for Julia. Israeli week = Sunday–Saturday. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} (${cyclePhase}). ${isSunday?"Include a WELL DONE section reviewing last week's performance.":"Do NOT reference or review last week at all — that chapter is closed."} Focus only on this week's actual data. This week food log: ${weekFoodSummary}. FORMAT: emoji + CAPS LABEL: **bold action.** one short sentence. Sections: ${isSunday?"WELL DONE (last week highlights), ":""}THIS WEEK (patterns you see in her actual data this week — nutrition trends, sleep, activity — reference her cycle phase), NEXT SESSION (specific next workout). No generic targets, no obvious advice. Be direct and insightful.`;
+      ? `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}, current time in Israel: ${hourIL}:00. Julia is on ${cyclePhase}.
+${isEvening?"⚠️ It is evening — the day for exercise is DONE. Do NOT suggest going to gym or training today under any circumstances.":""}
+${todayLog&&/pain/i.test(todayLog)?"⚠️ PAIN LOGGED TODAY: "+todayLog+" — Do not recommend any workout. Show FLAG first.":""}
+DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc||"none"}. Today's workout: ${todayActivity}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
+TASK: Write 2–3 short insights that connect dots between her data. Focus on HOW things relate — e.g. does her sleep connect to something from yesterday? Does her cycle phase explain her appetite or energy? Does a logged mood/pain link to sleep or recovery? Only draw connections that the data actually supports — do not guess. Language: warm, forgiving, no judgment.
+FORMAT: 2–3 sections. Each = one emoji + CAPS LABEL: **one bold key point.** One sentence max explaining the connection. Total max 80 words. ${isEvening?"Last section = TONIGHT (wind-down/sleep prep for her cycle phase).":""}No generic advice. Cycle phase MUST appear.`
+      : `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} (${cyclePhase}).
+${isSunday?"Include a brief LAST WEEK highlight (1 sentence only).":"Do NOT mention last week at all."}
+This week's food: ${weekFoodSummary}. Sleep this week: ${weekSleep||"limited data"}.
+TASK: Write 2–3 short insights connecting her data across this week. Look for patterns: does her eating pattern fit her cycle phase? Does her sleep correlate with activity or food? Any trend worth noting? Do NOT state obvious targets, do NOT recommend specific exercises or workout types. Language: warm, forgiving.
+FORMAT: 2–3 bullet points, one sentence each. Total max 60 words. Cycle phase MUST be mentioned by name.`;
     try {
       const txt = await callAI(p);
       if (type==="today") setAiToday(txt);
