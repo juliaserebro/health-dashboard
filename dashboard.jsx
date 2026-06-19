@@ -132,8 +132,7 @@ function CyclePhaseMetric({cycleDates}) {
   const day = Math.floor((now-last)/864e5)+1;
   const cd = ((day-1)%28)+1;
   const ph = cd<=5?"Menstrual":cd<=13?"Follicular":cd<=16?"Ovulatory":"Luteal";
-  const col = cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
-  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:col}}>{ph}</div><div style={{...s.ms,color:col}}>Day {cd} of cycle</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {cd} of cycle</div></div>;
 }
 
 // ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
@@ -164,9 +163,9 @@ function MonthlyMetrics({fitbitData, allFood, protTgt}) {
     return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
   }).length;
   return (<>
-    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={"target: 20/month"} subColor={activeDates.size>=15?C.tm:C.am}/>
-    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: 12/month"} subColor={gymCount>=8?C.tm:C.am}/>
-    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"target: 4/month"} subColor={yogaCount>=4?C.tm:yogaCount>=2?C.am:C.t3}/>
+    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={"target: 20/month"} subColor={C.teal}/>
+    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: 12/month"} subColor={C.pu}/>
+    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"target: 4/month"} subColor={C.or}/>
   </>);
 }
 
@@ -179,8 +178,8 @@ function ProteinDaysMetric({allFood, protTgt}) {
   return (
     <div style={s.mc}>
       <div style={s.ml}>Protein days hit</div>
-      <div style={{...s.mv,color:daysHit>0?C.tm:C.t3}}>{daysHit>0?daysHit:"—"}</div>
-      <div style={{...s.ms,color:daysHit>0?C.tm:C.t3}}>
+      <div style={{...s.mv,color:daysHit>0?C.am:C.t3}}>{daysHit>0?daysHit:"—"}</div>
+      <div style={{...s.ms,color:daysHit>0?C.am:C.t3}}>
         {daysHit>0?`of ${totalDaysLogged} days logged`:"log meals to track"}
       </div>
     </div>
@@ -203,7 +202,7 @@ function WeeklySleepMetric({fitbitData}) {
   const avg=Math.round(weekSleep.reduce((s,r)=>s+r.total,0)/weekSleep.length);
   const h=Math.floor(avg/60),m=avg%60;
   const col=avg>=420?C.sl:avg>=360?C.slm:C.red;
-  return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:C.t3}}>{weekSleep.length} night{weekSleep.length!==1?"s":""} this week</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:C.sl}}>{weekSleep.length} night{weekSleep.length!==1?"s":""} this week</div></div>;
 }
 
 function WeeklyWorkoutsMetric({fitbitData}) {
@@ -227,7 +226,7 @@ function WeeklyWorkoutsMetric({fitbitData}) {
   const last7Dates=[];
   for(let i=0;i<7;i++){const d=new Date(now.getTime()-i*864e5);last7Dates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));}
   const last7Count=(fitbitData.workouts||[]).filter(w=>last7Dates.includes(w.date)).length;
-  return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.pu:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.t3}}>{sub}{last7Count>weekWorkouts.length?` · ${last7Count} last 7d`:""}</div></div>;
+  return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.pu:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.pu}}>{sub}{last7Count>weekWorkouts.length?` · ${last7Count} last 7d`:""}</div></div>;
 }
 
 function WeeklyStepsMetric({fitbitData}) {
@@ -244,7 +243,7 @@ function WeeklyStepsMetric({fitbitData}) {
     if(rec) total+=rec.steps;
   }
   const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.t3}}>Sun–{dayNames[dowIL]} this week</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>Sun–{dayNames[dowIL]} this week</div></div>;
 }
 
 function SleepTileMetric({fitbitData}) {
@@ -266,7 +265,7 @@ function StepsMetric({fitbitData}) {
   const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
   const steps = todayRec ? todayRec.steps : 0;
   const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
-  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={{...s.mv,color:C.teal}}>{steps.toLocaleString()}</div><div style={{...s.ms,color:steps>=8000?C.tm:C.t3}}>{sub}</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={{...s.mv,color:C.teal}}>{steps.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>{sub}</div></div>;
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────────────────────
@@ -989,9 +988,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
                 <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
                 <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
-                  <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#3C3489"}}/>
-                  <div style={{width:Math.round(d.rem/tot*100)+"%",background:"#7F77DD"}}/>
-                  <div style={{width:Math.round(d.light/tot*100)+"%",background:"#AFA9EC"}}/>
+                  <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#1a4a8a"}}/>
+                  <div style={{width:Math.round(d.rem/tot*100)+"%",background:C.sl}}/>
+                  <div style={{width:Math.round(d.light/tot*100)+"%",background:"#7aa8d8"}}/>
                 </div>
                 <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
               </div>;
@@ -1038,7 +1037,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
           <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
           <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
-          <span><span style={{fontWeight:700,color:C.tm,fontSize:9}}>P✓</span> protein goal hit</span>
+          <span><span style={{fontWeight:700,color:C.am,fontSize:9}}>P✓</span> protein goal hit</span>
         </div>
       </Card>
 
@@ -1132,7 +1131,7 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     cells.push(
       <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive&&d!==todayDay?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===todayDay?{outline:`2px solid ${C.tx}`,background:isActive?C.tl:C.s2}:{})}}>
         {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
-        {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.tm,position:"absolute",top:2,left:2}}>P✓</span>}
+        {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.am,position:"absolute",top:2,left:2}}>P✓</span>}
         {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
         {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
         {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{types.includes("run")?"run":"cardio"}</div>}
