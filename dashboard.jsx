@@ -3,7 +3,64 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ── LIVE DATA (Fri 12 Jun 2026, 14:20 Israel) ─────────────────────────────
 const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
-const UID = "julia";
+const UID = "julia"; // TODO: replace with auth user ID when Supabase Auth is added
+
+// SUPABASE SETUP SQL — run once in Supabase SQL editor
+/*
+-- Run once in Supabase SQL editor
+create table if not exists profiles (
+  uid text primary key,
+  name text,
+  birth_date date,
+  gender text,
+  goals jsonb,
+  activity_mapping jsonb,
+  activity_targets jsonb,
+  step_target integer,
+  protein_target integer,
+  active_days_target integer,
+  height_cm numeric,
+  weight_kg numeric,
+  body_fat_pct numeric,
+  body_fat_target_pct numeric,
+  supplements jsonb,
+  health_notes text,
+  workout_plan text,
+  cycle_tracking boolean,
+  timezone text,
+  fitbit_connected boolean,
+  onboarding_complete boolean
+);
+alter table profiles enable row level security;
+create policy "Allow all for now" on profiles for all using (true) with check (true);
+*/
+
+// ── ACTIVITY CATEGORY MAPPING ────────────────────────────────────────────
+const DEFAULT_ACTIVITY_MAPPING = {
+  "strength training":"strength","weightlifting":"strength","powerlifting":"strength",
+  "boot camp":"strength","circuit training":"strength","crossfit":"strength","core training":"strength",
+  "yoga":"mobility","pilates":"mobility",
+  "run":"cardio","walk":"cardio","hike":"cardio","bike":"cardio","elliptical":"cardio",
+  "treadmill":"cardio","swim":"cardio","rowing machine":"cardio","stair climber":"cardio",
+  "hiit":"cardio","interval workout":"cardio","aerobics":"cardio","kickboxing":"cardio",
+  "dancing":"cardio","cross country skiing":"cardio","skiing":"cardio","snowboarding":"cardio",
+  "rollerblading":"cardio","surfing":"cardio","paddleboarding":"cardio","kayaking":"cardio",
+  "canoeing":"cardio","golf":"cardio","tennis":"cardio","martial arts":"cardio",
+  "indoor climbing":"cardio","outdoor workout":"cardio","sports":"cardio"
+  // "workout" intentionally omitted — requires user mapping
+};
+
+function getActivityCategory(activityType, userMapping) {
+  const key = (activityType||"").toLowerCase();
+  if (userMapping && userMapping[key]) return userMapping[key];
+  return DEFAULT_ACTIVITY_MAPPING[key] || "uncategorized";
+}
+
+// Active timezone — set from the loaded profile, falls back to Asia/Jerusalem.
+// Used by the many standalone metric components that compute Israel-local dates.
+let ACTIVE_TZ = "Asia/Jerusalem";
+function setActiveTz(tz){ if(tz) ACTIVE_TZ = tz; }
+function getTz(){ return ACTIVE_TZ || "Asia/Jerusalem"; }
 
 async function supa(method, table, body, query) {
   let url, hdrs, fetchOpts;
@@ -145,27 +202,28 @@ function ProteinAvgMetric({allFood, protTgt}) {
   return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
 }
 
-function MonthlyMetrics({fitbitData, allFood, protTgt}) {
+function MonthlyMetrics({fitbitData, allFood, protTgt, profileData}) {
   const now=new Date();
-  const month=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}).slice(0,7); // "2026-06"
-  // Active days = 8k+ steps OR workout
+  const month=now.toLocaleDateString("en-CA",{timeZone:profileData?.timezone||"Asia/Jerusalem"}).slice(0,7); // "2026-06"
+  const stepTarget=profileData?.step_target||8000;
+  // Active days = step target+ steps OR workout
   const monthSteps=(fitbitData.steps||[]).filter(s=>s.date.startsWith(month));
   const monthWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(month));
   const workoutDates=new Set(monthWorkouts.map(w=>w.date));
   const activeDates=new Set([
-    ...monthSteps.filter(s=>s.steps>=8000).map(s=>s.date),
+    ...monthSteps.filter(s=>s.steps>=stepTarget).map(s=>s.date),
     ...workoutDates
   ]);
-  const gymCount=monthWorkouts.filter(w=>w.type==="gym"||w.type==="pilates"||w.type==="circuit"||w.type==="strength training").length;
-  const yogaCount=monthWorkouts.filter(w=>w.type==="yoga").length;
+  const gymCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="strength").length; // LEGACY replaced
+  const yogaCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="mobility").length; // LEGACY replaced
   const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
     if(!date.startsWith(month)) return false;
     return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
   }).length;
   return (<>
-    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={"target: 20/month"} subColor={C.teal}/>
-    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: 12/month"} subColor={C.pu}/>
-    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"target: 4/month"} subColor={C.or}/>
+    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={(profileData?.active_days_target||20)+"/month"} subColor={C.teal}/>
+    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: "+Math.round((profileData?.activity_targets?.strength||2)*4.3)+"/month"} subColor={C.pu}/>
+    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"yoga · target: "+Math.round((profileData?.activity_targets?.mobility||2)*4.3)+"/month"} subColor={C.or}/>
   </>);
 }
 
@@ -188,14 +246,14 @@ function ProteinDaysMetric({allFood, protTgt}) {
 
 function WeeklySleepMetric({fitbitData}) {
   const now=new Date();
-  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
   // Parse date parts directly to avoid timezone issues with getDay()
   const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
   const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
   const weekDates=[];
   for(let i=0;i<=dowIL;i++){
     const d=new Date(now.getTime()-i*864e5);
-    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));
   }
   const weekSleep=(fitbitData.sleep||[]).filter(s=>weekDates.includes(s.date));
   if(!weekSleep.length) return <div style={s.mc}><div style={s.ml}>Avg sleep</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data this week</div></div>;
@@ -208,14 +266,14 @@ function WeeklySleepMetric({fitbitData}) {
 function WeeklyWorkoutsMetric({fitbitData}) {
   const now=new Date();
   // Compute day-of-week from Israel timezone, not browser local time
-  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
   // Parse date parts directly to avoid timezone issues with getDay()
   const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
   const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon... // 0=Sun in Israel
   const weekDates=[];
   for(let i=0;i<=dowIL;i++){
     const d=new Date(now.getTime()-i*864e5);
-    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));
+    weekDates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));
   }
   const weekWorkouts=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
   const weekWorkouts_=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
@@ -224,21 +282,21 @@ function WeeklyWorkoutsMetric({fitbitData}) {
   const sub=types.length?types.join(" · "):"rest so far";
   // Also compute last 7 days for context
   const last7Dates=[];
-  for(let i=0;i<7;i++){const d=new Date(now.getTime()-i*864e5);last7Dates.push(d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"}));}
+  for(let i=0;i<7;i++){const d=new Date(now.getTime()-i*864e5);last7Dates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));}
   const last7Count=(fitbitData.workouts||[]).filter(w=>last7Dates.includes(w.date)).length;
   return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.pu:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.pu}}>{sub}{last7Count>weekWorkouts.length?` · ${last7Count} last 7d`:""}</div></div>;
 }
 
 function WeeklyStepsMetric({fitbitData}) {
   const now=new Date();
-  const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
   // Parse date parts directly to avoid timezone issues with getDay()
   const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
   const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
   let total=0;
   for(let i=0;i<=dowIL;i++){
     const d=new Date(now.getTime()-i*864e5);
-    const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+    const dateStr=d.toLocaleDateString("en-CA",{timeZone:getTz()});
     const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
     if(rec) total+=rec.steps;
   }
@@ -260,11 +318,11 @@ function SleepTileMetric({fitbitData}) {
   return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:col}}>{sub}</div></div>;
 }
 
-function StepsMetric({fitbitData}) {
-  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+function StepsMetric({fitbitData, profileData}) {
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:profileData?.timezone||"Asia/Jerusalem"});
   const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
   const steps = todayRec ? todayRec.steps : 0;
-  const sub = steps >= 8000 ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
+  const sub = steps >= (profileData?.step_target||8000) ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
   return <div style={s.mc}><div style={s.ml}>Steps today</div><div style={{...s.mv,color:C.teal}}>{steps.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>{sub}</div></div>;
 }
 
@@ -394,9 +452,9 @@ function parseSleepPoint(pt){
   const endTime=sleep.interval.endTime;
   if(!startTime||!endTime) return null;
   // Wake date in Israel timezone
-  const wakeDate=new Date(endTime).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const wakeDate=new Date(endTime).toLocaleDateString("en-CA",{timeZone:getTz()});
   // Bedtime in Israel timezone
-  const bedtime=new Date(startTime).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Jerusalem"});
+  const bedtime=new Date(startTime).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:getTz()});
   // Duration from stages
   let deepMin=0,remMin=0,lightMin=0,awakeMin=0;
   (sleep.stages||[]).forEach(stage=>{
@@ -420,7 +478,7 @@ function parseExercise(pt){
   const endTime=ex.interval.endTime;
   const startTime=ex.interval.startTime;
   if(!endTime) return null;
-  const date=new Date(endTime).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+  const date=new Date(endTime).toLocaleDateString("en-CA",{timeZone:getTz()});
   const typeMap={WALK:"walk",WALKING:"walk",RUNNING:"run",YOGA:"yoga",WORKOUT:"gym",ELLIPTICAL:"elliptical",
     CIRCUIT_TRAINING:"gym",STRENGTH_TRAINING:"gym",BIKING:"cycling",HIKING:"walk",
     SPORT:"gym",SPINNING:"cycling",PILATES:"pilates"};
@@ -438,7 +496,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
   setSyncStatus("Syncing from Google Health...");
   try{
     const now=new Date();
-    const today=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+    const today=now.toLocaleDateString("en-CA",{timeZone:getTz()});
     const twoWeeksAgo=addDays(today,-14);
     const tomorrow=addDays(today,1);
 
@@ -591,7 +649,7 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
 }
 
-function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}}) {
+function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
@@ -654,8 +712,8 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   }
   async function genAIInner(type) {
     const now = new Date();
-    const todayKey = now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-    const hourIL = parseInt(now.toLocaleString("en-CA",{timeZone:"Asia/Jerusalem",hour:"numeric",hour12:false}));
+    const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+    const hourIL = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
     const isEvening = hourIL >= 19;
     const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
@@ -716,107 +774,187 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   return (
     <div>
       {/* READINESS */}
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
-        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
-          {(()=>{
-          const now2=new Date();
-          const yDate2=new Date(now2.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-          const ls=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-          const yw=(fitbitData.workouts||[]).filter(w=>w.date===yDate2);
-          const yF=allFood[yDate2]||[];
-          const yP=Math.round(yF.reduce((s,e)=>s+(e.p||0),0));
-          const sScore=ls?Math.min(30,Math.round(ls.total/420*30)):0;
-          const dPct=ls&&ls.total>0?Math.round(ls.deep/ls.total*100):0;
-          const rPct=ls&&ls.total>0?Math.round(ls.rem/ls.total*100):0;
-          const dScore=dPct>=20?20:dPct>=15?15:10;
-          const rScore=rPct>=20?10:rPct>=15?7:5;
-          const bHour=ls?parseInt(ls.bedtime.split(":")[0]):0;
-          const bScore=bHour<=23&&bHour>=22?8:bHour<=0?5:bHour<=1?3:2;
-          const lScore=yw.length===0?20:yw.some(w=>w.type==="gym"||w.type==="run")?12:16;
-          const pScore=yP>=protTgt?8:yP>=protTgt*0.7?4:0;
-          const score=sScore+dScore+rScore+bScore+lScore+pScore;
-          const col=score>=85?C.tm:score>=70?C.am:C.red;
-          const label=score>=85?"Great":score>=70?"Good":"Low";
-          return (<>
-            <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:col}}>{score}</div>
-            <div style={{flex:1}}>
-              <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}><div style={{width:score+"%",height:"100%",background:col,borderRadius:4}}/></div>
-              <div style={{fontSize:12,fontWeight:500,color:col}}>{label}</div>
+      {(()=>{
+        // ── Shared readiness calculation ─────────────────────────────────
+        const sleepRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date));
+        const lastSleep = sleepRecords[0];
+
+        // Luteal phase detection
+        const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+        let isLuteal = false;
+        if(confDates.length){
+          const lastPeriod = new Date(confDates[0].d);
+          const now = new Date();
+          const cycleDay = Math.floor((now-lastPeriod)/864e5)+1;
+          const cd = ((cycleDay-1)%28)+1;
+          isLuteal = cd>=15 && cd<=28;
+        }
+
+        // "Yesterday" = calendar date of last sleep's date minus 1 day
+        const yDate = lastSleep ? (()=>{
+          const d = new Date(lastSleep.date+"T12:00:00");
+          d.setDate(d.getDate()-1);
+          return d.toISOString().slice(0,10);
+        })() : new Date(new Date().getTime()-864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
+
+        // Sleep duration score — 28 pts
+        const totalMin = lastSleep ? lastSleep.total : 0;
+        const durScore = !lastSleep ? 0 : totalMin>=450?28:totalMin>=420?24:totalMin>=390?20:totalMin>=360?15:8;
+
+        // Deep sleep % — 18 pts
+        const deepPct = lastSleep&&lastSleep.total>0 ? lastSleep.deep/lastSleep.total*100 : 0;
+        const deepScore = deepPct>=20?18:deepPct>=15?13:deepPct>=10?7:2;
+
+        // REM sleep % — 14 pts (luteal thresholds apply)
+        const remPct = lastSleep&&lastSleep.total>0 ? lastSleep.rem/lastSleep.total*100 : 0;
+        const remScore = isLuteal
+          ? (remPct>=17?14:remPct>=12?10:remPct>=8?5:1)
+          : (remPct>=20?14:remPct>=15?10:remPct>=10?5:1);
+
+        // Bedtime — 10 pts
+        const bedtimeScore = (()=>{
+          if(!lastSleep) return 3;
+          const [bh,bm] = lastSleep.bedtime.split(":").map(Number);
+          const bt = bh*60+bm;
+          // convert to minutes past midnight (handle PM bedtimes as negative/large)
+          const midnight = 0;
+          const adjusted = bh>=12 ? bt-1440 : bt; // 22:00→-120, 23:30→-30, 00:00→0, 01:30→90
+          if(adjusted<=-30) return 10; // ≤23:30
+          if(adjusted<=0) return 7;    // ≤00:00
+          if(adjusted<=30) return 5;   // ≤00:30
+          if(adjusted<=60) return 3;   // ≤01:00
+          return 1;
+        })();
+
+        // Training load — 12 pts
+        // Find workouts since last sleep ended (use last sleep date as proxy)
+        const sinceDate = lastSleep ? lastSleep.date : "";
+        const recentWorkouts = (fitbitData.workouts||[]).filter(w=>w.date>=sinceDate&&w.date<=new Date().toISOString().slice(0,10));
+        const cats = recentWorkouts.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
+        const loadScore = recentWorkouts.length===0 ? 12
+          : cats.some(c=>c==="mobility") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
+          : 6;
+
+        // Protein — 10 pts
+        const yFood = allFood[yDate]||[];
+        const yProt = Math.round(yFood.reduce((s,e)=>s+(e.p||0),0));
+        const protScore = yProt>=protTgt?10:yProt>=protTgt*0.75?7:yProt>=protTgt*0.5?4:0;
+
+        // Alcohol penalty
+        const alcEntries = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yDate&&/\[alcohol\]/i.test(e.tag||""));
+        const alcCount = alcEntries.length;
+        const alcPenalty = alcCount===0?0:alcCount===1?3:alcCount===2?6:10;
+
+        // RHR vs baseline — 8 pts
+        const rhrRecords = sleepRecords.filter(s=>s.rhr!=null);
+        let rhrScore = 4; // calibrating default
+        let rhrCalibrating = true;
+        if(rhrRecords.length>=14){
+          rhrCalibrating = false;
+          const sorted = [...rhrRecords].map(s=>s.rhr).sort((a,b)=>a-b);
+          const mid = Math.floor(sorted.length/2);
+          const baseline = sorted.length%2===0?(sorted[mid-1]+sorted[mid])/2:sorted[mid];
+          const currentRhr = lastSleep?.rhr;
+          if(currentRhr==null){ rhrScore=4; rhrCalibrating=true; }
+          else {
+            const diff = currentRhr-baseline;
+            rhrScore = diff<=0?8:diff<=3?4:diff<=6?1:0;
+          }
+        }
+
+        // Base total
+        const baseBeforeAlc = Math.min(100, Math.max(20, durScore+deepScore+remScore+bedtimeScore+loadScore+protScore+rhrScore));
+        const base = Math.max(20, baseBeforeAlc-alcPenalty);
+
+        // Sleep quality bonus (above 100)
+        const bonusThresh1 = isLuteal ? [20,17] : [23,23];
+        const bonusThresh2 = isLuteal ? [17,12] : [20,20];
+        let bonus = 0;
+        if(base>=60){
+          if(deepPct>=bonusThresh1[0]&&remPct>=bonusThresh1[1]) bonus=8;
+          else if(deepPct>=bonusThresh2[0]&&remPct>=bonusThresh2[1]) bonus=5;
+        }
+
+        const totalScore = base; // bonus displayed separately
+        const scoreCol = totalScore>=85?C.tm:totalScore>=70?C.am:C.red;
+        const scoreLabel = totalScore>=85?"Great":totalScore>=70?"Good":"Low";
+
+        // Context note — lowest-scoring factor
+        const factors = [
+          {name:"sleep duration",pts:durScore,max:28},
+          {name:"deep sleep",pts:deepScore,max:18},
+          {name:"REM sleep",pts:remScore,max:14},
+          {name:`bedtime (${lastSleep?.bedtime||"--:--"})`,pts:bedtimeScore,max:10},
+          {name:"training load",pts:loadScore,max:12},
+          {name:"protein",pts:protScore,max:10},
+          {name:"RHR",pts:rhrScore,max:8},
+        ];
+        const lowestFactor = [...factors].sort((a,b)=>(a.pts/a.max)-(b.pts/b.max))[0];
+        const allFull = factors.every(f=>f.pts===f.max);
+        const contextNote = allFull
+          ? "Strong recovery — all factors in the green."
+          : alcPenalty>0
+            ? `Main cost: alcohol penalty (−${alcPenalty}) + ${lowestFactor.name}.`
+            : `Main cost: ${lowestFactor.name}.`;
+
+        // Breakdown rows
+        const h = Math.floor(totalMin/60);
+        const mm = totalMin%60;
+        const rows = [
+          [`Sleep duration (${h}h ${mm}m)`, `${durScore}/28`, durScore>=28?C.tm:durScore>=20?C.am:C.red],
+          [`Deep sleep (${lastSleep?.deep||0}m, ${Math.round(deepPct)}%)`, `${deepScore}/18`, deepScore>=18?C.tm:deepScore>=13?C.am:C.red],
+          [`REM sleep (${lastSleep?.rem||0}m, ${Math.round(remPct)}%)${isLuteal?" ◦":""}`, `${remScore}/14`, remScore>=14?C.tm:remScore>=10?C.am:C.red],
+          [`Bedtime ${lastSleep?.bedtime||"--:--"}`, `${bedtimeScore}/10`, bedtimeScore>=10?C.tm:bedtimeScore>=5?C.am:C.red],
+          [`Training load yesterday`, `${loadScore}/12`, loadScore>=12?C.tm:loadScore>=8?C.am:C.red],
+          [`Protein yesterday (${yProt}g)`, `${protScore}/10`, protScore>=10?C.tm:protScore>=7?C.am:C.red],
+          [rhrCalibrating?"RHR vs baseline (calibrating)":`RHR vs baseline`, `${rhrScore}/8`, rhrCalibrating?C.t3:rhrScore>=8?C.tm:rhrScore>=4?C.am:C.red],
+          ...(alcPenalty>0?[[`Alcohol (${alcCount} drink${alcCount>1?"s":""})`,`−${alcPenalty}`,C.red]]:[]),
+        ];
+
+        return (
+          <Card>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
+              Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
             </div>
-          </>);
-        })()}
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
-          {(()=>{
-            const now=new Date();
-            const yDate=new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-            const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-            const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
-            const yFood=allFood[yDate]||[];
-            const yProt=Math.round(yFood.reduce((s,e)=>s+(e.p||0),0));
-            const h=lastSleep?Math.floor(lastSleep.total/60):0;
-            const m=lastSleep?lastSleep.total%60:0;
-            const deepPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.deep/lastSleep.total*100):0;
-            const remPct=lastSleep&&lastSleep.total>0?Math.round(lastSleep.rem/lastSleep.total*100):0;
-            const sleepScore=lastSleep?Math.min(30,Math.round(lastSleep.total/420*30)):0;
-            const deepScore=deepPct>=20?20:deepPct>=15?15:10;
-            const remScore=remPct>=20?10:remPct>=15?7:5;
-            const bedtimeHour=lastSleep?parseInt(lastSleep.bedtime.split(":")[0]):0;
-            const bedtimeScore=bedtimeHour<=23&&bedtimeHour>=22?8:bedtimeHour<=0?5:bedtimeHour<=1?3:2;
-            const loadScore=yWorkouts.length===0?20:yWorkouts.some(w=>w.type==="gym"||w.type==="run")?12:16;
-            const protScore=yProt>=protTgt?8:yProt>=protTgt*0.7?4:0;
-            const total=sleepScore+deepScore+remScore+bedtimeScore+loadScore+protScore;
-            const rows=[
-              [`Sleep duration (${h}h ${m}m)`,`${sleepScore}/30`,sleepScore>=25?C.tm:sleepScore>=20?C.am:C.red],
-              [`Deep sleep (${lastSleep?.deep||0}m, ${deepPct}%)`,`${deepScore}/20`,deepScore>=18?C.tm:C.am],
-              [`REM sleep (${lastSleep?.rem||0}m, ${remPct}%)`,`${remScore}/10`,remScore>=9?C.tm:C.am],
-              [`Training load yesterday`,`${loadScore}/20`,loadScore>=18?C.tm:loadScore>=14?C.am:C.red],
-              [`Bedtime ${lastSleep?.bedtime||"--:--"}`,`${bedtimeScore}/10`,bedtimeScore>=7?C.tm:bedtimeScore>=4?C.am:C.red],
-              [`Protein yesterday (${yProt}g)`,`+${protScore}`,protScore>0?C.tm:C.t3],
-            ];
-            return rows;
-          })().map(([label,pts,col],i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<6?`.5px solid ${C.bd}`:"none"}}>
-              <span style={{color:C.t2}}>{label}</span>
-              <span style={{fontWeight:600,color:col}}>{pts}</span>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
+              <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:scoreCol}}>{totalScore}</div>
+              <div style={{flex:1}}>
+                <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}>
+                  <div style={{width:totalScore+"%",height:"100%",background:scoreCol,borderRadius:4}}/>
+                </div>
+                <div style={{fontSize:12,fontWeight:500,color:scoreCol}}>{scoreLabel}</div>
+              </div>
             </div>
-          ))}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.tl}}>
-            {(()=>{
-              const ls2=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-              if(!ls2) return null;
-              // Efficiency = (deep + REM) / total sleep — quality metric
-              const qualityPct=Math.round((ls2.deep+ls2.rem)/ls2.total*100);
-              const bonus=qualityPct>=45?5:qualityPct>=35?3:qualityPct>=25?1:0;
-              const col=qualityPct>=45?C.teal:qualityPct>=35?C.am:C.t3;
-              return (<>
-                <span style={{color:col}}>✨ Sleep quality ({qualityPct}% deep+REM)</span>
-                <span style={{fontWeight:600,color:col}}>{bonus>0?`+${bonus}`:"+0"}</span>
-              </>);
-            })()}
-          </div>
-        </div>
-        {(()=>{
-          const now=new Date();
-          const yDate=new Date(now.getTime()-864e5).toISOString().slice(0,10);
-          const yWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===yDate);
-          const ySteps=(fitbitData.steps||[]).find(s=>s.date===yDate);
-          const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-          const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day";
-          const stepNote=ySteps&&ySteps.steps>=8000?"active ("+ySteps.steps.toLocaleString()+" steps)":ySteps?"low steps ("+ySteps.steps.toLocaleString()+")":"";
-          const sleepNote=lastSleep?`${Math.floor(lastSleep.total/60)}h ${lastSleep.total%60}m sleep (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m), bedtime ${lastSleep.bedtime}`:"";
-          const costNote=lastSleep&&lastSleep.total<420?"Sleep duration is the main cost today.":lastSleep&&lastSleep.bedtime>"01:00"?"Late bedtime is the main cost today.":"";
-          return <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>
-            Yesterday: {yActivity}{stepNote?" · "+stepNote:""}. Last night: {sleepNote}. {costNote}
-          </div>;
-        })()}
-      </Card>
+            <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+              {rows.map(([label,pts,col],i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<rows.length-1?`.5px solid ${C.bd}`:"none"}}>
+                  <span style={{color:C.t2}}>{label}</span>
+                  <span style={{fontWeight:600,color:col}}>{pts}</span>
+                </div>
+              ))}
+              {bonus>0&&(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.tl}}>
+                  <span style={{color:C.teal}}>✨ Sleep quality bonus (deep {Math.round(deepPct)}% + REM {Math.round(remPct)}%)</span>
+                  <span style={{fontWeight:600,color:C.teal}}>{`+${bonus}`}</span>
+                </div>
+              )}
+              {isLuteal&&(
+                <div style={{fontSize:11,color:C.t3,padding:"5px 10px",background:C.s2,borderTop:`.5px solid ${C.bd}`}}>
+                  ◦ Luteal phase — REM naturally lower
+                </div>
+              )}
+            </div>
+            <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>
+              {contextNote}
+            </div>
+          </Card>
+        );
+      })()}
 
       <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
 
       <div style={s.mg}>
-        <StepsMetric fitbitData={fitbitData}/>
+        <StepsMetric fitbitData={fitbitData} profileData={profileData}/>
         <SleepTileMetric fitbitData={fitbitData}/>
         <Metric label="Protein today" value={<span style={{color:C.am}}>{Math.round(tp)}g</span>} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={C.am}/>
         <CyclePhaseMetric cycleDates={cycleDates}/>
@@ -907,7 +1045,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <hr style={s.hr}/>
       <SecLabel>{(()=>{
         const now=new Date();
-        const todayIL=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+        const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
         const [wy,wm,wd]=todayIL.split("-").map(Number);
         const wdow=new Date(wy,wm-1,wd).getDay();
         const sun=new Date(wy,wm-1,wd-wdow);
@@ -943,21 +1081,21 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             {(()=>{
               // Get current week's steps from fitbitData
               const now=new Date();
-              const nowILStr=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const nowILStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
               const [nowY,nowM,nowD2]=nowILStr.split("-").map(Number);
               const dow=new Date(nowY,nowM-1,nowD2).getDay(); // 0=Sun
               // Compute Sunday of this week using date strings to avoid timezone mutation bugs
-              const todayStrBar=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const todayStrBar=now.toLocaleDateString("en-CA",{timeZone:getTz()});
               const todayPartsBar=todayStrBar.split("-").map(Number);
               const dowILBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]).getDay();
               const sundayBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]-dowILBar);
               const dayLabels=["S","M","T","W","T","F","S"];
               const weekSteps=dayLabels.map((_,i)=>{
                 const d=new Date(sundayBar.getFullYear(),sundayBar.getMonth(),sundayBar.getDate()+i);
-                const dateStr=d.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+                const dateStr=d.toLocaleDateString("en-CA",{timeZone:getTz()});
                 const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
                 const isFuture=d>now;
-                const todayStr=now.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+                const todayStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
                 const isToday=dateStr===todayStr;
                 return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
               });
@@ -1023,14 +1161,14 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <SecLabel>Month — June 2026</SecLabel>
 
       <div style={s.mg}>
-        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt}/>
+        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
         <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
       {/* HEATMAP */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
-        <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData}/>
+        <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
@@ -1048,7 +1186,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           {label:"Week 1",range:"Mon 1 – Sat 6 Jun",detail:"1 active day · yoga Fri 5 Jun (96min ★)",current:false},
           ...(()=>{
             const now2=new Date();
-            const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+            const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:getTz()});
             const [y2,m2,d2]=todayStr2.split("-").map(Number);
             const dow2=new Date(y2,m2-1,d2).getDay();
             const tp2=todayStr2.split("-").map(Number);
@@ -1060,8 +1198,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             for(let w=-2;w<=2;w++){
               const sun=new Date(currSun);sun.setDate(currSun.getDate()+w*7);
               const sat=new Date(sun);sat.setDate(sun.getDate()+6);
-              const sunStr=sun.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
-              const satStr=sat.toLocaleDateString("en-CA",{timeZone:"Asia/Jerusalem"});
+              const sunStr=sun.toLocaleDateString("en-CA",{timeZone:getTz()});
+              const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
               const isCurr=w===0;
               const isPast=w<0;
               // Count workouts and steps for this week
@@ -1091,7 +1229,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   );
 }
 
-function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}}) {
+function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}, profileData=null}) {
+  const stepTarget=profileData?.step_target||8000;
   const today = new Date();
   const todayDay = today.getDate();
   const firstDay = new Date(today.getFullYear(),today.getMonth(),1).getDay();
@@ -1120,11 +1259,12 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     // Walks without a logged duration are auto-detected by Fitbit — don't count as active
     // Walks are auto-detected by Fitbit and too ambiguous — step count already captures movement
     const intentional=wObjs.filter(w=>w.type!=="walk"&&w.type!=="walking");
-    const isActive=steps>=8000||intentional.length>0;
+    const isActive=steps>=stepTarget||intentional.length>0;
+    const cats=wObjs.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
+    const hasGym=cats.includes("strength"); // LEGACY replaced
+    const hasYoga=cats.includes("mobility"); // LEGACY replaced
+    const hasCardio=cats.includes("cardio")&&wObjs.some(w=>w.type!=="walk"&&w.type!=="walking");
     const types=wObjs.map(w=>w.type);
-    const hasGym=types.includes("gym");
-    const hasYoga=types.includes("yoga")||types.includes("pilates");
-    const hasCardio=types.includes("elliptical")||types.includes("run")||types.includes("cycling");
     const dayMeals=allFood[dateStr]||[];
     const dayProt=dayMeals.reduce((s,e)=>s+(e.p||0),0);
     const protHit=dayProt>=protTgt;
@@ -1142,22 +1282,29 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
 }
 
 // ── SUPPLEMENT CHECKLIST COMPONENT ───────────────────────────────────────
-const SUPPS = [
-  {id:"creatine",name:"Creatine",time:"Morning with food"},
-  {id:"omega3",name:"Omega-3",time:"With meal"},
-  {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
-  {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
-  {id:"collagen",name:"Collagen",time:"With vitamin C"},
-  {id:"multi",name:"Multivitamin",time:"With meal"},
-];
+// Preserve stable ids for the original 6 supplements so existing supplement_log
+// rows keep matching; unknown supplements get a slug id from their name.
+const LEGACY_SUPP_IDS = {
+  "Creatine":"creatine","Omega-3":"omega3","Magnesium bisglycinate":"magnesium",
+  "D3 + K2":"d3k2","Collagen":"collagen","Multivitamin":"multi"
+};
+function suppId(name){
+  return LEGACY_SUPP_IDS[name] || (name||"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
+}
+// Build the checklist list from profileData.supplements ({name,dose,timing}).
+function suppsFromProfile(profileData){
+  const list=(profileData&&profileData.supplements)||[];
+  return list.map(sup=>({id:suppId(sup.name),name:sup.name,time:sup.timing||sup.dose||""}));
+}
 
-function SupplementChecklist({suppState={}, setSupp}) {
+function SupplementChecklist({suppState={}, setSupp, profileData}) {
+  const SUPPS = suppsFromProfile(profileData);
   const done = SUPPS.filter(s=>suppState[s.id]).length;
   return (
     <Card style={{marginTop:8}}>
       <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
         Supplements today — {done}/{SUPPS.length} taken
-        {done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
+        {SUPPS.length>0&&done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
         {SUPPS.map(sup=>{
@@ -1175,7 +1322,7 @@ function SupplementChecklist({suppState={}, setSupp}) {
 }
 
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -1361,7 +1508,7 @@ Input: ${txtInput}`;
       )}
 
       {/* SUPPLEMENTS CHECKLIST */}
-      <SupplementChecklist suppState={suppState} setSupp={setSupp}/>
+      <SupplementChecklist suppState={suppState} setSupp={setSupp} profileData={profileData}/>
 
       {/* EDIT MODAL */}
       {editIdx!==null&&(
@@ -1584,28 +1731,120 @@ function TabLog({logEntries, setLogEntries}) {
 }
 
 // ── PROFILE TAB ───────────────────────────────────────────────────────────
-function TabProfile({suppState, setSupp}) {
-  const SUPPS=[
-    {id:"creatine",name:"Creatine",time:"Morning with food"},
-    {id:"omega3",name:"Omega-3",time:"With meal"},
-    {id:"magnesium",name:"Magnesium bisglycinate",time:"Evening"},
-    {id:"d3k2",name:"D3 + K2",time:"Morning with fat"},
-    {id:"collagen",name:"Collagen",time:"With vitamin C"},
-    {id:"multi",name:"Multivitamin",time:"With meal"},
-  ];
-  const done=Object.values(suppState).filter(Boolean).length;
+// Compute age in whole years from a YYYY-MM-DD birth date
+function calcAge(birthDate){
+  if(!birthDate) return "";
+  const b=new Date(birthDate); if(isNaN(b)) return "";
+  const now=new Date();
+  let age=now.getFullYear()-b.getFullYear();
+  const m=now.getMonth()-b.getMonth();
+  if(m<0||(m===0&&now.getDate()<b.getDate())) age--;
+  return age;
+}
+
+const GOAL_OPTIONS=[
+  {id:"build_strength",label:"Build strength",defs:[["progressive_overload","Progressive overload"],["push_ups","More push-ups"],["lower_body","Lower body / glutes"]]},
+  {id:"body_composition",label:"Improve body composition",defs:[["reduce_body_fat","Reduce body fat %"],["build_muscle","Build muscle mass"]]},
+  {id:"sleep_quality",label:"Sleep better",defs:[["more_deep_rem","More deep / REM"],["earlier_bedtime","Earlier bedtime"]]},
+  {id:"cardio_fitness",label:"Cardiovascular fitness",defs:[["aerobic_base","Aerobic base"],["endurance","Endurance"]]},
+  {id:"injury_recovery",label:"Injury recovery",defs:[["spinal_stability","Spinal stability"],["pain_free","Pain-free movement"]]},
+  {id:"consistency",label:"Build consistency",defs:[["active_days","More active days"],["habit","Daily habit"]]},
+  {id:"nutrition",label:"Improve nutrition",defs:[["hit_protein","Hit protein target"],["balanced","Balanced macros"]]},
+  {id:"energy",label:"More energy",defs:[["reduce_fatigue","Reduce fatigue"],["stable_mood","Stable mood"]]},
+];
+
+function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}}) {
+  // Section A — editable personal info
+  const [pa, setPa] = useState({
+    name: profileData?.name||"",
+    birth_date: profileData?.birth_date||"",
+    gender: profileData?.gender||"female",
+    height_cm: profileData?.height_cm||"",
+    weight_kg: profileData?.weight_kg||"",
+    body_fat_pct: profileData?.body_fat_pct||"",
+    body_fat_target_pct: profileData?.body_fat_target_pct||"",
+    timezone: profileData?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  const [savedA, setSavedA] = useState("");
+
+  // Section B — settings & targets local state
+  const [goals, setGoals] = useState(profileData?.goals||[]);
+  const [savedGoals, setSavedGoals] = useState("");
+  const [targets, setTargets] = useState(profileData?.activity_targets||{strength:2,mobility:2,cardio:2});
+  const [savedTargets, setSavedTargets] = useState("");
+  const [mapping, setMapping] = useState(profileData?.activity_mapping||{});
+  const [savedMapping, setSavedMapping] = useState("");
+  const [numTargets, setNumTargets] = useState({
+    step_target: profileData?.step_target||8000,
+    protein_target: profileData?.protein_target||100,
+    active_days_target: profileData?.active_days_target||20,
+  });
+  const [savedNum, setSavedNum] = useState("");
+  const [supps, setSupps] = useState(profileData?.supplements||[]);
+  const [savedSupps, setSavedSupps] = useState("");
+  const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
+  const [savedNotes, setSavedNotes] = useState("");
+  const [workoutPlan, setWorkoutPlan] = useState(profileData?.workout_plan||"");
+  const [savedPlan, setSavedPlan] = useState("");
+  const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
+
+  // Persist a partial update to Supabase + local state
+  async function persist(patch, setFlag){
+    setProfileData(p=>({...p,...patch}));
+    try{ await supa("POST","profiles",{uid:UID,...patch},"on_conflict=uid"); if(setFlag) setFlag("Saved ✓"); }
+    catch(e){ if(setFlag) setFlag("Error: "+e.message.slice(0,40)); }
+  }
+
+  // Unique activity types seen in fitbit data, for the mapping section
+  const seenTypes=[...new Set((fitbitData.workouts||[]).map(w=>(w.type||"").toLowerCase()).filter(Boolean))];
+
+  const lbl={fontSize:11,color:C.t2,display:"block",marginBottom:3};
+  const fieldWrap={marginBottom:10};
+  const saveRow={display:"flex",alignItems:"center",gap:10,marginTop:6};
 
   return (
     <div>
       <SecLabel>Personal info</SecLabel>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-        {[["Name","Julia Serebro"],["Date of birth","29 Nov 1985"],["Height","166 cm"],["Age","40"]].map(([l,v])=>(
-          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
-            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
-            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
-          </div>
-        ))}
-      </div>
+      <Card style={{marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+          <div style={fieldWrap}><label style={lbl}>Name</label>
+            <input type="text" value={pa.name} onChange={e=>setPa(p=>({...p,name:e.target.value}))} style={s.input}/></div>
+          <div style={fieldWrap}><label style={lbl}>Birth date</label>
+            <input type="date" value={pa.birth_date} onChange={e=>setPa(p=>({...p,birth_date:e.target.value}))} style={s.input}/>
+            <div style={{fontSize:11,color:C.t3,marginTop:3}}>Age: {calcAge(pa.birth_date)||"—"}</div></div>
+          <div style={fieldWrap}><label style={lbl}>Gender</label>
+            <select value={pa.gender} onChange={e=>setPa(p=>({...p,gender:e.target.value}))} style={s.input}>
+              <option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
+            </select></div>
+          <div style={fieldWrap}><label style={lbl}>Height (cm)</label>
+            {/* TODO: unit toggle for international users */}
+            <input type="number" value={pa.height_cm} onChange={e=>setPa(p=>({...p,height_cm:e.target.value}))} style={s.input}/></div>
+          <div style={fieldWrap}><label style={lbl}>Weight (kg)</label>
+            {/* TODO: unit toggle for international users */}
+            <input type="number" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
+          <div style={fieldWrap}><label style={lbl}>Body fat % (from body composition scan)</label>
+            <input type="number" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
+          {pa.body_fat_pct!==""&&pa.body_fat_pct!=null&&(
+            <div style={fieldWrap}><label style={lbl}>Body fat % target</label>
+              <input type="number" value={pa.body_fat_target_pct} onChange={e=>setPa(p=>({...p,body_fat_target_pct:e.target.value}))} style={s.input}/></div>
+          )}
+          <div style={fieldWrap}><label style={lbl}>Timezone</label>
+            <input type="text" value={pa.timezone} onChange={e=>setPa(p=>({...p,timezone:e.target.value}))} style={s.input}/></div>
+          <div style={fieldWrap}><label style={lbl}>Fitbit</label>
+            <div style={{...s.input,background:C.s2,color:profileData?.fitbit_connected?C.teal:C.t3}}>{profileData?.fitbit_connected?"Connected":"Not connected"}</div></div>
+        </div>
+        <div style={saveRow}>
+          <button onClick={()=>persist({
+            name:pa.name, birth_date:pa.birth_date||null, gender:pa.gender,
+            height_cm:pa.height_cm===""?null:parseFloat(pa.height_cm),
+            weight_kg:pa.weight_kg===""?null:parseFloat(pa.weight_kg),
+            body_fat_pct:pa.body_fat_pct===""?null:parseFloat(pa.body_fat_pct),
+            body_fat_target_pct:pa.body_fat_target_pct===""?null:parseFloat(pa.body_fat_target_pct),
+            timezone:pa.timezone
+          }, setSavedA)} style={s.btn("p")}>Save</button>
+          {savedA&&<span style={{fontSize:12,color:C.teal}}>{savedA}</span>}
+        </div>
+      </Card>
 
       <SecLabel>InBody baseline — 8 June 2026</SecLabel>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
@@ -1663,27 +1902,38 @@ function TabProfile({suppState, setSupp}) {
       <SecLabel>Nutrition &amp; Supplements</SecLabel>
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplements</div>
-        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Stack below for reference.</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
-        {SUPPS.map(sup=>{
-          const checked=!!suppState[sup.id];
-          return (
-            <div key={sup.id} onClick={()=>setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.sf,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"10px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all .15s"}}>
-              <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.bd}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,flexShrink:0}}>{checked?"✓":""}</div>
-              <div><div style={{fontSize:12,fontWeight:500}}>{sup.name}</div><div style={{fontSize:10,color:C.t3,marginTop:1}}>{sup.time}</div></div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{fontSize:11,color:C.t3,marginBottom:14}}>
-        {done===0?"Tap each supplement when you take it. Resets daily.":done===SUPPS.length?"All supplements taken today ✅":`${done} of ${SUPPS.length} taken today`}
-      </div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Edit your stack below.</div>
+        {supps.map((sup,i)=>(
+          <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+            <div style={{flex:2}}><label style={lbl}>Name</label>
+              <input type="text" value={sup.name||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:e.target.value}:x))} style={s.input}/></div>
+            <div style={{flex:1}}><label style={lbl}>Dose</label>
+              <input type="text" value={sup.dose||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,dose:e.target.value}:x))} style={s.input}/></div>
+            <div style={{flex:2}}><label style={lbl}>Timing</label>
+              <input type="text" value={sup.timing||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,timing:e.target.value}:x))} style={s.input}/></div>
+            <button onClick={()=>setSupps(arr=>arr.filter((_,j)=>j!==i))} style={{...s.btn("s"),...s.btnSm}}>Remove</button>
+          </div>
+        ))}
+        <div style={saveRow}>
+          <button onClick={()=>setSupps(arr=>[...arr,{name:"",dose:"",timing:""}])} style={{...s.btn("s"),...s.btnSm}}>+ Add supplement</button>
+          <button onClick={()=>persist({supplements:supps.filter(x=>x.name&&x.name.trim())}, setSavedSupps)} style={s.btn("p")}>Save</button>
+          {savedSupps&&<span style={{fontSize:12,color:C.teal}}>{savedSupps}</span>}
+        </div>
       </Card>
 
       <SecLabel>Workout plan</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
+        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+        <div style={saveRow}>
+          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
+          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
+        </div>
+      </Card>
+
       <Card>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-          {[["GYM · 3x/week",C.pl,C.pu,"Lower body + upper body + core. Progressive overload."],["CARDIO · 2x/week",C.tl,C.teal,"Walking, hiking, elliptical. Adjusted by injury and cycle phase."],["YOGA · 2x/week",C.orl,C.or,"Ashtanga primary minus backbends. Mobility and recovery."]].map(([t,bg,col,desc])=>(
+          {[["GYM · 2-3x/week",C.pl,C.pu,"Lower body + upper body + core. Progressive overload."],["CARDIO · 2x/week",C.tl,C.teal,"Walking, hiking, elliptical. Adjusted by injury and cycle phase."],["YOGA · 2x/week",C.orl,C.or,"Ashtanga primary minus backbends. Mobility and recovery."]].map(([t,bg,col,desc])=>(
             <div key={t} style={{padding:12,background:bg,borderRadius:8}}>
               <div style={{fontSize:11,fontWeight:600,color:col,marginBottom:4}}>{t}</div>
               <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>{desc}</div>
@@ -1691,9 +1941,9 @@ function TabProfile({suppState, setSupp}) {
           ))}
         </div>
         {[
-          ["Glutes and legs",[["Hip thrust / glute bridge","Primary glute builder · start bodyweight"],["Romanian deadlift","Glutes + hamstrings · start light"],["Goblet squat","Quads + glutes · safer for lower back"],["Step-ups","Single-leg glute activation · low spinal load"],["Lateral band walks","Glute medius · knee and hip stability"],["Leg press (machine)","Compound · reduces spinal load"]]],
-          ["Upper body",[["Push-ups (progressive)","Baseline ~5 · incline then standard then decline"],["Dumbbell row","Upper back + biceps · bench support"],["Seated shoulder press","Deltoids · seated reduces lumbar strain"],["Lat pulldown","Back width and posture"],["Chest press (machine)","Pecs + triceps · machine if back discomfort"]]],
-          ["Core and spinal stability",[["Dead bug","Deep core · safest for post-surgery spine"],["Bird dog","Core + glutes · recommended for L4-L5"],["Forearm plank","Neutral spine endurance · build 20s to 60s"],["Pallof press","Anti-rotation core · spine-safe"],["Clamshell with band","Glute medius · directly supports L4-L5"]]],
+          ["Lower body",[["Leg press","35 kg · 3×12 · 90 sec rest"],["Hip abductor (leaning forward)","47 kg · 3×15 · 60 sec rest"],["Hip adductor","47 kg · 3×15 · 60 sec rest"],["Leg curl","20 kg · 3×12 · 60 sec rest"],["Cable glute kickback","10 kg each leg · 4×12 · 60 sec rest"]]],
+          ["Upper body",[["Lat pulldown","20 kg · 3×12 · 90 sec rest"],["Seated cable row","20 kg · 3×12 · 90 sec rest"],["Push-ups","3 sets · max full → max knee · 60 sec rest"]]],
+          ["Core",[["Cable woodchop","7.5 kg each side · 3×10 · 45 sec rest"],["Plank","3 sets · 45 sec · 30 sec rest"],["Side plank","2 sets · 30 sec each side · 30 sec rest"]]],
         ].map(([cat,exercises])=>(
           <div key={cat}>
             <div style={{fontSize:12,fontWeight:600,color:C.tx,marginBottom:8,paddingBottom:4,borderBottom:`.5px solid ${C.bd}`,marginTop:14}}>{cat}</div>
@@ -1709,6 +1959,114 @@ function TabProfile({suppState, setSupp}) {
           <strong style={{color:C.tx}}>Pending physio clearance:</strong> Back squats, deadlifts from floor, loaded spinal flexion, high-impact cardio.
         </div>
       </Card>
+
+      {/* ── SECTION B — SETTINGS & TARGETS ───────────────────────────────── */}
+      <SecLabel>Settings &amp; Targets</SecLabel>
+
+      {/* Goals */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goals (up to 3)</div>
+        {[0,1,2].map(slot=>{
+          const g=goals[slot]||{};
+          const opt=GOAL_OPTIONS.find(o=>o.id===g.id);
+          return (
+            <div key={slot} style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+              <select value={g.id||""} onChange={e=>{
+                const id=e.target.value; const o=GOAL_OPTIONS.find(x=>x.id===id);
+                setGoals(arr=>{const next=[...arr]; next[slot]=id?{id,label:o?o.label:id,definition:null}:undefined; return next.filter((_,i)=>i<3||next[i]);});
+              }} style={{...s.input,flex:2,minWidth:160}}>
+                <option value="">— none —</option>
+                {GOAL_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              {opt&&(
+                <select value={g.definition||""} onChange={e=>setGoals(arr=>{const next=[...arr]; next[slot]={...next[slot],definition:e.target.value}; return next;})} style={{...s.input,flex:2,minWidth:160}}>
+                  <option value="">— how —</option>
+                  {opt.defs.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                </select>
+              )}
+            </div>
+          );
+        })}
+        <div style={saveRow}>
+          <button onClick={()=>persist({goals:goals.filter(Boolean)}, setSavedGoals)} style={s.btn("p")}>Save goals</button>
+          {savedGoals&&<span style={{fontSize:12,color:C.teal}}>{savedGoals}</span>}
+        </div>
+      </Card>
+
+      {/* Activity targets */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Activity targets (sessions / week)</div>
+        {[["strength","Strength"],["mobility","Mobility"],["cardio","Cardio"]].map(([k,l])=>(
+          <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <span style={{flex:1,fontSize:13}}>{l}</span>
+            <input type="number" min={0} max={14} value={targets[k]??0} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:90}}/>
+          </div>
+        ))}
+        <div style={saveRow}>
+          <button onClick={()=>persist({activity_targets:targets}, setSavedTargets)} style={s.btn("p")}>Save targets</button>
+          {savedTargets&&<span style={{fontSize:12,color:C.teal}}>{savedTargets}</span>}
+        </div>
+      </Card>
+
+      {/* Activity mapping */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Activity mapping</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Map each logged activity type to a category.</div>
+        {seenTypes.length===0&&<div style={{fontSize:12,color:C.t3,marginBottom:8}}>No activity types logged yet.</div>}
+        {seenTypes.map(t=>(
+          <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <span style={{flex:1,fontSize:13}}>{t}</span>
+            <select value={mapping[t]||getActivityCategory(t, mapping)} onChange={e=>setMapping(m=>({...m,[t]:e.target.value}))} style={{...s.input,width:170}}>
+              <option value="strength">strength</option>
+              <option value="mobility">mobility</option>
+              <option value="cardio">cardio</option>
+              <option value="uncategorized">uncategorized</option>
+            </select>
+          </div>
+        ))}
+        <div style={saveRow}>
+          <button onClick={()=>persist({activity_mapping:mapping}, setSavedMapping)} style={s.btn("p")}>Save mapping</button>
+          {savedMapping&&<span style={{fontSize:12,color:C.teal}}>{savedMapping}</span>}
+        </div>
+      </Card>
+
+      {/* Numeric targets */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Targets</div>
+        {[["step_target","Step target"],["protein_target","Protein target (g)"],["active_days_target","Active days / month"]].map(([k,l])=>(
+          <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <span style={{flex:1,fontSize:13}}>{l}</span>
+            <input type="number" value={numTargets[k]} onChange={e=>setNumTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:110}}/>
+          </div>
+        ))}
+        <div style={saveRow}>
+          <button onClick={()=>persist({step_target:numTargets.step_target,protein_target:numTargets.protein_target,active_days_target:numTargets.active_days_target}, setSavedNum)} style={s.btn("p")}>Save targets</button>
+          {savedNum&&<span style={{fontSize:12,color:C.teal}}>{savedNum}</span>}
+        </div>
+      </Card>
+
+      {/* Health notes */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Health notes</div>
+        <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="Injuries, restrictions, medical context…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+        <div style={saveRow}>
+          <button onClick={()=>persist({health_notes:healthNotes}, setSavedNotes)} style={s.btn("p")}>Save notes</button>
+          {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
+        </div>
+      </Card>
+
+      {/* Cycle tracking */}
+      {pa.gender==="female"&&(
+        <Card style={{marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:500}}>Cycle tracking</div>
+              <div style={{fontSize:11,color:C.t3}}>Show cycle phase across the app</div>
+            </div>
+            <button onClick={()=>{const v=!cycleTracking; setCycleTracking(v); persist({cycle_tracking:v});}} style={{...s.btn(cycleTracking?"p":"s"),...s.btnSm}}>{cycleTracking?"On":"Off"}</button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -1731,7 +2089,9 @@ function CycleHeaderPill({cycleDates, onPress}) {
 export default function App() {
   const [tab, setTab] = useState("dash");
   const [apiKey, setApiKey] = useState(()=>localStorage.getItem("jkey")||"");
-  const [protTgt, setProtTgt] = useState(()=>parseInt(localStorage.getItem("jprot")||"100"));
+  const [profileData, setProfileData] = useState(null);
+  // protTgt now derives from profileData (falls back to 100 during load)
+  const protTgt = profileData?.protein_target || 100;
 
   const [cycleDates, setCycleDates] = useState(()=>{
     try{const b=localStorage.getItem("jcycle_backup");return b?JSON.parse(b):[]}catch{return [];}
@@ -1755,8 +2115,13 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Updated Mon 15 Jun 2026, 10:15");
   const [settKey, setSettKey] = useState(apiKey);
-  const [settProt, setSettProt] = useState(protTgt);
+  const [settProt, setSettProt] = useState(100);
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
+
+  // Keep Settings modal protein field in sync once profile loads
+  useEffect(()=>{ if(profileData?.protein_target) setSettProt(profileData.protein_target); },[profileData?.protein_target]);
+  // Publish the profile timezone to the module-level helper used by metric components
+  useEffect(()=>{ if(profileData?.timezone) setActiveTz(profileData.timezone); },[profileData?.timezone]);
 
   useEffect(()=>{
     // Handle Google OAuth callback (token in URL hash)
@@ -1770,14 +2135,81 @@ export default function App() {
     }
     async function load(){
       setSyncStatus("syncing...");
-      // Load settings first
+      // Load settings first (legacy protein target captured for profile default)
+      let legacyProt = parseInt(localStorage.getItem("jprot")||"100")||100;
       try{
         const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
         if(rows&&rows.length){
           if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
-          if(rows[0].protein_target){setProtTgt(rows[0].protein_target);localStorage.setItem("jprot",String(rows[0].protein_target));}
+          if(rows[0].protein_target){legacyProt=rows[0].protein_target;localStorage.setItem("jprot",String(rows[0].protein_target));}
         }
       }catch(e){}
+
+      // ── Load profile (and migrate / create default if missing) ───────────
+      try{
+        const profiles = await supa("GET","profiles",null,`uid=eq.${UID}`);
+        let prof = profiles && profiles[0] ? profiles[0] : null;
+        if (prof) {
+          // Auto-detect timezone if missing
+          if (!prof.timezone) {
+            prof.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            try{ await supa("POST","profiles",{...prof},"on_conflict=uid"); }catch(e){}
+          }
+          setProfileData(prof);
+        } else {
+          // No profile — run one-time migration of known hardcoded data
+          const migrated = {
+            uid:"julia", // TODO: replace with auth user ID when Supabase Auth is added
+            name:"Julia Serebro",
+            birth_date:"1985-11-29",
+            gender:"female",
+            goals:[
+              {id:"build_strength",label:"Build strength",definition:"progressive_overload",target_value:null,target_unit:null},
+              {id:"body_composition",label:"Improve body composition",definition:"reduce_body_fat",target_value:null,target_unit:null},
+              {id:"sleep_quality",label:"Sleep better",definition:"more_deep_rem",target_value:null,target_unit:null}
+            ],
+            activity_mapping:{"workout":"strength"},
+            activity_targets:{strength:2,mobility:2,cardio:2},
+            step_target:8000,
+            protein_target:legacyProt,
+            active_days_target:20,
+            height_cm:166,
+            supplements:[
+              {name:"Creatine",dose:"5g",timing:"Morning with food"},
+              {name:"Omega-3",dose:"standard",timing:"With meal"},
+              {name:"Magnesium bisglycinate",dose:"standard",timing:"Evening"},
+              {name:"D3 + K2",dose:"standard",timing:"Morning with fat"},
+              {name:"Collagen",dose:"standard",timing:"With vitamin C"},
+              {name:"Multivitamin",dose:"standard",timing:"With meal"}
+            ],
+            health_notes:"L4-L5 disc herniation with nerve root compression, history of radicular leg pain now largely resolved. T9-T10 thoracic spinal cord compression, surgically decompressed. Loaded hip extension movements currently restricted pending MRI clearance. Physiotherapy consultation planned.",
+            cycle_tracking:true,
+            timezone:"Asia/Jerusalem",
+            fitbit_connected:true,
+            onboarding_complete:true
+          };
+          try{ await supa("POST","profiles",{...migrated},"on_conflict=uid"); }catch(e){ console.log("Profile migration save:",e.message); }
+          setProfileData(migrated);
+        }
+      }catch(e){
+        console.log("Profile load error:",e.message);
+        // Fallback default so the app still renders
+        setProfileData({
+          uid: UID,
+          name: "Julia",
+          birth_date: "1985-11-29",
+          gender: "female",
+          protein_target: legacyProt,
+          step_target: 8000,
+          active_days_target: 20,
+          activity_targets: {strength:2, mobility:2, cardio:2},
+          activity_mapping: {"workout":"strength"},
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          supplements: [],
+          cycle_tracking: true,
+          onboarding_complete: false
+        });
+      }
       // Load data
       try{
         const [food,log,cyc,supp,fitbit]=await Promise.all([
@@ -1882,8 +2314,11 @@ export default function App() {
   async function saveSett(){
     localStorage.setItem("jkey",settKey);
     localStorage.setItem("jprot",String(settProt));
-    setApiKey(settKey);setProtTgt(settProt);
+    setApiKey(settKey);
+    // Protein target now lives on the profile
+    setProfileData(p=>p?{...p,protein_target:settProt}:p);
     try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey,protein_target:settProt},"on_conflict=user_id");}catch(e){}
+    try{await supa("POST","profiles",{uid:UID,protein_target:settProt},"on_conflict=uid");}catch(e){}
     setShowSett(false);
   }
 
@@ -1917,6 +2352,15 @@ export default function App() {
 
   const isViewOnly = new URLSearchParams(window.location.search).get("view")==="1";
 
+  // Wait for profile to load before rendering the full app
+  if (profileData === null) {
+    return (
+      <div style={{...s.shell,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:13,color:C.t2}}><Spinner/>Loading your profile...</div>
+      </div>
+    );
+  }
+
   return (
     <div style={s.shell}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`}</style>
@@ -1941,11 +2385,11 @@ export default function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
-      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp}/>}
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
-      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp}/>}
+      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData}/>}
 
       {/* COACH CHAT BUTTON */}
       <button onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>

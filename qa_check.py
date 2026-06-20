@@ -89,7 +89,7 @@ print(f"✓ Week simulation: today={today_il}, dow={js_dow}, sundayBar={sun}, we
 
 # ── 7. DYNAMIC vs HARDCODED ──────────────────────────────────────────────
 required_dynamic = [
-    ("sScore+dScore+rScore", "readiness score formula"),
+    ("durScore+deepScore+remScore", "readiness score formula"),
     ("fitbitData.sleep", "sleep card reads fitbitData"),
     ("fitbitData.steps", "steps reads fitbitData"),
     ("fitbitData.workouts", "workouts reads fitbitData"),
