@@ -76,7 +76,8 @@ const DEFAULT_ACTIVITY_MAPPING = {
   "dancing":"cardio","cross country skiing":"cardio","skiing":"cardio","snowboarding":"cardio",
   "rollerblading":"cardio","surfing":"cardio","paddleboarding":"cardio","kayaking":"cardio",
   "canoeing":"cardio","golf":"cardio","tennis":"cardio","martial arts":"cardio",
-  "indoor climbing":"cardio","outdoor workout":"cardio","sports":"cardio"
+  "indoor climbing":"cardio","outdoor workout":"cardio","sports":"cardio",
+  "gym":"strength","weightlifting":"strength"
   // "workout" intentionally omitted — requires user mapping
 };
 
@@ -1822,7 +1823,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   async function persist(patch, setFlag){
     setProfileData(p=>({...p,...patch}));
     try{ await supa("POST","profiles",{uid:UID,...patch},"on_conflict=uid"); if(setFlag) setFlag("Saved ✓"); }
-    catch(e){ if(setFlag) setFlag("Error: "+e.message.slice(0,40)); }
+    catch(e){ if(setFlag) setFlag("Error: "+e.message.slice(0,120)); }
   }
 
   // Unique activity types seen in fitbit data, for the mapping section
@@ -1876,58 +1877,26 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         </div>
       </Card>
 
-      <SecLabel>InBody baseline — 8 June 2026</SecLabel>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
-        {[["Weight","57.6 kg",null],["Skeletal muscle","24.9 kg",C.tl],["Body fat","12.2 kg",C.al],["Body fat %","21.2%",null]].map(([l,v,bg])=>(
-          <div key={l} style={{background:bg||C.s2,borderRadius:8,padding:12}}>
-            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
-            <div style={{fontSize:18,fontWeight:600}}>{v}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-        {[["BMI","20.9"],["InBody score","78 / 100"],["Visceral fat","Level 5 ✓"],["BMR","1,350 kcal"]].map(([l,v])=>(
-          <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
-            <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
-            <div style={{fontSize:14,fontWeight:500}}>{v}</div>
-          </div>
-        ))}
-      </div>
-
-      <SecLabel>Goals</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>The 4 main goals</div>
-        {[
-          ["1. Build glute and leg muscle mass","Increase skeletal muscle from 24.9 kg baseline through progressive lower body resistance training."],
-          ["2. Improve upper body strength","Build from ~5 consecutive push-ups to 10 by September, 15 by December."],
-          ["3. Strengthen lower back","Spinal stability post T9-T10 surgery and L4-L5 herniation. Deep core, glute activation, progressive loading within physio guidelines."],
-          ["4. Develop cardiovascular fitness","Build sustained aerobic capacity. Targets set progressively based on injury progress and physio clearance."],
-        ].map(([title,desc])=>(
-          <div key={title} style={{paddingBottom:10,marginBottom:10,borderBottom:`.5px solid ${C.bd}`}}>
-            <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{title}</div>
-            <div style={{fontSize:12,color:C.t2,lineHeight:1.6}}>{desc}</div>
-          </div>
-        ))}
-        <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingBottom:0}}>
-          <strong style={{color:C.tx}}>Next InBody scan:</strong> September 2026 — 3-month check-in against targets below.
-        </div>
-      </Card>
-      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Measurable targets</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        {[
-          {title:"3 months — September 2026",color:C.tm,items:[["Weight","57-58 kg"],["Skeletal muscle","25.5 kg (+0.6)"],["Body fat","11.5 kg (-0.7)"],["Body fat %","19.8%"],["InBody score","82+"],["Push-ups","10 consecutive"]]},
-          {title:"6 months — December 2026",color:C.pu,items:[["Weight","57-59 kg"],["Skeletal muscle","26.9 kg (+2.0)"],["Body fat","10.2 kg (-2.0)"],["Body fat %","17.5%"],["InBody score","85+"],["Push-ups","15 consecutive"]]},
-        ].map(g=>(
-          <div key={g.title} style={{...s.card,borderLeft:`3px solid ${g.color}`,marginBottom:0}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>{g.title}</div>
-            {g.items.map(([l,v])=>(
-              <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`.5px solid ${C.bd}`}}>
-                <span style={{color:C.t2}}>{l}</span><span style={{fontWeight:500}}>{v}</span>
+      {/* BMI / BMR calculated tiles */}
+      {(pa.weight_kg||profileData?.weight_kg)&&(pa.height_cm||profileData?.height_cm)?(()=>{
+        const w=parseFloat(pa.weight_kg||profileData?.weight_kg||0);
+        const h=parseFloat(pa.height_cm||profileData?.height_cm||1);
+        const age=calcAge(pa.birth_date||profileData?.birth_date)||30;
+        const bmi=w/(h/100)**2;
+        // Mifflin-St Jeor BMR
+        const bmr=pa.gender==="female"?(10*w+6.25*h-5*age-161):(10*w+6.25*h-5*age+5);
+        return (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            {[["BMI",bmi.toFixed(1)],["BMR",Math.round(bmr)+" kcal/day"]].map(([l,v])=>(
+              <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
+                <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
+                <div style={{fontSize:16,fontWeight:600}}>{v}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l==="BMI"?"calculated from height & weight":"basal metabolic rate (Mifflin-St Jeor)"}</div>
               </div>
             ))}
           </div>
-        ))}
-      </div>
+        );
+      })():null}
 
       <SecLabel>Nutrition &amp; Supplements</SecLabel>
       <Card style={{marginBottom:14}}>
@@ -1995,24 +1964,28 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
 
       {/* Goals */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goals (up to 3)</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goals — up to 3</div>
         {[0,1,2].map(slot=>{
           const g=goals[slot]||{};
           const opt=GOAL_OPTIONS.find(o=>o.id===g.id);
           return (
-            <div key={slot} style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+            <div key={slot} style={{marginBottom:10,paddingBottom:10,borderBottom:slot<2?`.5px solid ${C.bd}`:"none"}}>
+              <div style={{fontSize:11,color:C.t3,marginBottom:4}}>Goal {slot+1}</div>
               <select value={g.id||""} onChange={e=>{
                 const id=e.target.value; const o=GOAL_OPTIONS.find(x=>x.id===id);
-                setGoals(arr=>{const next=[...arr]; next[slot]=id?{id,label:o?o.label:id,definition:null}:undefined; return next.filter((_,i)=>i<3||next[i]);});
-              }} style={{...s.input,flex:2,minWidth:160}}>
-                <option value="">— none —</option>
+                setGoals(arr=>{const next=[...arr]; next[slot]=id?{id,label:o?o.label:id,definition:null}:null; return next;});
+              }} style={{...s.input,width:"100%",marginBottom:4}}>
+                <option value="">— select a goal —</option>
                 {GOAL_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
               {opt&&(
-                <select value={g.definition||""} onChange={e=>setGoals(arr=>{const next=[...arr]; next[slot]={...next[slot],definition:e.target.value}; return next;})} style={{...s.input,flex:2,minWidth:160}}>
-                  <option value="">— how —</option>
-                  {opt.defs.map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                </select>
+                <div style={{paddingLeft:12}}>
+                  <div style={{fontSize:11,color:C.t3,marginBottom:3}}>What does this mean for you?</div>
+                  <select value={g.definition||""} onChange={e=>setGoals(arr=>{const next=[...arr]; next[slot]={...next[slot],definition:e.target.value}; return next;})} style={{...s.input,width:"100%"}}>
+                    <option value="">— choose —</option>
+                    {opt.defs.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
               )}
             </div>
           );
@@ -2025,11 +1998,13 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
 
       {/* Activity targets */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Activity targets (sessions / week)</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity targets — sessions per week</div>
+        <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>Research on longevity consistently supports a weekly mix of strength, mobility, and cardio. All three together outperform any single category for long-term health.</div>
         {[["strength","Strength"],["mobility","Mobility"],["cardio","Cardio"]].map(([k,l])=>(
           <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
             <span style={{flex:1,fontSize:13}}>{l}</span>
             <input type="number" min={0} max={14} value={targets[k]??0} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:90}}/>
+            <span style={{fontSize:11,color:C.t3,width:70}}>≈ {Math.round((targets[k]??0)*4.3)}/month</span>
           </div>
         ))}
         <div style={saveRow}>
@@ -2038,27 +2013,41 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         </div>
       </Card>
 
-      {/* Activity mapping */}
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Activity mapping</div>
-        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Map each logged activity type to a category.</div>
-        {seenTypes.length===0&&<div style={{fontSize:12,color:C.t3,marginBottom:8}}>No activity types logged yet.</div>}
-        {seenTypes.map(t=>(
-          <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-            <span style={{flex:1,fontSize:13}}>{t}</span>
-            <select value={mapping[t]||getActivityCategory(t, mapping)} onChange={e=>setMapping(m=>({...m,[t]:e.target.value}))} style={{...s.input,width:170}}>
-              <option value="strength">strength</option>
-              <option value="mobility">mobility</option>
-              <option value="cardio">cardio</option>
-              <option value="uncategorized">uncategorized</option>
-            </select>
-          </div>
-        ))}
-        <div style={saveRow}>
-          <button onClick={()=>persist({activity_mapping:mapping}, setSavedMapping)} style={s.btn("p")}>Save mapping</button>
-          {savedMapping&&<span style={{fontSize:12,color:C.teal}}>{savedMapping}</span>}
-        </div>
-      </Card>
+      {/* Activity mapping — only show types that need user decision */}
+      {(()=>{
+        const needsDecision = seenTypes.filter(t=>getActivityCategory(t,{})==="uncategorized"&&!mapping[t]);
+        const userOverrides = seenTypes.filter(t=>mapping[t]&&mapping[t]!==DEFAULT_ACTIVITY_MAPPING[t]);
+        if(needsDecision.length===0&&userOverrides.length===0) return null;
+        return (
+          <Card style={{marginBottom:14}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity mapping</div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>These activity types from your Fitbit data need categorising. Everything else is auto-mapped.</div>
+            {needsDecision.map(t=>(
+              <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{flex:1,fontSize:13,fontWeight:500}}>{t}</span>
+                <select value={mapping[t]||""} onChange={e=>{const v=e.target.value;setMapping(m=>({...m,[t]:v}));if(e.target.value)persist({activity_mapping:{...mapping,[t]:v}});}} style={{...s.input,width:170}}>
+                  <option value="">— categorise —</option>
+                  <option value="strength">Strength</option>
+                  <option value="mobility">Mobility</option>
+                  <option value="cardio">Cardio</option>
+                </select>
+              </div>
+            ))}
+            {userOverrides.length>0&&(
+              <>
+                <div style={{fontSize:11,color:C.t3,marginTop:8,marginBottom:6}}>Your overrides</div>
+                {userOverrides.map(t=>(
+                  <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6,fontSize:12}}>
+                    <span style={{flex:1,color:C.t2}}>{t}</span>
+                    <span style={{color:C.tx,fontWeight:500}}>{mapping[t]}</span>
+                    <button onClick={()=>{const m={...mapping};delete m[t];setMapping(m);persist({activity_mapping:m});}} style={{fontSize:10,background:"none",border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px 6px",cursor:"pointer",color:C.t3}}>reset</button>
+                  </div>
+                ))}
+              </>
+            )}
+          </Card>
+        );
+      })()}
 
       {/* Numeric targets */}
       <Card style={{marginBottom:14}}>
