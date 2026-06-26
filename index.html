@@ -83,7 +83,7 @@ create policy "Allow all for now" on fitness_cache for all using (true) with che
 const DEFAULT_ACTIVITY_MAPPING = {
   "strength training":"strength","weightlifting":"strength","powerlifting":"strength",
   "boot camp":"strength","circuit training":"strength","crossfit":"strength","core training":"strength",
-  "yoga":"movement","pilates":"movement","tai chi":"movement","stretching":"movement","flexibility":"movement","barre":"movement","dance":"movement","qigong":"movement",
+  "yoga":"mobility","pilates":"mobility","tai chi":"mobility","stretching":"mobility","flexibility":"mobility","barre":"mobility","dance":"mobility","qigong":"mobility",
   "run":"cardio","walk":"cardio","hike":"cardio","bike":"cardio","elliptical":"cardio",
   "treadmill":"cardio","swim":"cardio","rowing machine":"cardio","stair climber":"cardio",
   "hiit":"cardio","interval workout":"cardio","aerobics":"cardio","kickboxing":"cardio",
@@ -279,11 +279,11 @@ function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=fals
     ...workoutDates
   ]);
   const strengthCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="strength").length;
-  const movementCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="movement").length;
+  const mobilityCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="mobility").length;
   const cardioCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="cardio").length;
   const at=profileData?.activity_targets||{};
   const tStr=Math.round((Number(at.strength)||2)*4.3);
-  const tMov=Math.round((Number(at.movement)||Number(at.mobility)||2)*4.3);
+  const tMov=Math.round((Number(at.mobility)||Number(at.movement)||2)*4.3);
   const tCard=Math.round((Number(at.cardio)||2)*4.3);
   const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
     if(!date.startsWith(month)) return false;
@@ -292,7 +292,7 @@ function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=fals
   return (<>
     <Metric compact={compact} label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={(profileData?.active_days_target||20)+"/month"} subColor={C.teal}/>
     <Metric compact={compact} label="Strength" value={<span style={{color:C.pu}}>{strengthCount}</span>} sub={"target: "+tStr+"/mo"} subColor={C.pu}/>
-    <Metric compact={compact} label="Movement" value={<span style={{color:C.or}}>{movementCount}</span>} sub={"target: "+tMov+"/mo"} subColor={C.or}/>
+    <Metric compact={compact} label="Mobility" value={<span style={{color:C.or}}>{mobilityCount}</span>} sub={"target: "+tMov+"/mo"} subColor={C.or}/>
     <Metric compact={compact} label="Cardio" value={<span style={{color:C.teal}}>{cardioCount}</span>} sub={"target: "+tCard+"/mo"} subColor={C.teal}/>
   </>);
 }
@@ -694,7 +694,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
 }
 
 // ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
-function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
+function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData}) {
   const now = new Date();
   const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:getTz()});
   const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -730,7 +730,10 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   const ySteps=(fitbitData.steps||[]).find(s=>s.date===yKey);
   const yActivity=yWorkouts.length?yWorkouts.map(w=>w.type).join(" + "):"rest day, no workout logged";
   const yStepsNote=ySteps?ySteps.steps.toLocaleString()+" steps":"steps unknown";
-  return `Julia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+  const goalsCtx = (profileData?.goals||[]).length>0 ? '\nUSER GOALS:\n'+(profileData.goals.map(g=>'- '+g.label+': '+g.definition+(g.target_value?' (target: '+g.target_value+' '+(g.target_unit||'')+')':'')).join('\n')) : '';
+  const actTargCtx = profileData?.activity_targets ? `\nACTIVITY TARGETS: Strength ${profileData.activity_targets.strength}x/week, Mobility ${profileData.activity_targets.mobility||2}x/week, Cardio ${profileData.activity_targets.cardio}x/week` : '';
+  const suppsCtx = (profileData?.supplements||[]).filter(s=>s.name).length>0 ? '\nSUPPLEMENTS: '+(profileData.supplements.filter(s=>s.name).map(s=>`${s.name} ${s.dose||''} ${s.timing?'('+s.timing+')':''}`).join(', ')) : '';
+  return goalsCtx + actTargCtx + suppsCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
 }
 
 function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
@@ -742,7 +745,7 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
 
   function buildCtx() {
-    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
   }
 
   async function callAI(prompt) {
@@ -929,7 +932,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const recentWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===yDate);
         const cats = recentWorkouts.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
         const loadScore = recentWorkouts.length===0 ? 12
-          : cats.some(c=>c==="movement") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
+          : cats.some(c=>c==="mobility") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
           : 6;
 
         // Protein — 10 pts
@@ -1238,7 +1241,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
         {(()=>{
-          const catStyle={strength:[C.pl,C.pu],movement:[C.orl,C.or],cardio:[C.tl,C.teal]};
+          const catStyle={strength:[C.pl,C.pu],mobility:[C.orl,C.or],cardio:[C.tl,C.teal]};
           const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
           if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
           return recent.map((w,i)=>{
@@ -1268,7 +1271,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Strength</span>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Movement</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Mobility</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
           <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
           <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
@@ -1359,7 +1362,7 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     const isActive=steps>=stepTarget||intentional.length>0;
     const cats=wObjs.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
     const hasStrength=cats.includes("strength");
-    const hasMovement=cats.includes("movement");
+    const hasMobility=cats.includes("mobility");
     const hasCardio=cats.includes("cardio")&&wObjs.some(w=>w.type!=="walk"&&w.type!=="walking");
     const types=wObjs.map(w=>w.type);
     const dayMeals=allFood[dateStr]||[];
@@ -1370,7 +1373,7 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
         {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
         {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.am,position:"absolute",top:2,left:2}}>P✓</span>}
         {hasStrength&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").map(w=>w.type).join(", ")}</div>}
-        {hasMovement&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="movement").map(w=>w.type).join(", ")}</div>}
+        {hasMobility&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="mobility").map(w=>w.type).join(", ")}</div>}
         {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio"&&w.type!=="walk"&&w.type!=="walking").map(w=>w.type).join(", ")}</div>}
       </div>
     );
@@ -1837,16 +1840,78 @@ function calcAge(birthDate){
   return age;
 }
 
-const GOAL_OPTIONS=[
-  {id:"build_strength",label:"Build strength",defs:[["progressive_overload","Progressive overload"],["push_ups","More push-ups"],["lower_body","Lower body / glutes"]]},
-  {id:"body_composition",label:"Improve body composition",defs:[["reduce_body_fat","Reduce body fat %"],["build_muscle","Build muscle mass"]]},
-  {id:"sleep_quality",label:"Sleep better",defs:[["more_deep_rem","More deep / REM"],["earlier_bedtime","Earlier bedtime"]]},
-  {id:"cardio_fitness",label:"Cardiovascular fitness",defs:[["aerobic_base","Aerobic base"],["endurance","Endurance"]]},
-  {id:"injury_recovery",label:"Injury recovery",defs:[["spinal_stability","Spinal stability"],["pain_free","Pain-free movement"]]},
-  {id:"consistency",label:"Build consistency",defs:[["active_days","More active days"],["habit","Daily habit"]]},
-  {id:"nutrition",label:"Improve nutrition",defs:[["hit_protein","Hit protein target"],["balanced","Balanced macros"]]},
-  {id:"energy",label:"More energy",defs:[["reduce_fatigue","Reduce fatigue"],["stable_mood","Stable mood"]]},
+const GOAL_CARDS = [
+  {id:"sleep_better", label:"I want to sleep better"},
+  {id:"build_strength", label:"I want to get stronger"},
+  {id:"improve_mobility", label:"I want to move better and feel less stiff"},
+  {id:"more_energy", label:"I want more energy and better recovery"},
+  {id:"improve_endurance", label:"I want to improve my fitness and endurance"},
+  {id:"build_consistency", label:"I want to build consistent healthy habits"},
+  {id:"body_composition", label:"I want to feel better in my body"},
 ];
+
+const GOAL_SUBS = {
+  sleep_better:{label:"Sleep better",prompt:"What matters most to you?",options:[
+    {id:"longer",label:"Sleep longer",input:{type:"number",label:"Minimum hours/night",default:7,unit:"hours"}},
+    {id:"earlier",label:"Sleep earlier",input:{type:"time",label:"In bed by",default:"23:00"}},
+    {id:"quality",label:"Better quality sleep",note:"tracked automatically from your data"},
+    {id:"all",label:"All of the above"},
+  ]},
+  build_strength:{label:"Build strength",prompt:"How do you want to measure progress?",options:[
+    {id:"sessions",label:"Hit my weekly strength sessions"},
+    {id:"progressive",label:"Lift heavier over time",note:"coming soon — log manually in journal for now"},
+  ]},
+  improve_mobility:{label:"Improve mobility",prompt:"How do you want to measure progress?",options:[
+    {id:"sessions",label:"Hit my weekly mobility sessions"},
+    {id:"feel",label:"Feel less stiff and move more freely",note:"tracked via journal entries"},
+  ]},
+  more_energy:{label:"More energy & recovery",prompt:"How do you want to measure progress?",options:[
+    {id:"readiness",label:"Improve my readiness score over time"},
+    {id:"both",label:"Both energy and recovery"},
+  ]},
+  improve_endurance:{label:"Improve endurance",prompt:"How do you want to measure progress?",options:[
+    {id:"sessions",label:"Hit my weekly cardio sessions"},
+    {id:"base",label:"Build my aerobic base over time",note:"tracked via session duration trend"},
+  ]},
+  build_consistency:{label:"Build consistency",prompt:"How do you want to measure progress?",options:[
+    {id:"active_days",label:"Hit my active days per week"},
+    {id:"daily",label:"Build a daily movement habit"},
+  ]},
+  body_composition:{label:"Improve body composition",prompt:"How do you want to measure progress?",options:[
+    {id:"body_fat",label:"Reduce body fat %",input:{type:"number",label:"Target body fat %",unit:"%",optional:true}},
+    {id:"muscle",label:"Build muscle and feel stronger"},
+    {id:"both",label:"Both"},
+  ]},
+};
+
+function getDefaultActivityTargets(goals) {
+  const ids = (goals||[]).map(g => g.id);
+  if (ids.includes("build_strength") && ids.includes("improve_mobility") && ids.includes("improve_endurance")) return {strength:2,mobility:2,cardio:1};
+  if (ids.includes("build_strength") && ids.includes("improve_mobility")) return {strength:2,mobility:2,cardio:1};
+  if (ids.includes("build_strength") && ids.includes("improve_endurance")) return {strength:2,mobility:1,cardio:2};
+  if (ids.includes("improve_mobility") && ids.includes("improve_endurance")) return {strength:2,mobility:2,cardio:1};
+  if (ids.includes("build_strength") || ids.includes("body_composition")) return {strength:3,mobility:1,cardio:1};
+  if (ids.includes("improve_mobility")) return {strength:2,mobility:2,cardio:1};
+  if (ids.includes("improve_endurance")) return {strength:2,mobility:1,cardio:2};
+  return {strength:2,mobility:1,cardio:2};
+}
+
+function getDefaultProteinTarget(weightKg, goals) {
+  if (!weightKg) return null;
+  const ids = (goals||[]).map(g => g.id);
+  const multiplier = (ids.includes("build_strength") || ids.includes("body_composition")) ? 2.0 : 1.6;
+  return Math.round(parseFloat(weightKg) * multiplier);
+}
+
+const SUPPLEMENT_LIST = [
+  "Vitamin A","Vitamin B12","Vitamin B Complex","Vitamin C","Vitamin D3","Vitamin D3+K2","Vitamin E","Vitamin K2",
+  "Magnesium","Magnesium Bisglycinate","Magnesium Glycinate","Zinc","Iron","Calcium","Iodine","Selenium","Folate","Biotin",
+  "Creatine","Creatine Monohydrate","Protein Powder","Whey Protein","Collagen","Collagen Peptides","BCAA","Beta-Alanine",
+  "Caffeine","Pre-workout","Glutamine","Electrolytes",
+  "Omega-3","Fish Oil","Multivitamin","Probiotics","Prebiotics","CoQ10","Alpha Lipoic Acid","NAC","Turmeric","Curcumin",
+  "Ashwagandha","Rhodiola","Melatonin","L-Theanine","Maca"
+];
+const SUPP_TIMING = ["Morning","With meal","Evening","Before workout","Before bed"];
 
 function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}}) {
   // Section A — editable personal info
@@ -1864,18 +1929,37 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [editPersonal, setEditPersonal] = useState(!profileData?.name);
 
   // Section B — settings & targets local state
-  const [goals, setGoals] = useState(profileData?.goals||[]);
+  // Goals (new card-based flow)
+  const [selectedGoals, setSelectedGoals] = useState((profileData?.goals||[]).map(g=>g.id));
+  const [goalSubs, setGoalSubs] = useState(()=>{
+    const m={};
+    (profileData?.goals||[]).forEach(g=>{m[g.id]={option:g.definition,inputValue:g.target_value||g.target_bedtime||""};});
+    return m;
+  });
+  const [editGoals, setEditGoals] = useState(!(profileData?.goals?.length>0));
   const [savedGoals, setSavedGoals] = useState("");
-  const [targets, setTargets] = useState(profileData?.activity_targets||{strength:2,movement:2,cardio:2});
+  // Activity targets
+  const defaultTargets = getDefaultActivityTargets(profileData?.goals);
+  const [targets, setTargets] = useState(()=>{
+    const raw = profileData?.activity_targets;
+    if(!raw) return defaultTargets;
+    // Migrate old "movement" key to "mobility"
+    return {strength: raw.strength||defaultTargets.strength, mobility: raw.mobility||raw.movement||defaultTargets.mobility, cardio: raw.cardio||defaultTargets.cardio};
+  });
+  const [editTargets, setEditTargets] = useState(!profileData?.activity_targets);
   const [savedTargets, setSavedTargets] = useState("");
   const [mapping, setMapping] = useState(profileData?.activity_mapping||{});
   const [savedMapping, setSavedMapping] = useState("");
-  const [numTargets, setNumTargets] = useState({
+  // Goal Foundations
+  const calcProt = getDefaultProteinTarget(pa.weight_kg||profileData?.weight_kg, profileData?.goals);
+  const [foundTargets, setFoundTargets] = useState({
     step_target: profileData?.step_target||8000,
-    protein_target: profileData?.protein_target||100,
-    active_days_target: profileData?.active_days_target||20,
+    protein_target: profileData?.protein_target||(calcProt||100),
   });
-  const [savedNum, setSavedNum] = useState("");
+  const [editFoundations, setEditFoundations] = useState(!profileData?.step_target);
+  const [savedFoundations, setSavedFoundations] = useState("");
+  // Supplement dropdown state
+  const [suppDropdowns, setSuppDropdowns] = useState({});
   const [supps, setSupps] = useState(profileData?.supplements||[]);
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
@@ -1994,17 +2078,40 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplements</div>
         <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Edit your stack below.</div>
-        {supps.map((sup,i)=>(
-          <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
-            <div style={{flex:2}}><label style={lbl}>Name</label>
-              <input type="text" value={sup.name||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:e.target.value}:x))} style={s.input}/></div>
-            <div style={{flex:1}}><label style={lbl}>Dose</label>
-              <input type="text" value={sup.dose||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,dose:e.target.value}:x))} style={s.input}/></div>
-            <div style={{flex:2}}><label style={lbl}>Timing</label>
-              <input type="text" value={sup.timing||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,timing:e.target.value}:x))} style={s.input}/></div>
-            <button onClick={()=>setSupps(arr=>arr.filter((_,j)=>j!==i))} style={{...s.btn("s"),...s.btnSm}}>Remove</button>
-          </div>
-        ))}
+        {supps.map((sup,i)=>{
+          const query=suppDropdowns[i];
+          const suggestions=query?SUPPLEMENT_LIST.filter(s=>s.toLowerCase().includes(query.toLowerCase())).slice(0,6):[];
+          return (
+            <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+              <div style={{flex:2,position:"relative"}}><label style={lbl}>Name</label>
+                <input type="text" value={sup.name||""} onChange={e=>{
+                  const v=e.target.value;
+                  setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:v}:x));
+                  setSuppDropdowns(d=>({...d,[i]:v}));
+                }} onBlur={()=>setTimeout(()=>setSuppDropdowns(d=>({...d,[i]:""})),150)} style={s.input}/>
+                {suggestions.length>0&&suppDropdowns[i]&&(
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.sf,border:`.5px solid ${C.bd}`,borderRadius:8,maxHeight:200,overflowY:"auto",zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,.1)"}}>
+                    {suggestions.map(s=>(
+                      <div key={s} onMouseDown={()=>{
+                        setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:s}:x));
+                        setSuppDropdowns(d=>({...d,[i]:""}));
+                      }} style={{padding:"6px 10px",cursor:"pointer",fontSize:13}} onMouseEnter={e=>e.target.style.background=C.s2} onMouseLeave={e=>e.target.style.background=""}>{s}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{flex:1}}><label style={lbl}>Dose</label>
+                <input type="text" value={sup.dose||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,dose:e.target.value}:x))} style={s.input}/></div>
+              <div style={{flex:2}}><label style={lbl}>Timing</label>
+                <select value={sup.timing||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,timing:e.target.value}:x))} style={s.input}>
+                  <option value="">— select —</option>
+                  {SUPP_TIMING.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <button onClick={()=>setSupps(arr=>arr.filter((_,j)=>j!==i))} style={{...s.btn("s"),...s.btnSm}}>Remove</button>
+            </div>
+          );
+        })}
         <div style={saveRow}>
           <button onClick={()=>setSupps(arr=>[...arr,{name:"",dose:"",timing:""}])} style={{...s.btn("s"),...s.btnSm}}>+ Add supplement</button>
           <button onClick={()=>persist({supplements:supps.filter(x=>x.name&&x.name.trim())}, setSavedSupps)} style={s.btn("p")}>Save</button>
@@ -2056,53 +2163,154 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
 
       {/* Goals */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goals — up to 3</div>
-        {[0,1,2].map(slot=>{
-          const g=goals[slot]||{};
-          const opt=GOAL_OPTIONS.find(o=>o.id===g.id);
-          return (
-            <div key={slot} style={{marginBottom:10,paddingBottom:10,borderBottom:slot<2?`.5px solid ${C.bd}`:"none"}}>
-              <div style={{fontSize:11,color:C.t3,marginBottom:4}}>Goal {slot+1}</div>
-              <select value={g.id||""} onChange={e=>{
-                const id=e.target.value; const o=GOAL_OPTIONS.find(x=>x.id===id);
-                setGoals(arr=>{const next=[...arr]; next[slot]=id?{id,label:o?o.label:id,definition:null}:null; return next;});
-              }} style={{...s.input,width:"100%",marginBottom:4}}>
-                <option value="">— select a goal —</option>
-                {GOAL_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
-              {opt&&(
-                <div style={{paddingLeft:12}}>
-                  <div style={{fontSize:11,color:C.t3,marginBottom:3}}>What does this mean for you?</div>
-                  <select value={g.definition||""} onChange={e=>setGoals(arr=>{const next=[...arr]; next[slot]={...next[slot],definition:e.target.value}; return next;})} style={{...s.input,width:"100%"}}>
-                    <option value="">— choose —</option>
-                    {opt.defs.map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                  </select>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goals</div>
+        {editGoals ? (
+          <>
+            <div style={{fontSize:17,fontWeight:600,marginBottom:16}}>What's the main thing you want to improve right now?</div>
+            {selectedGoals.length>=3&&<div style={{fontSize:12,color:C.or,marginBottom:8}}>Maximum 3 goals — deselect one to add another.</div>}
+            {GOAL_CARDS.map(gc=>{
+              const sel=selectedGoals.includes(gc.id);
+              return (
+                <div key={gc.id}>
+                  <div onClick={()=>{
+                    if(sel){
+                      setSelectedGoals(prev=>prev.filter(x=>x!==gc.id));
+                    } else {
+                      if(selectedGoals.length>=3) return;
+                      setSelectedGoals(prev=>[...prev,gc.id]);
+                    }
+                  }} style={{padding:"12px 14px",border:`1.5px solid ${sel?C.pu:C.bd}`,background:sel?C.pl:C.sf,borderRadius:10,cursor:"pointer",fontSize:14,marginBottom:8}}>
+                    {gc.label}
+                  </div>
+                  {sel&&GOAL_SUBS[gc.id]&&(
+                    <div style={{marginLeft:16,marginBottom:12,padding:"12px 14px",background:C.s2,borderRadius:10}}>
+                      <div style={{fontStyle:"italic",color:C.t2,fontSize:13,marginBottom:8}}>{GOAL_SUBS[gc.id].prompt}</div>
+                      {GOAL_SUBS[gc.id].options.map(opt=>{
+                        const subSel=goalSubs[gc.id]?.option===opt.id;
+                        return (
+                          <div key={opt.id}>
+                            <div onClick={()=>setGoalSubs(prev=>({...prev,[gc.id]:{...(prev[gc.id]||{}),option:opt.id}}))} style={{padding:"8px 12px",border:`1.5px solid ${subSel?C.pu:C.bd}`,background:subSel?C.pl:C.sf,borderRadius:8,cursor:"pointer",fontSize:13,marginBottom:6}}>
+                              {opt.label}
+                              {opt.note&&<span style={{fontSize:11,color:C.t3,marginLeft:8}}>— {opt.note}</span>}
+                            </div>
+                            {subSel&&opt.input&&(
+                              <div style={{marginLeft:12,marginBottom:8}}>
+                                <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{opt.input.label}</label>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <input type={opt.input.type} defaultValue={goalSubs[gc.id]?.inputValue||opt.input.default||""} onChange={e=>setGoalSubs(prev=>({...prev,[gc.id]:{...(prev[gc.id]||{}),inputValue:e.target.value}}))} style={{...s.input,width:120}}/>
+                                  {opt.input.unit&&<span style={{fontSize:12,color:C.t2}}>{opt.input.unit}</span>}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
-        <div style={saveRow}>
-          <button onClick={()=>persist({goals:goals.filter(Boolean)}, setSavedGoals)} style={s.btn("p")}>Save goals</button>
-          {savedGoals&&<span style={{fontSize:12,color:C.teal}}>{savedGoals}</span>}
-        </div>
+              );
+            })}
+            {(()=>{
+              const ready=selectedGoals.length>0&&selectedGoals.every(id=>goalSubs[id]?.option);
+              return (
+                <div style={saveRow}>
+                  {!ready&&<div style={{fontSize:11,color:C.t3,marginBottom:8}}>Choose at least one goal to continue — your coach uses these to personalise everything.</div>}
+                  <button disabled={!ready} onClick={()=>{
+                    const goalObjects=selectedGoals.map(id=>{
+                      const card=GOAL_CARDS.find(g=>g.id===id);
+                      const sub=GOAL_SUBS[id];
+                      const subData=goalSubs[id]||{};
+                      const chosenOpt=sub?.options.find(o=>o.id===subData.option);
+                      const hasInput=chosenOpt?.input;
+                      return {
+                        id,
+                        label:card?.label||id,
+                        definition:subData.option||null,
+                        target_value:hasInput&&subData.inputValue?subData.inputValue:null,
+                        target_bedtime:hasInput?.type==="time"&&subData.inputValue?subData.inputValue:null,
+                        target_unit:chosenOpt?.input?.unit||null,
+                      };
+                    });
+                    persist({goals:goalObjects}, setSavedGoals);
+                    setEditGoals(false);
+                  }} style={{...s.btn("p"),opacity:ready?1:0.5,cursor:ready?"pointer":"default"}}>Save goals</button>
+                  {selectedGoals.length>0&&<button onClick={()=>setEditGoals(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+                  {savedGoals&&<span style={{fontSize:12,color:C.teal}}>{savedGoals}</span>}
+                </div>
+              );
+            })()}
+          </>
+        ) : (
+          <>
+            {(profileData?.goals||[]).length===0
+              ? <div style={{fontSize:13,color:C.t3,marginBottom:10}}>No goals set yet.</div>
+              : (profileData?.goals||[]).map((g,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,fontSize:13}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:C.pu,marginTop:5,flexShrink:0}}/>
+                  <div>
+                    <div style={{fontWeight:500}}>{g.label}</div>
+                    {g.definition&&<div style={{fontSize:11,color:C.t2,marginTop:1}}>{g.definition.replace(/_/g," ")}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>}
+                  </div>
+                </div>
+              ))
+            }
+            <button onClick={()=>setEditGoals(true)} style={{...s.btn("s"),...s.btnSm,marginTop:4}}>Edit goals</button>
+          </>
+        )}
       </Card>
 
       {/* Activity targets */}
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity targets — sessions per week</div>
-        <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>Research on longevity consistently supports a weekly mix of strength, movement, and cardio. All three together outperform any single category for long-term health.</div>
-        {[["strength","Strength"],["movement","Movement"],["cardio","Cardio"]].map(([k,l])=>(
-          <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-            <span style={{flex:1,fontSize:13}}>{l}</span>
-            <input type="number" min={0} max={14} value={targets[k]??0} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:90}}/>
-            <span style={{fontSize:11,color:C.t3,width:70}}>≈ {Math.round((targets[k]??0)*4.3)}/month</span>
-          </div>
-        ))}
-        <div style={saveRow}>
-          <button onClick={()=>persist({activity_targets:targets}, setSavedTargets)} style={s.btn("p")}>Save targets</button>
-          {savedTargets&&<span style={{fontSize:12,color:C.teal}}>{savedTargets}</span>}
-        </div>
+        {editTargets ? (
+          <>
+            {[
+              {k:"strength",label:"Strength",color:C.pu,desc:"Exercises that challenge your muscles against resistance — building muscle mass, bone density, and metabolic health.",examples:"weight training, resistance machines, bodyweight exercises, CrossFit, circuit training"},
+              {k:"mobility",label:"Mobility",color:C.or,desc:"Movement that improves your range of motion, flexibility, and body control. Reduces injury risk and keeps your joints healthy.",examples:"yoga, Pilates, stretching, core training"},
+              {k:"cardio",label:"Cardio",color:C.teal,desc:"Activities that raise your heart rate — improving endurance, heart health, and energy levels.",examples:"running, cycling, swimming, hiking, elliptical, HIIT"},
+            ].map(({k,label,color,desc,examples})=>(
+              <div key={k} style={{marginBottom:14}}>
+                <div style={{fontWeight:600,color,fontSize:13,marginBottom:3}}>{label}</div>
+                <div style={{fontSize:11,color:C.t2,lineHeight:1.6,marginBottom:2}}>{desc}</div>
+                <div style={{fontSize:10,color:C.t3,marginBottom:6}}>Examples: {examples}</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="number" min="1" max="5" value={targets[k]??1} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||1}))} style={{...s.input,width:90}}/>
+                  <span style={{fontSize:11,color:C.t3}}>sessions/week</span>
+                </div>
+              </div>
+            ))}
+            {(()=>{
+              const total=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);
+              return (
+                <>
+                  <div style={{fontSize:12,color:total===5?C.teal:C.am,marginBottom:4,fontWeight:500}}>Total: {total} sessions / week · {Math.round(total*4.3)} sessions / month{total!==5?" ⚠ aim for 5 total":""}</div>
+                  <div style={{fontSize:11,color:C.t3,marginBottom:10}}>These numbers are based on your goals and longevity research. Adjust them to whatever works for your life.</div>
+                  <div style={saveRow}>
+                    <button disabled={total!==5||(targets.strength||0)<1||(targets.mobility||0)<1||(targets.cardio||0)<1} onClick={()=>{persist({activity_targets:targets}, setSavedTargets);setEditTargets(false);}} style={{...s.btn("p"),opacity:(total===5&&(targets.strength||0)>=1&&(targets.mobility||0)>=1&&(targets.cardio||0)>=1)?1:0.5}}>Save targets</button>
+                    {profileData?.activity_targets&&<button onClick={()=>setEditTargets(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+                    {savedTargets&&<span style={{fontSize:12,color:C.teal}}>{savedTargets}</span>}
+                  </div>
+                </>
+              );
+            })()}
+          </>
+        ) : (
+          <>
+            {["strength","mobility","cardio"].map(k=>{
+              const colors={strength:[C.pu,C.pl],mobility:[C.or,C.orl],cardio:[C.teal,C.tl]};
+              const [col]=colors[k]||[C.t2,C.s2];
+              return (
+                <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:13}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:col,flexShrink:0}}/>
+                  <span style={{flex:1,textTransform:"capitalize"}}>{k}</span>
+                  <span style={{fontWeight:600,color:col}}>{targets[k]||0}x/week</span>
+                </div>
+              );
+            })}
+            <div style={{fontSize:11,color:C.t3,marginTop:4,marginBottom:8}}>Total: {(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0)} sessions/week · {Math.round(((targets.strength||0)+(targets.mobility||0)+(targets.cardio||0))*4.3)}/month</div>
+            <button onClick={()=>setEditTargets(true)} style={{...s.btn("s"),...s.btnSm}}>Edit targets</button>
+          </>
+        )}
       </Card>
 
       {/* Activity mapping — only show types that need user decision */}
@@ -2120,7 +2328,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                 <select value={mapping[t]||""} onChange={e=>{const v=e.target.value;setMapping(m=>({...m,[t]:v}));if(e.target.value)persist({activity_mapping:{...mapping,[t]:v}});}} style={{...s.input,width:170}}>
                   <option value="">— categorise —</option>
                   <option value="strength">Strength</option>
-                  <option value="movement">Movement</option>
+                  <option value="mobility">Mobility</option>
                   <option value="cardio">Cardio</option>
                 </select>
               </div>
@@ -2141,19 +2349,43 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         );
       })()}
 
-      {/* Numeric targets */}
+      {/* Goal Foundations */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Targets</div>
-        {[["step_target","Step target"],["protein_target","Protein target (g)"],["active_days_target","Active days / month"]].map(([k,l])=>(
-          <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-            <span style={{flex:1,fontSize:13}}>{l}</span>
-            <input type="number" value={numTargets[k]} onChange={e=>setNumTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:110}}/>
-          </div>
-        ))}
-        <div style={saveRow}>
-          <button onClick={()=>persist({step_target:numTargets.step_target,protein_target:numTargets.protein_target,active_days_target:numTargets.active_days_target}, setSavedNum)} style={s.btn("p")}>Save targets</button>
-          {savedNum&&<span style={{fontSize:12,color:C.teal}}>{savedNum}</span>}
-        </div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Goal Foundations</div>
+        <div style={{fontSize:11,color:C.t2,marginBottom:12,lineHeight:1.6}}>These numbers power your coach and your tracking. They're calculated from your goals and profile — adjust them if needed.</div>
+        {editFoundations ? (
+          <>
+            <div style={{marginBottom:12}}>
+              <label style={lbl}>Daily step target</label>
+              <input type="number" value={foundTargets.step_target} onChange={e=>setFoundTargets(t=>({...t,step_target:e.target.value}))} style={{...s.input,width:140}}/>
+              <div style={{fontSize:11,color:C.t3,marginTop:3}}>Steps are the simplest measure of daily movement. 8,000–10,000/day is the evidence-based sweet spot.</div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={lbl}>Daily protein target (g)</label>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <input type="number" value={foundTargets.protein_target} onChange={e=>setFoundTargets(t=>({...t,protein_target:e.target.value}))} style={{...s.input,width:140}}/>
+                <span style={{fontSize:12,color:C.t2}}>g</span>
+              </div>
+              {!(pa.weight_kg||profileData?.weight_kg)&&<div style={{fontSize:11,color:C.t3,marginTop:3}}>Add your weight in Personal Info to get a personalised protein target.</div>}
+              <div style={{fontSize:11,color:C.t3,marginTop:3}}>Protein supports muscle repair and satiety. Aim for 1.6–2g per kg of body weight when training.</div>
+            </div>
+            <div style={saveRow}>
+              <button onClick={()=>{persist({step_target:Number(foundTargets.step_target),protein_target:Number(foundTargets.protein_target)},setSavedFoundations);setEditFoundations(false);}} style={s.btn("p")}>Save</button>
+              {profileData?.step_target&&<button onClick={()=>setEditFoundations(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+              {savedFoundations&&<span style={{fontSize:12,color:C.teal}}>{savedFoundations}</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            {[["Daily steps target",foundTargets.step_target?.toLocaleString()],["Daily protein target",foundTargets.protein_target+"g"]].map(([label,val])=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:13}}>
+                <span style={{color:C.t2}}>{label}</span>
+                <span style={{fontWeight:600}}>{val}</span>
+              </div>
+            ))}
+            <button onClick={()=>setEditFoundations(true)} style={{...s.btn("s"),...s.btnSm,marginTop:4}}>Edit</button>
+          </>
+        )}
       </Card>
 
       {/* Health notes */}
@@ -2279,7 +2511,7 @@ function App() {
               {id:"sleep_quality",label:"Sleep better",definition:"more_deep_rem",target_value:null,target_unit:null}
             ],
             activity_mapping:{"workout":"strength"},
-            activity_targets:{strength:2,movement:2,cardio:2},
+            activity_targets:{strength:2,mobility:2,cardio:2},
             step_target:8000,
             protein_target:legacyProt,
             active_days_target:20,
@@ -2436,7 +2668,7 @@ function App() {
   }
 
   function buildCtxForChat(){
-    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData});
+    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
   }
 
   async function sendChat(){
