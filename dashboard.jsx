@@ -120,9 +120,10 @@ async function supa(method, table, body, query) {
   } catch(networkErr) {
     throw new Error("Network/CORS: " + networkErr.message);
   }
-  if (!res.ok) { const e=await res.text(); throw new Error(table+" "+res.status+": "+e.slice(0,80)); }
-  if (res.status===204||method==="DELETE") return null;
-  return res.json();
+  const txt = await res.text();
+  if (!res.ok) { throw new Error(table+" "+res.status+": "+txt.slice(0,80)); }
+  if (!txt) return null;
+  return JSON.parse(txt);
 }
 
 function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
@@ -1833,8 +1834,16 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   // Persist a partial update to Supabase + local state
   async function persist(patch, setFlag){
     setProfileData(p=>({...p,...patch}));
-    try{ await supa("POST","profiles",{uid:UID,...patch},"on_conflict=uid"); if(setFlag) setFlag("Saved ✓"); }
-    catch(e){ if(setFlag) setFlag("Error: "+e.message.slice(0,120)); }
+    try{
+      const payload={uid:UID,...patch};
+      console.log("Saving profile payload:", JSON.stringify(payload));
+      await supa("POST","profiles",payload,"on_conflict=uid");
+      if(setFlag) setFlag("Saved ✓");
+    }
+    catch(e){
+      console.error("Profile save error:", e.message);
+      if(setFlag) setFlag("Error: "+e.message.slice(0,200));
+    }
   }
 
   // Unique activity types seen in fitbit data, for the mapping section
@@ -1859,17 +1868,11 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
               <option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
             </select></div>
           <div style={fieldWrap}><label style={lbl}>Height (cm)</label>
-            {/* TODO: unit toggle for international users */}
-            <input type="number" value={pa.height_cm} onChange={e=>setPa(p=>({...p,height_cm:e.target.value}))} style={s.input}/></div>
+            <input type="number" step="0.1" value={pa.height_cm} onChange={e=>setPa(p=>({...p,height_cm:e.target.value}))} style={s.input}/></div>
           <div style={fieldWrap}><label style={lbl}>Weight (kg)</label>
-            {/* TODO: unit toggle for international users */}
-            <input type="number" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Body fat % (from body composition scan)</label>
-            <input type="number" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
-          {pa.body_fat_pct!==""&&pa.body_fat_pct!=null&&(
-            <div style={fieldWrap}><label style={lbl}>Body fat % target</label>
-              <input type="number" value={pa.body_fat_target_pct} onChange={e=>setPa(p=>({...p,body_fat_target_pct:e.target.value}))} style={s.input}/></div>
-          )}
+            <input type="number" step="0.1" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
+          <div style={fieldWrap}><label style={lbl}>Body fat % (from body scan)</label>
+            <input type="number" step="0.1" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
           <div style={fieldWrap}><label style={lbl}>Timezone</label>
             <input type="text" value={pa.timezone} onChange={e=>setPa(p=>({...p,timezone:e.target.value}))} style={s.input}/></div>
           <div style={fieldWrap}><label style={lbl}>Fitbit</label>
@@ -1881,7 +1884,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
             height_cm:pa.height_cm===""?null:parseFloat(pa.height_cm),
             weight_kg:pa.weight_kg===""?null:parseFloat(pa.weight_kg),
             body_fat_pct:pa.body_fat_pct===""?null:parseFloat(pa.body_fat_pct),
-            body_fat_target_pct:pa.body_fat_target_pct===""?null:parseFloat(pa.body_fat_target_pct),
             timezone:pa.timezone
           }, setSavedA)} style={s.btn("p")}>Save</button>
           {savedA&&<span style={{fontSize:12,color:C.teal}}>{savedA}</span>}
@@ -2275,6 +2277,13 @@ export default function App() {
         (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
         setSuppState(ss);
         // Load fitbit data from Supabase (falls back to seed if not loaded)
+        // If no data under UUID, try legacy "julia" user_id for backward compat
+        if((!fitbit||!fitbit[0]||!fitbit[0].data)){
+          try{
+            const legacyFit=await supa("GET","fitness_cache",null,"user_id=eq.julia&limit=1");
+            if(legacyFit&&legacyFit[0]&&legacyFit[0].data) fitbit=legacyFit;
+          }catch(ex){}
+        }
         if(fitbit&&fitbit[0]&&fitbit[0].data){
           console.log("✓ Fitness data loaded from Supabase, synced_at:",fitbit[0].synced_at);
           const supaData=fitbit[0].data;
