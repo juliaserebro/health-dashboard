@@ -2276,36 +2276,31 @@ export default function App() {
         const ss={};
         (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
         setSuppState(ss);
-        // Load fitbit data from Supabase (falls back to seed if not loaded)
-        // If no data under UUID, try legacy "julia" user_id for backward compat
-        if((!fitbit||!fitbit[0]||!fitbit[0].data)){
-          try{
-            const legacyFit=await supa("GET","fitness_cache",null,"user_id=eq.julia&limit=1");
-            if(legacyFit&&legacyFit[0]&&legacyFit[0].data) fitbit=legacyFit;
-          }catch(ex){}
-        }
+        // Load fitbit data from Supabase — always merge UUID + legacy "julia" rows
+        let legacyData=null;
+        try{
+          const legacyFit=await supa("GET","fitness_cache",null,"user_id=eq.julia&limit=1");
+          if(legacyFit&&legacyFit[0]&&legacyFit[0].data) legacyData=legacyFit[0].data;
+        }catch(ex){}
         if(fitbit&&fitbit[0]&&fitbit[0].data){
           console.log("✓ Fitness data loaded from Supabase, synced_at:",fitbit[0].synced_at);
           const supaData=fitbit[0].data;
-          // Merge: use Supabase data but fill gaps with seed (seed may have newer dates)
-          const mergeByDate=(supaArr,seedArr)=>{
+          // Merge: seed → legacy "julia" → UUID (newest wins per date)
+          const mergeByDate=(...arrs)=>{
             const m={};
-            (seedArr||[]).forEach(x=>{m[x.date]=x;});
-            (supaArr||[]).forEach(x=>{m[x.date]=x;});
+            arrs.forEach(arr=>(arr||[]).forEach(x=>{m[x.date]=x;}));
             return Object.values(m);
           };
-          const mergeWorkouts=(supaArr,seedArr)=>{
-            // Use date|type composite key so multiple workouts per day are all kept
+          const mergeWorkouts=(...arrs)=>{
             const m={};
-            (seedArr||[]).forEach(w=>{m[w.date+'|'+w.type]=w;});
-            (supaArr||[]).forEach(w=>{m[w.date+'|'+w.type]=w;});
+            arrs.forEach(arr=>(arr||[]).forEach(w=>{m[w.date+'|'+w.type]=w;}));
             return Object.values(m);
           };
           setFitbitData({
-            sleep: mergeByDate(supaData.sleep,FITBIT_SEED.sleep).sort((a,b)=>b.date.localeCompare(a.date)),
-            naps: supaData.naps||FITBIT_SEED.naps||[],
-            steps: mergeByDate(supaData.steps,FITBIT_SEED.steps).sort((a,b)=>a.date.localeCompare(b.date)),
-            workouts: mergeWorkouts(supaData.workouts,FITBIT_SEED.workouts).sort((a,b)=>b.date.localeCompare(a.date)),
+            sleep: mergeByDate(FITBIT_SEED.sleep,legacyData?.sleep,supaData.sleep).sort((a,b)=>b.date.localeCompare(a.date)),
+            naps: supaData.naps||legacyData?.naps||FITBIT_SEED.naps||[],
+            steps: mergeByDate(FITBIT_SEED.steps,legacyData?.steps,supaData.steps).sort((a,b)=>a.date.localeCompare(b.date)),
+            workouts: mergeWorkouts(FITBIT_SEED.workouts,legacyData?.workouts,supaData.workouts).sort((a,b)=>b.date.localeCompare(a.date)),
             synced_at: supaData.synced_at
           });
         } else {
