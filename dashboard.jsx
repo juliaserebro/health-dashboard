@@ -559,10 +559,24 @@ async function ghFullSync(setSyncStatus,setFitbitData){
       sleepPts.forEach(pt=>{
         const parsed=parseSleepPoint(pt);
         if(!parsed) return;
-        if(parsed.total<90){
+        if(parsed.total<60){
           napArr.push({date:parsed.date,start:parsed.bedtime,total:parsed.total,deep:parsed.deep});
         } else {
-          if(!byDate[parsed.date]||parsed.total>byDate[parsed.date].total) byDate[parsed.date]=parsed;
+          if(!byDate[parsed.date]){
+            byDate[parsed.date]={...parsed};
+          } else {
+            // Multiple segments on same night (e.g. woke for medical test, went back to sleep) — sum them
+            const ex=byDate[parsed.date];
+            byDate[parsed.date]={
+              ...ex,
+              total:ex.total+parsed.total,
+              deep:(ex.deep||0)+(parsed.deep||0),
+              rem:(ex.rem||0)+(parsed.rem||0),
+              light:(ex.light||0)+(parsed.light||0),
+              awake:(ex.awake||0)+(parsed.awake||0),
+              bedtime:ex.bedtime<=parsed.bedtime?ex.bedtime:parsed.bedtime,
+            };
+          }
         }
       });
       Object.values(byDate).forEach(s=>sleepArr.push(s));
@@ -1214,9 +1228,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <hr style={s.hr}/>
       <SecLabel>Month — June 2026</SecLabel>
 
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData} compact/>
-        <ProteinDaysMetric allFood={allFood} protTgt={protTgt} compact/>
+      <div style={s.mg}>
+        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
       </div>
 
       {/* HEATMAP */}
@@ -1818,6 +1831,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     timezone: profileData?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
   const [savedA, setSavedA] = useState("");
+  const [editPersonal, setEditPersonal] = useState(!profileData?.name);
 
   // Section B — settings & targets local state
   const [goals, setGoals] = useState(profileData?.goals||[]);
@@ -1866,37 +1880,63 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     <div>
       <SecLabel>Personal info</SecLabel>
       <Card style={{marginBottom:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-          <div style={fieldWrap}><label style={lbl}>Name</label>
-            <input type="text" value={pa.name} onChange={e=>setPa(p=>({...p,name:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Birth date</label>
-            <input type="date" value={pa.birth_date} onChange={e=>setPa(p=>({...p,birth_date:e.target.value}))} style={s.input}/>
-            <div style={{fontSize:11,color:C.t3,marginTop:3}}>Age: {calcAge(pa.birth_date)||"—"}</div></div>
-          <div style={fieldWrap}><label style={lbl}>Gender</label>
-            <select value={pa.gender} onChange={e=>setPa(p=>({...p,gender:e.target.value}))} style={s.input}>
-              <option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
-            </select></div>
-          <div style={fieldWrap}><label style={lbl}>Height (cm)</label>
-            <input type="number" step="0.1" value={pa.height_cm} onChange={e=>setPa(p=>({...p,height_cm:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Weight (kg)</label>
-            <input type="number" step="0.1" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Body fat % (from body scan)</label>
-            <input type="number" step="0.1" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Timezone</label>
-            <input type="text" value={pa.timezone} onChange={e=>setPa(p=>({...p,timezone:e.target.value}))} style={s.input}/></div>
-          <div style={fieldWrap}><label style={lbl}>Fitbit</label>
-            <div style={{...s.input,background:C.s2,color:profileData?.fitbit_connected?C.teal:C.t3}}>{profileData?.fitbit_connected?"Connected":"Not connected"}</div></div>
-        </div>
-        <div style={saveRow}>
-          <button onClick={()=>persist({
-            name:pa.name, birth_date:pa.birth_date||null, gender:pa.gender,
-            height_cm:pa.height_cm===""?null:parseFloat(pa.height_cm),
-            weight_kg:pa.weight_kg===""?null:parseFloat(pa.weight_kg),
-            body_fat_pct:pa.body_fat_pct===""?null:parseFloat(pa.body_fat_pct),
-            timezone:pa.timezone
-          }, setSavedA)} style={s.btn("p")}>Save</button>
-          {savedA&&<span style={{fontSize:12,color:C.teal}}>{savedA}</span>}
-        </div>
+        {editPersonal ? (
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+              <div style={fieldWrap}><label style={lbl}>Name</label>
+                <input type="text" value={pa.name} onChange={e=>setPa(p=>({...p,name:e.target.value}))} style={s.input}/></div>
+              <div style={fieldWrap}><label style={lbl}>Birth date</label>
+                <input type="date" value={pa.birth_date} onChange={e=>setPa(p=>({...p,birth_date:e.target.value}))} style={s.input}/>
+                <div style={{fontSize:11,color:C.t3,marginTop:3}}>Age: {calcAge(pa.birth_date)||"—"}</div></div>
+              <div style={fieldWrap}><label style={lbl}>Gender</label>
+                <select value={pa.gender} onChange={e=>setPa(p=>({...p,gender:e.target.value}))} style={s.input}>
+                  <option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
+                </select></div>
+              <div style={fieldWrap}><label style={lbl}>Height (cm)</label>
+                <input type="number" step="0.1" value={pa.height_cm} onChange={e=>setPa(p=>({...p,height_cm:e.target.value}))} style={s.input}/></div>
+              <div style={fieldWrap}><label style={lbl}>Weight (kg)</label>
+                <input type="number" step="0.1" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
+              <div style={fieldWrap}><label style={lbl}>Body fat % (from body scan)</label>
+                <input type="number" step="0.1" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
+              <div style={fieldWrap}><label style={lbl}>Timezone</label>
+                <input type="text" value={pa.timezone} onChange={e=>setPa(p=>({...p,timezone:e.target.value}))} style={s.input}/></div>
+            </div>
+            <div style={saveRow}>
+              <button onClick={async()=>{
+                await persist({
+                  name:pa.name, birth_date:pa.birth_date||null, gender:pa.gender,
+                  height_cm:pa.height_cm===""?null:parseFloat(pa.height_cm),
+                  weight_kg:pa.weight_kg===""?null:parseFloat(pa.weight_kg),
+                  body_fat_pct:pa.body_fat_pct===""?null:parseFloat(pa.body_fat_pct),
+                  timezone:pa.timezone
+                }, setSavedA);
+                setEditPersonal(false);
+              }} style={s.btn("p")}>Save</button>
+              {pa.name&&<button onClick={()=>setEditPersonal(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+              {savedA&&<span style={{fontSize:12,color:C.teal}}>{savedA}</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:12}}>
+              {[
+                ["Name", pa.name||"—"],
+                ["Age", calcAge(pa.birth_date) ? calcAge(pa.birth_date)+" years" : "—"],
+                ["Gender", pa.gender ? pa.gender.charAt(0).toUpperCase()+pa.gender.slice(1) : "—"],
+                ["Height", pa.height_cm ? pa.height_cm+" cm" : "—"],
+                ["Weight", pa.weight_kg ? pa.weight_kg+" kg" : "—"],
+                ["Body fat", pa.body_fat_pct ? pa.body_fat_pct+"%" : "—"],
+                ["Timezone", pa.timezone||"—"],
+              ].map(([label,val])=>(
+                <div key={label}>
+                  <div style={{fontSize:10,color:C.t3,marginBottom:1,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{label}</div>
+                  <div style={{fontSize:13,fontWeight:500,color:C.tx}}>{val}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>setEditPersonal(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+          </>
+        )}
       </Card>
 
       {/* BMI / BMR calculated tiles */}
