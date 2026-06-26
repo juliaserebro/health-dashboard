@@ -53,7 +53,7 @@ create policy "Allow all for now" on fitness_cache for all using (true) with che
 const DEFAULT_ACTIVITY_MAPPING = {
   "strength training":"strength","weightlifting":"strength","powerlifting":"strength",
   "boot camp":"strength","circuit training":"strength","crossfit":"strength","core training":"strength",
-  "yoga":"mobility","pilates":"mobility",
+  "yoga":"movement","pilates":"movement","tai chi":"movement","stretching":"movement","flexibility":"movement","barre":"movement","dance":"movement","qigong":"movement",
   "run":"cardio","walk":"cardio","hike":"cardio","bike":"cardio","elliptical":"cardio",
   "treadmill":"cardio","swim":"cardio","rowing machine":"cardio","stair climber":"cardio",
   "hiit":"cardio","interval workout":"cardio","aerobics":"cardio","kickboxing":"cardio",
@@ -134,7 +134,7 @@ function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
 // ── FITBIT SEED DATA ─────────────────────────────────────────────────────
 // Updated: 2026-06-14. Auto-upserts to Supabase fitness_cache on load.
 // Each sync session: only this block changes. App reads from Supabase state.
-const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503,"deep":112,"rem":97,"light":294,"awake":0},{"date":"2026-06-15","bedtime":"00:44","total":447,"deep":106,"rem":107,"light":234,"awake":0},{"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},{"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},{"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},{"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},{"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},{"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},{"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},{"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},{"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},{"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},{"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},{"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10}],"naps":[{"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9}],"steps":[{"date":"2026-06-03","steps":5473},{"date":"2026-06-04","steps":5912},{"date":"2026-06-05","steps":6964},{"date":"2026-06-06","steps":6676},{"date":"2026-06-07","steps":7361},{"date":"2026-06-08","steps":11972},{"date":"2026-06-09","steps":8461},{"date":"2026-06-10","steps":10033},{"date":"2026-06-11","steps":13717},{"date":"2026-06-12","steps":3719},{"date":"2026-06-13","steps":6574},{"date":"2026-06-14","steps":7649},{"date":"2026-06-15","steps":7915},{"date":"2026-06-16","steps":6400}],"workouts":[{"date":"2026-06-23","type":"gym","duration_min":null,"avg_hr":null},{"date":"2026-06-15","type":"gym","duration_min":50,"avg_hr":79},{"date":"2026-06-14","type":"yoga","duration_min":60,"avg_hr":99},{"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99},{"date":"2026-06-11","type":"gym","duration_min":38,"avg_hr":94},{"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},{"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},{"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},{"date":"2026-06-08","type":"gym","duration_min":25,"avg_hr":68},{"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},{"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},{"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null}],"synced_at":"2026-06-26T08:00:00+03:00"};
+const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503,"deep":112,"rem":97,"light":294,"awake":0},{"date":"2026-06-15","bedtime":"00:44","total":447,"deep":106,"rem":107,"light":234,"awake":0},{"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},{"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},{"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},{"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},{"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},{"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},{"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},{"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},{"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},{"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},{"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},{"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10}],"naps":[{"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9}],"steps":[{"date":"2026-06-03","steps":5473},{"date":"2026-06-04","steps":5912},{"date":"2026-06-05","steps":6964},{"date":"2026-06-06","steps":6676},{"date":"2026-06-07","steps":7361},{"date":"2026-06-08","steps":11972},{"date":"2026-06-09","steps":8461},{"date":"2026-06-10","steps":10033},{"date":"2026-06-11","steps":13717},{"date":"2026-06-12","steps":3719},{"date":"2026-06-13","steps":6574},{"date":"2026-06-14","steps":7649},{"date":"2026-06-15","steps":7915},{"date":"2026-06-16","steps":6400}],"workouts":[{"date":"2026-06-15","type":"workout","duration_min":50,"avg_hr":79},{"date":"2026-06-14","type":"yoga","duration_min":60,"avg_hr":99},{"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99},{"date":"2026-06-11","type":"workout","duration_min":38,"avg_hr":94},{"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},{"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},{"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},{"date":"2026-06-08","type":"workout","duration_min":25,"avg_hr":68},{"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},{"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},{"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null}],"synced_at":"2026-06-26T08:00:00+03:00"};
 
 
 
@@ -198,9 +198,16 @@ function Card({children, style={}}) {
 function SecLabel({children}) {
   return <div style={s.secLbl}>{children}<div style={s.secLine}/></div>;
 }
-function Metric({label,value,sub,subColor}) {
+function Metric({label,value,sub,subColor,compact=false}) {
+  if(compact) return (
+    <div style={{...s.mc,flex:"1 1 0",minWidth:0,padding:"12px 10px",overflow:"hidden"}}>
+      <div style={{...s.ml,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
+      <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px",lineHeight:1.1}}>{value}</div>
+      {sub&&<div style={{...s.ms,color:subColor||C.t3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div>}
+    </div>
+  );
   return (
-    <div style={s.mc}>
+    <div style={{...s.mc}}>
       <div style={s.ml}>{label}</div>
       <div style={s.mv}>{value}</div>
       {sub && <div style={{...s.ms,color:subColor||C.t3}}>{sub}</div>}
@@ -229,7 +236,7 @@ function ProteinAvgMetric({allFood, protTgt}) {
   return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
 }
 
-function MonthlyMetrics({fitbitData, allFood, protTgt, profileData}) {
+function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=false}) {
   const now=new Date();
   const month=now.toLocaleDateString("en-CA",{timeZone:profileData?.timezone||"Asia/Jerusalem"}).slice(0,7); // "2026-06"
   const stepTarget=profileData?.step_target||8000;
@@ -241,34 +248,32 @@ function MonthlyMetrics({fitbitData, allFood, protTgt, profileData}) {
     ...monthSteps.filter(s=>s.steps>=stepTarget).map(s=>s.date),
     ...workoutDates
   ]);
-  const gymCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="strength").length; // LEGACY replaced
-  const yogaCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="mobility").length; // LEGACY replaced
+  const strengthCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="strength").length;
+  const movementCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="movement").length;
+  const cardioCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="cardio").length;
+  const at=profileData?.activity_targets||{};
+  const tStr=Math.round((Number(at.strength)||2)*4.3);
+  const tMov=Math.round((Number(at.movement)||Number(at.mobility)||2)*4.3);
+  const tCard=Math.round((Number(at.cardio)||2)*4.3);
   const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
     if(!date.startsWith(month)) return false;
     return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
   }).length;
   return (<>
-    <Metric label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={(profileData?.active_days_target||20)+"/month"} subColor={C.teal}/>
-    <Metric label="Workout sessions" value={<span style={{color:C.pu}}>{gymCount}</span>} sub={"gym/pilates · target: "+Math.round((profileData?.activity_targets?.strength||2)*4.3)+"/month"} subColor={C.pu}/>
-    <Metric label="Yoga sessions" value={<span style={{color:C.or}}>{yogaCount}</span>} sub={"yoga · target: "+Math.round((profileData?.activity_targets?.mobility||2)*4.3)+"/month"} subColor={C.or}/>
+    <Metric compact={compact} label="Active days" value={<span style={{color:C.teal}}>{activeDates.size}</span>} sub={(profileData?.active_days_target||20)+"/month"} subColor={C.teal}/>
+    <Metric compact={compact} label="Strength" value={<span style={{color:C.pu}}>{strengthCount}</span>} sub={"target: "+tStr+"/mo"} subColor={C.pu}/>
+    <Metric compact={compact} label="Movement" value={<span style={{color:C.or}}>{movementCount}</span>} sub={"target: "+tMov+"/mo"} subColor={C.or}/>
+    <Metric compact={compact} label="Cardio" value={<span style={{color:C.teal}}>{cardioCount}</span>} sub={"target: "+tCard+"/mo"} subColor={C.teal}/>
   </>);
 }
 
-function ProteinDaysMetric({allFood, protTgt}) {
+function ProteinDaysMetric({allFood, protTgt, compact=false}) {
   const daysHit = Object.entries(allFood).filter(([date, meals]) => {
     const total = meals.reduce((s,e)=>s+(e.p||0),0);
     return total >= protTgt;
   }).length;
   const totalDaysLogged = Object.keys(allFood).length;
-  return (
-    <div style={s.mc}>
-      <div style={s.ml}>Protein days hit</div>
-      <div style={{...s.mv,color:daysHit>0?C.am:C.t3}}>{daysHit>0?daysHit:"—"}</div>
-      <div style={{...s.ms,color:daysHit>0?C.am:C.t3}}>
-        {daysHit>0?`of ${totalDaysLogged} days logged`:"log meals to track"}
-      </div>
-    </div>
-  );
+  return <Metric compact={compact} label="Protein days" value={<span style={{color:daysHit>0?C.am:C.t3}}>{daysHit>0?daysHit:"—"}</span>} sub={daysHit>0?`of ${totalDaysLogged} logged`:"log meals"} subColor={daysHit>0?C.am:C.t3}/>;
 }
 
 function WeeklySleepMetric({fitbitData}) {
@@ -817,7 +822,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     }
   }
 
-  useEffect(()=>{ if(apiKey){genAI("today");genAI("week");} },[apiKey, aiRefreshTick]);
+  const latestSleepDate=(fitbitData.sleep||[]).reduce((m,s)=>s.date>m?s.date:m,"");
+  const sevenDaysAgo=new Date(Date.now()-7*864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
+  const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
+  useEffect(()=>{ if(apiKey && fitbitReady){genAI("today");genAI("week");} },[apiKey, aiRefreshTick, latestSleepDate]);
 
 
   return (
@@ -877,7 +885,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const recentWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===yDate);
         const cats = recentWorkouts.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
         const loadScore = recentWorkouts.length===0 ? 12
-          : cats.some(c=>c==="mobility") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
+          : cats.some(c=>c==="movement") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
           : 6;
 
         // Protein — 10 pts
@@ -1186,11 +1194,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
         {(()=>{
-          const typeStyle={gym:[C.pl,C.pu],yoga:[C.orl,C.or],run:[C.tl,C.teal],elliptical:[C.tl,C.teal],walk:[C.tl,C.teal],pilates:[C.orl,C.or]};
+          const catStyle={strength:[C.pl,C.pu],movement:[C.orl,C.or],cardio:[C.tl,C.teal]};
           const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
           if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
           return recent.map((w,i)=>{
-            const [bg,col]=typeStyle[w.type]||[C.s2,C.t2];
+            const cat=getActivityCategory(w.type, profileData?.activity_mapping);
+            const [bg,col]=catStyle[cat]||[C.s2,C.t2];
             const dateObj=new Date(w.date);
             const dayLbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
             const detail=[w.duration_min?w.duration_min+" min":null,w.avg_hr?w.avg_hr+"bpm":null].filter(Boolean).join(" · ")||"";
@@ -1205,9 +1214,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       <hr style={s.hr}/>
       <SecLabel>Month — June 2026</SecLabel>
 
-      <div style={s.mg}>
-        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
-        <ProteinDaysMetric allFood={allFood} protTgt={protTgt}/>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData} compact/>
+        <ProteinDaysMetric allFood={allFood} protTgt={protTgt} compact/>
       </div>
 
       {/* HEATMAP */}
@@ -1215,8 +1224,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
         <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Gym</span>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Yoga</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Strength</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Movement</span>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
           <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
           <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
@@ -1306,8 +1315,8 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
     const intentional=wObjs.filter(w=>w.type!=="walk"&&w.type!=="walking");
     const isActive=steps>=stepTarget||intentional.length>0;
     const cats=wObjs.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
-    const hasGym=cats.includes("strength"); // LEGACY replaced
-    const hasYoga=cats.includes("mobility"); // LEGACY replaced
+    const hasStrength=cats.includes("strength");
+    const hasMovement=cats.includes("movement");
     const hasCardio=cats.includes("cardio")&&wObjs.some(w=>w.type!=="walk"&&w.type!=="walking");
     const types=wObjs.map(w=>w.type);
     const dayMeals=allFood[dateStr]||[];
@@ -1317,9 +1326,9 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
       <div key={"d"+d} style={{borderRadius:4,background:C.s2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:2,padding:3,position:"relative",overflow:"hidden",minHeight:52,border:isActive&&d!==todayDay?`2px solid ${C.tm}`:"2px solid transparent",boxSizing:"border-box",...(d===todayDay?{outline:`2px solid ${C.tx}`,background:isActive?C.tl:C.s2}:{})}}>
         {steps>=10000&&<span style={{fontSize:7,fontWeight:700,color:C.teal,position:"absolute",top:2,right:2}}>10k</span>}
         {protHit&&<span style={{fontSize:7,fontWeight:700,color:C.am,position:"absolute",top:2,left:2}}>P✓</span>}
-        {hasGym&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu}}>gym</div>}
-        {hasYoga&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or}}>yoga</div>}
-        {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal}}>{types.includes("run")?"run":"cardio"}</div>}
+        {hasStrength&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.pl,color:C.pu,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").map(w=>w.type).join(", ")}</div>}
+        {hasMovement&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.orl,color:C.or,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="movement").map(w=>w.type).join(", ")}</div>}
+        {hasCardio&&<div style={{width:"100%",borderRadius:3,padding:"2px 3px",fontSize:9,fontWeight:600,textAlign:"center",background:C.tl,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wObjs.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio"&&w.type!=="walk"&&w.type!=="walking").map(w=>w.type).join(", ")}</div>}
       </div>
     );
   }
@@ -1813,7 +1822,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   // Section B — settings & targets local state
   const [goals, setGoals] = useState(profileData?.goals||[]);
   const [savedGoals, setSavedGoals] = useState("");
-  const [targets, setTargets] = useState(profileData?.activity_targets||{strength:2,mobility:2,cardio:2});
+  const [targets, setTargets] = useState(profileData?.activity_targets||{strength:2,movement:2,cardio:2});
   const [savedTargets, setSavedTargets] = useState("");
   const [mapping, setMapping] = useState(profileData?.activity_mapping||{});
   const [savedMapping, setSavedMapping] = useState("");
@@ -2012,8 +2021,8 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       {/* Activity targets */}
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity targets — sessions per week</div>
-        <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>Research on longevity consistently supports a weekly mix of strength, mobility, and cardio. All three together outperform any single category for long-term health.</div>
-        {[["strength","Strength"],["mobility","Mobility"],["cardio","Cardio"]].map(([k,l])=>(
+        <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>Research on longevity consistently supports a weekly mix of strength, movement, and cardio. All three together outperform any single category for long-term health.</div>
+        {[["strength","Strength"],["movement","Movement"],["cardio","Cardio"]].map(([k,l])=>(
           <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
             <span style={{flex:1,fontSize:13}}>{l}</span>
             <input type="number" min={0} max={14} value={targets[k]??0} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||0}))} style={{...s.input,width:90}}/>
@@ -2041,7 +2050,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                 <select value={mapping[t]||""} onChange={e=>{const v=e.target.value;setMapping(m=>({...m,[t]:v}));if(e.target.value)persist({activity_mapping:{...mapping,[t]:v}});}} style={{...s.input,width:170}}>
                   <option value="">— categorise —</option>
                   <option value="strength">Strength</option>
-                  <option value="mobility">Mobility</option>
+                  <option value="movement">Movement</option>
                   <option value="cardio">Cardio</option>
                 </select>
               </div>
@@ -2200,7 +2209,7 @@ export default function App() {
               {id:"sleep_quality",label:"Sleep better",definition:"more_deep_rem",target_value:null,target_unit:null}
             ],
             activity_mapping:{"workout":"strength"},
-            activity_targets:{strength:2,mobility:2,cardio:2},
+            activity_targets:{strength:2,movement:2,cardio:2},
             step_target:8000,
             protein_target:legacyProt,
             active_days_target:20,
