@@ -2189,7 +2189,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                   <div style={{width:6,height:6,borderRadius:"50%",background:C.pu,marginTop:5,flexShrink:0}}/>
                   <div>
                     <div style={{fontWeight:500}}>{g.label}</div>
-                    {g.definition&&(()=>{const opt=GOAL_SUBS[g.id]?.options.find(o=>o.id===g.definition);const defLabel=opt?.label||g.definition.replace(/_/g," ");return <div style={{fontSize:11,color:C.t2,marginTop:1}}>{defLabel}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>;})()
+                    {g.definition&&(()=>{const opt=GOAL_SUBS[g.id]?.options.find(o=>o.id===g.definition);const defLabel=opt?.label||g.definition.replace(/_/g," ");return <div style={{fontSize:11,color:C.t2,marginTop:1}}>{defLabel}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>;})()}
                   </div>
                 </div>
               ))
