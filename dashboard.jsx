@@ -54,8 +54,8 @@ const DEFAULT_ACTIVITY_MAPPING = {
   "strength training":"strength","weightlifting":"strength","powerlifting":"strength",
   "boot camp":"strength","circuit training":"strength","crossfit":"strength","core training":"strength",
   "yoga":"mobility","pilates":"mobility","tai chi":"mobility","stretching":"mobility","flexibility":"mobility","barre":"mobility","dance":"mobility","qigong":"mobility",
-  "run":"cardio","walk":"cardio","hike":"cardio","bike":"cardio","elliptical":"cardio",
-  "treadmill":"cardio","swim":"cardio","rowing machine":"cardio","stair climber":"cardio",
+  "run":"cardio","walk":"cardio","hike":"cardio","bike":"cardio","cycling":"cardio","elliptical":"cardio",
+  "treadmill":"cardio","swim":"cardio","swimming":"cardio","rowing machine":"cardio","stair climber":"cardio",
   "hiit":"cardio","interval workout":"cardio","aerobics":"cardio","kickboxing":"cardio",
   "dancing":"cardio","cross country skiing":"cardio","skiing":"cardio","snowboarding":"cardio",
   "rollerblading":"cardio","surfing":"cardio","paddleboarding":"cardio","kayaking":"cardio",
@@ -1913,10 +1913,16 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [targets, setTargets] = useState(()=>{
     const raw = profileData?.activity_targets;
     if(!raw) return defaultTargets;
-    // Migrate old "movement" key to "mobility"
-    return {strength: raw.strength||defaultTargets.strength, mobility: raw.mobility||raw.movement||defaultTargets.mobility, cardio: raw.cardio||defaultTargets.cardio};
+    const m = {strength: raw.strength||defaultTargets.strength, mobility: raw.mobility||raw.movement||defaultTargets.mobility, cardio: raw.cardio||defaultTargets.cardio};
+    // If total ≠ 5 (e.g. old saved 2+2+2=6), use goal-derived defaults instead
+    return (m.strength+m.mobility+m.cardio)===5 ? m : defaultTargets;
   });
-  const [editTargets, setEditTargets] = useState(!profileData?.activity_targets);
+  const [editTargets, setEditTargets] = useState(()=>{
+    const raw = profileData?.activity_targets;
+    if(!raw) return true;
+    const m = {strength:raw.strength||0, mobility:raw.mobility||raw.movement||0, cardio:raw.cardio||0};
+    return (m.strength+m.mobility+m.cardio) !== 5;
+  });
   const [savedTargets, setSavedTargets] = useState("");
   const [mapping, setMapping] = useState(profileData?.activity_mapping||{});
   const [savedMapping, setSavedMapping] = useState("");
@@ -2089,45 +2095,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         </div>
       </Card>
 
-      <SecLabel>Workout plan</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
-        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
-        <div style={saveRow}>
-          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
-          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
-        </div>
-      </Card>
-
-      <Card>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-          {[["GYM · 2-3x/week",C.pl,C.pu,"Lower body + upper body + core. Progressive overload."],["CARDIO · 2x/week",C.tl,C.teal,"Walking, hiking, elliptical. Adjusted by injury and cycle phase."],["YOGA · 2x/week",C.orl,C.or,"Ashtanga primary minus backbends. Mobility and recovery."]].map(([t,bg,col,desc])=>(
-            <div key={t} style={{padding:12,background:bg,borderRadius:8}}>
-              <div style={{fontSize:11,fontWeight:600,color:col,marginBottom:4}}>{t}</div>
-              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>{desc}</div>
-            </div>
-          ))}
-        </div>
-        {[
-          ["Lower body",[["Leg press","35 kg · 3×12 · 90 sec rest"],["Hip abductor (leaning forward)","47 kg · 3×15 · 60 sec rest"],["Hip adductor","47 kg · 3×15 · 60 sec rest"],["Leg curl","20 kg · 3×12 · 60 sec rest"],["Cable glute kickback","10 kg each leg · 4×12 · 60 sec rest"]]],
-          ["Upper body",[["Lat pulldown","20 kg · 3×12 · 90 sec rest"],["Seated cable row","20 kg · 3×12 · 90 sec rest"],["Push-ups","3 sets · max full → max knee · 60 sec rest"]]],
-          ["Core",[["Cable woodchop","7.5 kg each side · 3×10 · 45 sec rest"],["Plank","3 sets · 45 sec · 30 sec rest"],["Side plank","2 sets · 30 sec each side · 30 sec rest"]]],
-        ].map(([cat,exercises])=>(
-          <div key={cat}>
-            <div style={{fontSize:12,fontWeight:600,color:C.tx,marginBottom:8,paddingBottom:4,borderBottom:`.5px solid ${C.bd}`,marginTop:14}}>{cat}</div>
-            {exercises.map(([name,note])=>(
-              <div key={name} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:`.5px solid ${C.s2}`,fontSize:12}}>
-                <span style={{fontWeight:500,flex:1}}>{name}</span>
-                <span style={{color:C.t2,fontSize:11}}>{note}</span>
-              </div>
-            ))}
-          </div>
-        ))}
-        <div style={{padding:10,background:C.s2,borderRadius:8,fontSize:11,color:C.t2,marginTop:10}}>
-          <strong style={{color:C.tx}}>Pending physio clearance:</strong> Back squats, deadlifts from floor, loaded spinal flexion, high-impact cardio.
-        </div>
-      </Card>
-
       {/* ── SECTION B — SETTINGS & TARGETS ───────────────────────────────── */}
       <SecLabel>Settings &amp; Targets</SecLabel>
 
@@ -2202,6 +2169,9 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                       };
                     });
                     persist({goals:goalObjects}, setSavedGoals);
+                    // Recalculate protein target based on new goals
+                    const newProt = getDefaultProteinTarget(pa.weight_kg||profileData?.weight_kg, goalObjects);
+                    if(newProt) setFoundTargets(prev=>({...prev, protein_target:newProt}));
                     setEditGoals(false);
                   }} style={{...s.btn("p"),opacity:ready?1:0.5,cursor:ready?"pointer":"default"}}>Save goals</button>
                   {selectedGoals.length>0&&<button onClick={()=>setEditGoals(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
@@ -2219,7 +2189,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                   <div style={{width:6,height:6,borderRadius:"50%",background:C.pu,marginTop:5,flexShrink:0}}/>
                   <div>
                     <div style={{fontWeight:500}}>{g.label}</div>
-                    {g.definition&&<div style={{fontSize:11,color:C.t2,marginTop:1}}>{g.definition.replace(/_/g," ")}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>}
+                    {g.definition&&(()=>{const opt=GOAL_SUBS[g.id]?.options.find(o=>o.id===g.definition);const defLabel=opt?.label||g.definition.replace(/_/g," ");return <div style={{fontSize:11,color:C.t2,marginTop:1}}>{defLabel}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>;})()
                   </div>
                 </div>
               ))
@@ -2356,6 +2326,16 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
             <button onClick={()=>setEditFoundations(true)} style={{...s.btn("s"),...s.btnSm,marginTop:4}}>Edit</button>
           </>
         )}
+      </Card>
+
+      <SecLabel>Workout plan</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
+        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+        <div style={saveRow}>
+          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
+          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
+        </div>
       </Card>
 
       {/* Health notes */}
@@ -2531,8 +2511,12 @@ export default function App() {
           supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
           supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
         ]);
+        // Also load legacy "julia" food entries (pre-UID-migration)
+        let legacyFood=[];
+        try{legacyFood=await supa("GET","food_log",null,"user_id=eq.julia&order=created_at.asc&select=*");}catch(e){}
+        const allFoodRows=[...(legacyFood||[]),...(food||[])];
         const foodMap={};
-        (food||[]).forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
+        allFoodRows.forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
         if(Object.keys(foodMap).length>0){
           setAllFood(foodMap);
           localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
