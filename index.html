@@ -33,11 +33,16 @@ const { useState, useEffect, useRef, useCallback } = React;
 // ── LIVE DATA (Fri 12 Jun 2026, 14:20 Israel) ─────────────────────────────
 const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
-const UID = "julia"; // TODO: replace with auth user ID when Supabase Auth is added
+const UID = "00000000-0000-0000-0000-000000000001"; // stable UUID — works with both text and uuid column types
 
 // SUPABASE SETUP SQL — run once in Supabase SQL editor
 /*
 -- Run once in Supabase SQL editor
+
+-- profiles table (uid MUST be text, not uuid — app uses "julia" as UID)
+-- If you get "string did not match expected pattern" errors, run these first:
+-- ALTER TABLE profiles ALTER COLUMN uid TYPE text;
+-- (or drop and recreate if it was created with uid uuid)
 create table if not exists profiles (
   uid text primary key,
   name text,
@@ -63,6 +68,15 @@ create table if not exists profiles (
 );
 alter table profiles enable row level security;
 create policy "Allow all for now" on profiles for all using (true) with check (true);
+
+-- fitness_cache table (RLS required — Supabase security alert)
+create table if not exists fitness_cache (
+  user_id text primary key,
+  data jsonb,
+  synced_at timestamptz
+);
+alter table fitness_cache enable row level security;
+create policy "Allow all for now" on fitness_cache for all using (true) with check (true);
 */
 
 // ── ACTIVITY CATEGORY MAPPING ────────────────────────────────────────────
@@ -77,7 +91,10 @@ const DEFAULT_ACTIVITY_MAPPING = {
   "rollerblading":"cardio","surfing":"cardio","paddleboarding":"cardio","kayaking":"cardio",
   "canoeing":"cardio","golf":"cardio","tennis":"cardio","martial arts":"cardio",
   "indoor climbing":"cardio","outdoor workout":"cardio","sports":"cardio",
-  "gym":"strength","weightlifting":"strength"
+  "gym":"strength","weightlifting":"strength",
+  "weight training":"strength","resistance training":"strength","weights":"strength",
+  "functional training":"strength","calisthenics":"strength","bodyweight training":"strength",
+  "functional strength training":"strength","strength and conditioning":"strength"
   // "workout" intentionally omitted — requires user mapping
 };
 
@@ -92,6 +109,17 @@ function getActivityCategory(activityType, userMapping) {
 let ACTIVE_TZ = "Asia/Jerusalem";
 function setActiveTz(tz){ if(tz) ACTIVE_TZ = tz; }
 function getTz(){ return ACTIVE_TZ || "Asia/Jerusalem"; }
+
+// Safe cycle-day helper — avoids UTC-midnight vs local-midnight bug.
+// Returns 1 on the start date, 28 on day 27, wraps at 28.
+function calcCycleDay(startDateStr) {
+  const nowStr = new Date().toLocaleDateString("en-CA", {timeZone: getTz()});
+  const d1 = new Date(startDateStr + "T12:00:00");
+  const d2 = new Date(nowStr + "T12:00:00");
+  const diff = Math.round((d2 - d1) / 864e5);
+  if (diff < 0) return 1;
+  return (diff % 28) + 1;
+}
 
 async function supa(method, table, body, query) {
   let url, hdrs, fetchOpts;
@@ -135,7 +163,7 @@ function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
 // ── FITBIT SEED DATA ─────────────────────────────────────────────────────
 // Updated: 2026-06-14. Auto-upserts to Supabase fitness_cache on load.
 // Each sync session: only this block changes. App reads from Supabase state.
-const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503,"deep":112,"rem":97,"light":294,"awake":0},{"date":"2026-06-15","bedtime":"00:44","total":447,"deep":106,"rem":107,"light":234,"awake":0},{"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},{"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},{"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},{"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},{"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},{"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},{"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},{"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},{"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},{"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},{"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},{"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10}],"naps":[{"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9}],"steps":[{"date":"2026-06-03","steps":5473},{"date":"2026-06-04","steps":5912},{"date":"2026-06-05","steps":6964},{"date":"2026-06-06","steps":6676},{"date":"2026-06-07","steps":7361},{"date":"2026-06-08","steps":11972},{"date":"2026-06-09","steps":8461},{"date":"2026-06-10","steps":10033},{"date":"2026-06-11","steps":13717},{"date":"2026-06-12","steps":3719},{"date":"2026-06-13","steps":6574},{"date":"2026-06-14","steps":7649},{"date":"2026-06-15","steps":7915},{"date":"2026-06-16","steps":6400}],"workouts":[{"date":"2026-06-15","type":"gym","duration_min":50,"avg_hr":79},{"date":"2026-06-14","type":"yoga","duration_min":60,"avg_hr":99},{"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99},{"date":"2026-06-11","type":"gym","duration_min":38,"avg_hr":94},{"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},{"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},{"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},{"date":"2026-06-08","type":"gym","duration_min":25,"avg_hr":68},{"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},{"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},{"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null}],"synced_at":"2026-06-16T23:05:00+03:00"};
+const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503,"deep":112,"rem":97,"light":294,"awake":0},{"date":"2026-06-15","bedtime":"00:44","total":447,"deep":106,"rem":107,"light":234,"awake":0},{"date":"2026-06-14","bedtime":"01:16","total":395,"deep":92,"rem":96,"light":207,"awake":7},{"date":"2026-06-13","bedtime":"01:15","total":420,"deep":105,"rem":104,"light":211,"awake":9},{"date":"2026-06-12","bedtime":"01:27","total":399,"deep":102,"rem":93,"light":203,"awake":9},{"date":"2026-06-11","bedtime":"00:47","total":430,"deep":89,"rem":120,"light":221,"awake":4},{"date":"2026-06-10","bedtime":"01:22","total":434,"deep":118,"rem":116,"light":200,"awake":5},{"date":"2026-06-09","bedtime":"00:10","total":476,"deep":128,"rem":118,"light":230,"awake":7},{"date":"2026-06-08","bedtime":"23:46","total":358,"deep":97,"rem":74,"light":187,"awake":5},{"date":"2026-06-07","bedtime":"00:41","total":461,"deep":121,"rem":100,"light":240,"awake":23},{"date":"2026-06-06","bedtime":"01:38","total":440,"deep":101,"rem":114,"light":225,"awake":77},{"date":"2026-06-05","bedtime":"01:58","total":479,"deep":110,"rem":118,"light":251,"awake":10},{"date":"2026-06-04","bedtime":"02:40","total":449,"deep":100,"rem":109,"light":240,"awake":8},{"date":"2026-06-03","bedtime":"02:07","total":473,"deep":126,"rem":89,"light":257,"awake":10}],"naps":[{"date":"2026-06-08","start":"13:10","total":16,"deep":7,"light":9}],"steps":[{"date":"2026-06-03","steps":5473},{"date":"2026-06-04","steps":5912},{"date":"2026-06-05","steps":6964},{"date":"2026-06-06","steps":6676},{"date":"2026-06-07","steps":7361},{"date":"2026-06-08","steps":11972},{"date":"2026-06-09","steps":8461},{"date":"2026-06-10","steps":10033},{"date":"2026-06-11","steps":13717},{"date":"2026-06-12","steps":3719},{"date":"2026-06-13","steps":6574},{"date":"2026-06-14","steps":7649},{"date":"2026-06-15","steps":7915},{"date":"2026-06-16","steps":6400}],"workouts":[{"date":"2026-06-23","type":"gym","duration_min":null,"avg_hr":null},{"date":"2026-06-15","type":"gym","duration_min":50,"avg_hr":79},{"date":"2026-06-14","type":"yoga","duration_min":60,"avg_hr":99},{"date":"2026-06-12","type":"yoga","duration_min":91,"avg_hr":99},{"date":"2026-06-11","type":"gym","duration_min":38,"avg_hr":94},{"date":"2026-06-11","type":"elliptical","duration_min":24,"avg_hr":109},{"date":"2026-06-11","type":"run","duration_min":23,"avg_hr":119},{"date":"2026-06-11","type":"walk","duration_min":null,"avg_hr":null},{"date":"2026-06-08","type":"gym","duration_min":25,"avg_hr":68},{"date":"2026-06-08","type":"walk","duration_min":60,"avg_hr":99},{"date":"2026-06-07","type":"yoga","duration_min":60,"avg_hr":101},{"date":"2026-06-05","type":"yoga","duration_min":96,"avg_hr":null}],"synced_at":"2026-06-26T08:00:00+03:00"};
 
 
 
@@ -215,10 +243,7 @@ function Spinner() {
 function CyclePhaseMetric({cycleDates}) {
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   if(!conf.length) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
-  const last = new Date(conf[0].d);
-  const now = new Date(); now.setHours(0,0,0,0);
-  const day = Math.floor((now-last)/864e5)+1;
-  const cd = ((day-1)%28)+1;
+  const cd = calcCycleDay(conf[0].d);
   const ph = cd<=5?"Menstrual":cd<=13?"Follicular":cd<=16?"Ovulatory":"Luteal";
   return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {cd} of cycle</div></div>;
 }
@@ -336,15 +361,14 @@ function WeeklyStepsMetric({fitbitData}) {
 }
 
 function SleepTileMetric({fitbitData}) {
-  const yesterday = new Date();yesterday.setDate(yesterday.getDate()-1);
-  const yDate = yesterday.toISOString().slice(0,10);
+  const todayIL = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
   // Sleep date = the morning date (when you woke up)
-  const rec = (fitbitData.sleep||[]).find(s=>s.date===new Date().toISOString().slice(0,10))
+  const rec = (fitbitData.sleep||[]).find(s=>s.date===todayIL)
            || (fitbitData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date))[0];
   if(!rec) return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data</div></div>;
   const h=Math.floor(rec.total/60),m=rec.total%60;
   const col=rec.total>=420?C.sl:rec.total>=360?C.slm:C.red;
-  const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+  const todayNap=(fitbitData.naps||[]).find(n=>n.date===todayIL);
   const sub=todayNap?`${rec.deep}m deep · +${todayNap.total}m nap`:`${rec.deep}m deep · ${rec.rem}m REM`;
   return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:col}}>{h}h {m}m</div><div style={{...s.ms,color:col}}>{sub}</div></div>;
 }
@@ -616,7 +640,13 @@ async function ghFullSync(setSyncStatus,setFitbitData){
         });
         return merged.sort((a,b)=>a.date.localeCompare(b.date));
       })(),
-        workouts: workoutsArr.length>0 ? workoutsArr : prev.workouts||[],
+        workouts: (()=>{
+          if(!workoutsArr.length) return prev.workouts||[];
+          // Keep synced workouts + any seed/manual workouts for dates not covered by the sync
+          const syncDates=new Set(workoutsArr.map(w=>w.date));
+          const preserved=(prev.workouts||[]).filter(w=>!syncDates.has(w.date));
+          return [...workoutsArr,...preserved].sort((a,b)=>b.date.localeCompare(a.date));
+        })(),
         synced_at: new Date().toISOString()
       };
       // Save merged data to Supabase
@@ -646,9 +676,9 @@ async function ghFullSync(setSyncStatus,setFitbitData){
 // ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
 function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   const now = new Date();
-  const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  const todayKey = now.toISOString().slice(0,10);
-  const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+  const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:getTz()});
+  const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+  const yKey = new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
   const todayFood = allFood[todayKey]||[];
   const liveProt = Math.round(todayFood.reduce((s,e)=>s+(e.p||0),0));
   const liveKcal = Math.round(todayFood.reduce((s,e)=>s+(e.k||0),0));
@@ -658,12 +688,15 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData}) {
   const yAlcohol = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   let cycleCtx = "Cycle not tracked";
-  if(conf.length){const last=new Date(conf[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
-  // Include all entries but mark with date so AI knows which are recent
-  const jArr = logEntries.slice(0,12).map(e=>{
-    const entryDate=e.dt?e.dt.slice(0,10):"unknown";
-    const daysAgo=e.dt?Math.floor((now-new Date(e.dt))/864e5):99;
-    const recency=daysAgo===0?"TODAY":daysAgo===1?"YESTERDAY":`${daysAgo}d ago`;
+  if(conf.length){const cd=calcCycleDay(conf[0].d);const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
+  // Only include TODAY and YESTERDAY log entries — older entries are for the weekly context
+  const jArr = logEntries.filter(e=>{
+    if(!e.dt) return false;
+    const daysAgo=Math.floor((now-new Date(e.dt))/864e5);
+    return daysAgo<=1;
+  }).slice(0,8).map(e=>{
+    const daysAgo=Math.floor((now-new Date(e.dt))/864e5);
+    const recency=daysAgo===0?"TODAY":"YESTERDAY";
     return `[${e.tag}|${recency}] ${e.txt}`;
   });
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
@@ -752,15 +785,15 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
     let cyclePhase = "cycle phase unknown";
     let cyclePhaseName = "unknown";
-    if(confDates.length){const last=new Date(confDates[0].d);const day=Math.floor((now-last)/864e5)+1;const cd=((day-1)%28)+1;cyclePhaseName=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cd}/28, ${cyclePhaseName} phase`;}
+    if(confDates.length){const cd=calcCycleDay(confDates[0].d);cyclePhaseName=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cd}/28, ${cyclePhaseName} phase`;}
     // Today nutrition
-    const todayFoodKey = now.toISOString().slice(0,10);
+    const todayFoodKey = todayKey; // already timezone-aware (en-CA local)
     const tf = allFood[todayFoodKey]||[];
     const liveProt = Math.round(tf.reduce((s,e)=>s+(e.p||0),0));
     const liveCarbs = Math.round(tf.reduce((s,e)=>s+(e.c||0),0));
     const liveKcal = Math.round(tf.reduce((s,e)=>s+(e.k||0),0));
     // Yesterday alcohol from log
-    const yKey = new Date(now.getTime()-864e5).toISOString().slice(0,10);
+    const yKey = new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
     const yAlc = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&/wine|alcohol|beer|drink/i.test(e.txt||"")).map(e=>e.txt).join("; ");
     // Last sleep
     const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
@@ -770,22 +803,36 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
     // Today pain/mood log
     const todayLog = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===todayFoodKey).map(e=>`[${e.tag}] ${e.txt}`).join("; ");
-    // This week food per day
+    // This week food per day + workouts
     const weekFoodLines=[];
-    for(let i=0;i<=dowIL;i++){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dowIL+i);const dk=d.toISOString().slice(0,10);const m=allFood[dk]||[];if(m.length){const p=Math.round(m.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(m.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(m.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${d.toLocaleDateString("en-GB",{weekday:"short"})}: ${p}g prot ${c}g carb ${k}kcal`);}}
+    const weekWorkoutLines=[];
+    for(let i=0;i<=dowIL;i++){
+      const d=new Date(now.getTime()-(dowIL-i)*864e5);
+      const dk=d.toLocaleDateString("en-CA",{timeZone:getTz()});
+      const dayLabel=d.toLocaleDateString("en-GB",{weekday:"short",timeZone:getTz()});
+      const m=allFood[dk]||[];
+      if(m.length){const p=Math.round(m.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(m.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(m.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${dayLabel}: ${p}g prot ${c}g carb ${k}kcal`);}
+      const dw=(fitbitData.workouts||[]).filter(w=>w.date===dk);
+      if(dw.length) weekWorkoutLines.push(`${dayLabel}: ${dw.map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")).join(" + ")}`);
+    }
     const weekFoodSummary=weekFoodLines.join(" | ")||"no food logged";
+    const weekWorkoutSummary=weekWorkoutLines.join(" | ")||"no workouts logged this week";
     // This week sleep
     const weekSleep=(fitbitData.sleep||[]).filter(s=>s.date>=todayKey.slice(0,7)+"-"+(parseInt(todayKey.slice(8))-dowIL).toString().padStart(2,"0")&&s.date<=todayKey).map(s=>`${s.date.slice(5)}: ${Math.floor(s.total/60)}h${s.total%60}m`).join(", ");
     const p = type==="today"
       ? `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}, current time in Israel: ${hourIL}:00. Julia is on ${cyclePhase}.
 ${isEvening?"⚠️ It is evening — the day for exercise is DONE. Do NOT suggest going to gym or training today under any circumstances.":""}
 ${todayLog&&/pain/i.test(todayLog)?"⚠️ PAIN LOGGED TODAY: "+todayLog+" — Do not recommend any workout. Show FLAG first.":""}
-DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc||"none"}. Today's workout: ${todayActivity}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
-TASK: Write 2–3 short insights that connect dots between her data. Focus on HOW things relate — e.g. does her sleep connect to something from yesterday? Does her cycle phase explain her appetite or energy? Does a logged mood/pain link to sleep or recovery? Only draw connections that the data actually supports — do not guess. Language: warm, forgiving, no judgment.
-FORMAT: 2–3 sections. Each = one emoji + CAPS LABEL: **one bold key point.** One sentence max explaining the connection. Total max 80 words. ${isEvening?"Last section = TONIGHT (wind-down/sleep prep for her cycle phase).":""}No generic advice. Cycle phase MUST appear.`
+DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc||"none"}. Today's workout so far: ${todayActivity}. This week's workouts: ${weekWorkoutSummary}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
+TASK: Write exactly 3 sections:
+1. One insight connecting her sleep/recovery to her data (cycle phase, yesterday's activity, or nutrition).
+2. ${isEvening?"TONIGHT: wind-down or sleep prep tip for her cycle phase.":todayActivity==="no workout yet"?"TRAINING TODAY: based on this week's workout history and her readiness, suggest whether she should train today and what type (gym/cardio/yoga/rest). Be specific and decisive — one sentence.":"TRAINING: comment on today's completed workout in context of her week and recovery."}
+3. One nutrition or energy insight.
+Language: warm, decisive, no fluff. Only reference log entries from today/yesterday — nothing older.
+FORMAT: each section = emoji + CAPS LABEL: **bold key point.** One sentence context. Total max 90 words. Cycle phase MUST appear in section 1.`
       : `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} (${cyclePhase}).
 ${isSunday?"Include a brief LAST WEEK highlight (1 sentence only).":"Do NOT mention last week at all."}
-This week's food: ${weekFoodSummary}. Sleep this week: ${weekSleep||"limited data"}.
+This week's workouts: ${weekWorkoutSummary}. This week's food: ${weekFoodSummary}. Sleep this week: ${weekSleep||"limited data"}.
 TASK: Write 2–3 short insights connecting her data across this week. Look for patterns: does her eating pattern fit her cycle phase? Does her sleep correlate with activity or food? Any trend worth noting? Do NOT state obvious targets. Do NOT recommend specific exercises. Language: warm, forgiving.
 FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.** one sentence explaining the pattern. Total max 70 words. Cycle phase name MUST appear. Example format:
 🌙 SLEEP PATTERN: **Your deep sleep averaged X minutes.** This correlates with Y.`;
@@ -814,10 +861,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
         let isLuteal = false;
         if(confDates.length){
-          const lastPeriod = new Date(confDates[0].d);
-          const now = new Date();
-          const cycleDay = Math.floor((now-lastPeriod)/864e5)+1;
-          const cd = ((cycleDay-1)%28)+1;
+          const cd = calcCycleDay(confDates[0].d);
           isLuteal = cd>=15 && cd<=28;
         }
 
@@ -858,9 +902,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         })();
 
         // Training load — 12 pts
-        // Find workouts since last sleep ended (use last sleep date as proxy)
-        const sinceDate = lastSleep ? lastSleep.date : "";
-        const recentWorkouts = (fitbitData.workouts||[]).filter(w=>w.date>=sinceDate&&w.date<=new Date().toISOString().slice(0,10));
+        // Check yesterday's workouts (yDate already accounts for the sleep record's date)
+        const recentWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===yDate);
         const cats = recentWorkouts.map(w=>getActivityCategory(w.type, profileData?.activity_mapping));
         const loadScore = recentWorkouts.length===0 ? 12
           : cats.some(c=>c==="mobility") && !cats.some(c=>c==="strength"||c==="cardio") ? 8
@@ -1028,7 +1071,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             if(!r) return <div style={{color:C.t3,fontSize:13}}>No sleep data</div>;
             const h=Math.floor(r.total/60),m=r.total%60;
             const tot=r.deep+r.rem+r.light+r.awake;
-            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toISOString().slice(0,10));
+            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
             return (<>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                 <div>
@@ -1575,11 +1618,9 @@ function TabCycle({cycleDates, setCycleDates}) {
 
   function cycleInfo(){
     if(!confirmed.length) return null;
-    const last=new Date(confirmed[0].d);
-    const now=new Date();now.setHours(0,0,0,0);
-    const day=Math.floor((now-last)/864e5)+1;
+    const day=calcCycleDay(confirmed[0].d);
     const phase=day<=5?"menstrual":day<=13?"follicular":day<=16?"ovulatory":"luteal";
-    return {day:((day-1)%28)+1,phase};
+    return {day,phase};
   }
 
   const info=cycleInfo();
@@ -2094,8 +2135,7 @@ function CycleHeaderPill({cycleDates, onPress}) {
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   let label="cycle", bg=C.pil, col=C.pi;
   if(conf.length){
-    const last=new Date(conf[0].d);const now=new Date();now.setHours(0,0,0,0);
-    const cd=((Math.floor((now-last)/864e5))%28)+1;
+    const cd=calcCycleDay(conf[0].d);
     const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";
     label=`Day ${cd} · ${ph}`;
     bg=cd<=5?C.rl:cd<=13?C.tl:cd<=16?C.al:C.pl;
@@ -2260,7 +2300,7 @@ function App() {
           if(cb){try{const parsed=JSON.parse(cb);if(parsed.length>0){setCycleDates(parsed);console.log("Cycle from localStorage backup:",parsed.length,"entries");}}catch(ex){}}
         }
         // Only load supplements for TODAY - reset daily
-        const todayKey2=new Date().toISOString().slice(0,10);
+        const todayKey2=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
         const ss={};
         (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
         setSuppState(ss);
@@ -2332,12 +2372,8 @@ function App() {
 
   async function saveSett(){
     localStorage.setItem("jkey",settKey);
-    localStorage.setItem("jprot",String(settProt));
     setApiKey(settKey);
-    // Protein target now lives on the profile
-    setProfileData(p=>p?{...p,protein_target:settProt}:p);
-    try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey,protein_target:settProt},"on_conflict=user_id");}catch(e){}
-    try{await supa("POST","profiles",{uid:UID,protein_target:settProt},"on_conflict=uid");}catch(e){}
+    try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey},"on_conflict=user_id");}catch(e){}
     setShowSett(false);
   }
 
@@ -2394,7 +2430,6 @@ function App() {
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
-          <CycleHeaderPill cycleDates={cycleDates} onPress={()=>setTab("cycle")}/>
           <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
           <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
@@ -2476,9 +2511,7 @@ function App() {
             <h3 style={{fontSize:16,fontWeight:600,marginBottom:16}}>Settings</h3>
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
             <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
-            <p style={{fontSize:11,color:C.t3,marginBottom:12}}>Stored locally in your browser only.</p>
-            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Daily protein target (g)</label>
-            <input type="number" value={settProt} onChange={e=>setSettProt(parseInt(e.target.value)||100)} min={50} max={200} style={{...s.input,marginBottom:16}}/>
+            <p style={{fontSize:11,color:C.t3,marginBottom:16}}>Stored locally in your browser only.</p>
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowSett(false)} style={s.btn("s")}>Cancel</button>
               <button onClick={saveSett} style={s.btn("p")}>Save</button>
