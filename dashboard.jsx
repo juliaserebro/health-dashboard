@@ -2038,8 +2038,10 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [supps, setSupps] = useState(profileData?.supplements||[]);
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
+  const [editNotes, setEditNotes] = useState(!profileData?.health_notes);
   const [savedNotes, setSavedNotes] = useState("");
   const [workoutPlan, setWorkoutPlan] = useState(profileData?.workout_plan||"");
+  const [editPlan, setEditPlan] = useState(!profileData?.workout_plan);
   const [savedPlan, setSavedPlan] = useState("");
   const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
 
@@ -2348,23 +2350,42 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
 
       <SecLabel>Health Notes</SecLabel>
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Any injuries, restrictions, or medical context your coach should know about. If you're all good — say so, that's useful info too.</div>
-        {!healthNotes&&<button onClick={()=>setHealthNotes("All good — no injuries or restrictions to report.")} style={{...s.btn("s"),...s.btnSm,marginBottom:8}}>I'm all good right now</button>}
-        <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="e.g. All good — no current injuries. Or: left knee pain, avoiding high-impact for now." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:8}}/>
-        <div style={saveRow}>
-          <button onClick={()=>persist({health_notes:healthNotes}, setSavedNotes)} style={s.btn("p")}>Save</button>
-          {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
-        </div>
+        {editNotes ? (
+          <>
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Any injuries, restrictions, or medical context your coach should know about. If you're all good — say so, that's useful info too.</div>
+            {!healthNotes&&<button onClick={()=>setHealthNotes("All good — no injuries or restrictions to report.")} style={{...s.btn("s"),...s.btnSm,marginBottom:8}}>I'm all good right now</button>}
+            <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="e.g. All good — no current injuries. Or: left knee pain, avoiding high-impact for now." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:8}}/>
+            <div style={saveRow}>
+              <button onClick={()=>{persist({health_notes:healthNotes}, setSavedNotes);setEditNotes(false);}} style={s.btn("p")}>Save</button>
+              {healthNotes&&<button onClick={()=>setEditNotes(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+              {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{fontSize:13,color:C.tx,lineHeight:1.7,marginBottom:10,whiteSpace:"pre-wrap"}}>{healthNotes}</div>
+            <button onClick={()=>setEditNotes(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+          </>
+        )}
       </Card>
 
       <SecLabel>Workout plan</SecLabel>
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
-        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
-        <div style={saveRow}>
-          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
-          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
-        </div>
+        {editPlan ? (
+          <>
+            <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+            <div style={saveRow}>
+              <button onClick={()=>{persist({workout_plan:workoutPlan}, setSavedPlan);setEditPlan(false);}} style={s.btn("p")}>Save</button>
+              {workoutPlan&&<button onClick={()=>setEditPlan(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
+              {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{fontSize:13,color:C.tx,lineHeight:1.7,marginBottom:10,whiteSpace:"pre-wrap"}}>{workoutPlan}</div>
+            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+          </>
+        )}
       </Card>
 
       {/* Activity mapping — moved here, after Workout Plan */}
