@@ -1982,7 +1982,23 @@ function getDefaultProteinTarget(weightKg, goals) {
   return Math.round(parseFloat(weightKg) * multiplier);
 }
 
-function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}}) {
+function StructuredView({text}) {
+  if(!text) return null;
+  return (
+    <div>
+      {text.split('\n').map((line,i)=>{
+        const t=line.trim();
+        if(!t) return <div key={i} style={{height:6}}/>;
+        if(/^⚠/.test(t)) return <div key={i} style={{background:C.al,borderRadius:6,padding:"6px 10px",fontSize:12,color:C.am,marginBottom:6,lineHeight:1.5}}>{t}</div>;
+        if(/^[A-Z][A-Z &/()-]{2,}$/.test(t)) return <div key={i} style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.t3,marginTop:12,marginBottom:4}}>{t}</div>;
+        if(/^[•\-]/.test(t)) return <div key={i} style={{display:"flex",gap:8,marginBottom:4,fontSize:13}}><span style={{color:C.pu,flexShrink:0,marginTop:1}}>•</span><span style={{color:C.tx,lineHeight:1.55}}>{t.replace(/^[•\-]\s*/,"")}</span></div>;
+        return <div key={i} style={{fontSize:12,color:C.t2,marginBottom:3,lineHeight:1.55}}>{t}</div>;
+      })}
+    </div>
+  );
+}
+
+function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}, apiKey}) {
   // Section A — editable personal info
   const [pa, setPa] = useState({
     name: profileData?.name||"",
@@ -2039,9 +2055,11 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
   const [editNotes, setEditNotes] = useState(!profileData?.health_notes);
+  const [processingNotes, setProcessingNotes] = useState(false);
   const [savedNotes, setSavedNotes] = useState("");
   const [workoutPlan, setWorkoutPlan] = useState(profileData?.workout_plan||"");
   const [editPlan, setEditPlan] = useState(!profileData?.workout_plan);
+  const [processingPlan, setProcessingPlan] = useState(false);
   const [savedPlan, setSavedPlan] = useState("");
   const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
 
@@ -2058,6 +2076,40 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       console.error("Profile save error:", e.message);
       if(setFlag) setFlag("Error: "+e.message.slice(0,200));
     }
+  }
+
+  async function aiCall(prompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:600,messages:[{role:"user",content:prompt}]})
+    });
+    const d=await res.json();
+    return d.content?.[0]?.text||"";
+  }
+
+  async function analyseNotes(raw) {
+    if(!apiKey||!raw.trim()) return raw;
+    setProcessingNotes(true);
+    try{
+      const result = await aiCall(
+        `Read the following health notes and extract ONLY the medically relevant information. Rewrite it as a clean, very concise structured summary using ALL CAPS section headers and bullet points starting with •. Fix spelling and grammar. Be very brief — max 3 bullets per section. Use only sections that apply: CONDITIONS, RESTRICTIONS, SYMPTOMS, FOLLOW-UP. If something looks like an exercise restriction or contraindication, include it under RESTRICTIONS.\n\nReturn ONLY the formatted text, nothing else.\n\nHealth notes:\n${raw}`
+      );
+      return result.trim();
+    }catch(e){return raw;}
+    finally{setProcessingNotes(false);}
+  }
+
+  async function analysePlan(raw, notes) {
+    if(!apiKey||!raw.trim()) return raw;
+    setProcessingPlan(true);
+    try{
+      const result = await aiCall(
+        `Read the following workout plan and reformat it as a clean, scannable workout plan. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY, etc.). Each exercise on its own line: Exercise name — weight · sets×reps · rest time. Fix exercise names and capitalisation. Group exercises into the correct sections.\n\nIf the health notes below mention restrictions or injuries that conflict with any exercise in the plan, add a line: ⚠️ FLAGGED: [exercise] — [reason from health notes]\n\nReturn ONLY the formatted workout plan, nothing else.\n\nHealth notes: ${notes||"none"}\n\nWorkout plan:\n${raw}`
+      );
+      return result.trim();
+    }catch(e){return raw;}
+    finally{setProcessingPlan(false);}
   }
 
   // Unique activity types seen in fitbit data, for the mapping section
@@ -2352,19 +2404,26 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       <Card style={{marginBottom:14}}>
         {editNotes ? (
           <>
-            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Any injuries, restrictions, or medical context your coach should know about. If you're all good — say so, that's useful info too.</div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Describe any injuries, restrictions, or medical context. Just write it out — AI will structure it when you save.</div>
             {!healthNotes&&<button onClick={()=>setHealthNotes("All good — no injuries or restrictions to report.")} style={{...s.btn("s"),...s.btnSm,marginBottom:8}}>I'm all good right now</button>}
-            <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="e.g. All good — no current injuries. Or: left knee pain, avoiding high-impact for now." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:8}}/>
+            <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="Write anything — conditions, surgeries, restrictions, symptoms. AI will organise it." style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
             <div style={saveRow}>
-              <button onClick={()=>{persist({health_notes:healthNotes}, setSavedNotes);setEditNotes(false);}} style={s.btn("p")}>Save</button>
+              <button disabled={processingNotes||!healthNotes.trim()} onClick={async()=>{
+                const structured=await analyseNotes(healthNotes);
+                setHealthNotes(structured);
+                await persist({health_notes:structured},setSavedNotes);
+                setEditNotes(false);
+              }} style={{...s.btn("p"),opacity:processingNotes?0.6:1}}>{processingNotes?"Analysing...":"Analyse & Save"}</button>
+              {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {healthNotes&&<button onClick={()=>setEditNotes(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
             </div>
+            {!apiKey&&<div style={{fontSize:11,color:C.am,marginTop:6}}>Add your API key in Settings to enable AI analysis.</div>}
           </>
         ) : (
           <>
-            <div style={{fontSize:13,color:C.tx,lineHeight:1.7,marginBottom:10,whiteSpace:"pre-wrap"}}>{healthNotes}</div>
-            <button onClick={()=>setEditNotes(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+            <StructuredView text={healthNotes}/>
+            <button onClick={()=>setEditNotes(true)} style={{...s.btn("s"),...s.btnSm,marginTop:10}}>Edit</button>
           </>
         )}
       </Card>
@@ -2373,17 +2432,25 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       <Card style={{marginBottom:14}}>
         {editPlan ? (
           <>
-            <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it into a proper plan and flag anything that conflicts with your health notes.</div>
+            <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s..." style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
-              <button onClick={()=>{persist({workout_plan:workoutPlan}, setSavedPlan);setEditPlan(false);}} style={s.btn("p")}>Save</button>
+              <button disabled={processingPlan||!workoutPlan.trim()} onClick={async()=>{
+                const structured=await analysePlan(workoutPlan,healthNotes);
+                setWorkoutPlan(structured);
+                await persist({workout_plan:structured},setSavedPlan);
+                setEditPlan(false);
+              }} style={{...s.btn("p"),opacity:processingPlan?0.6:1}}>{processingPlan?"Organising...":"Organise & Save"}</button>
+              {workoutPlan&&!processingPlan&&<button onClick={async()=>{await persist({workout_plan:workoutPlan},setSavedPlan);setEditPlan(false);}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {workoutPlan&&<button onClick={()=>setEditPlan(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
             </div>
+            {!apiKey&&<div style={{fontSize:11,color:C.am,marginTop:6}}>Add your API key in Settings to enable AI organisation.</div>}
           </>
         ) : (
           <>
-            <div style={{fontSize:13,color:C.tx,lineHeight:1.7,marginBottom:10,whiteSpace:"pre-wrap"}}>{workoutPlan}</div>
-            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+            <StructuredView text={workoutPlan}/>
+            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm,marginTop:10}}>Edit</button>
           </>
         )}
       </Card>
@@ -2759,7 +2826,7 @@ export default function App() {
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
-      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData}/>}
+      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey}/>}
 
       {/* COACH CHAT BUTTON */}
       <button onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
