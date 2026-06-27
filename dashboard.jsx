@@ -1998,6 +1998,98 @@ function StructuredView({text}) {
   );
 }
 
+function WorkoutView({text, healthNotes, apiKey, onUpdatePlan}) {
+  const [suggesting, setSuggesting] = React.useState({});
+  if(!text) return null;
+
+  // First pass: collect all ⚠️ FLAGGED lines
+  const flagged = {};
+  text.split('\n').forEach(line=>{
+    const t=line.trim();
+    const m=t.match(/^⚠️\s*(?:FLAGGED:)?\s*(.+?)\s*[—\-]\s*(.+)$/i);
+    if(m&&/^⚠/.test(t)) flagged[m[1].trim().toLowerCase()]=m[2].trim();
+  });
+
+  // Second pass: build sections
+  const sections=[];
+  let cur=null;
+  text.split('\n').forEach(line=>{
+    const t=line.trim();
+    if(!t||/^⚠/.test(t)) return;
+    if(/^[A-Z][A-Z &/()\-]{2,}$/.test(t)){cur={title:t,exercises:[]};sections.push(cur);return;}
+    if(!cur) return;
+    const dash=t.indexOf(' — ');
+    const name=dash>-1?t.slice(0,dash).trim():t;
+    const rest2=dash>-1?t.slice(dash+3).split(/\s*·\s*/):[];
+    cur.exercises.push({name,cols:rest2,raw:t});
+  });
+
+  async function suggest(ex, reason) {
+    setSuggesting(s=>({...s,[ex.name]:{loading:true}}));
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:150,messages:[{role:"user",content:
+          `Workout plan:\n${text}\n\nHealth restrictions: ${healthNotes||"none"}\n\n"${ex.name}" is flagged: ${reason}\n\nSuggest ONE safe replacement that targets similar muscles. Reply with just the exercise line in this exact format (copy the weight/sets/rest style from the rest of the plan): Exercise name — weight · sets×reps · rest\nNo explanation.`
+        }]})
+      });
+      const d=await res.json();
+      setSuggesting(s=>({...s,[ex.name]:{loading:false,suggestion:d.content?.[0]?.text?.trim()||""}}));
+    }catch(e){setSuggesting(s=>({...s,[ex.name]:{loading:false,error:true}}));}
+  }
+
+  function accept(oldName, suggestion) {
+    const newLines=text.split('\n')
+      .filter(l=>!(/^⚠/.test(l.trim())&&l.toLowerCase().includes(oldName.toLowerCase())))
+      .map(l=>l.trim().toLowerCase().startsWith(oldName.toLowerCase())?suggestion:l);
+    onUpdatePlan(newLines.join('\n'));
+    setSuggesting(s=>{const n={...s};delete n[oldName];return n;});
+  }
+
+  return (
+    <div>
+      {sections.map((sec,si)=>(
+        <div key={si} style={{marginBottom:18}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:8,paddingBottom:4,borderBottom:`1px solid ${C.s2}`}}>{sec.title}</div>
+          {sec.exercises.map((ex,ei)=>{
+            const flagKey=Object.keys(flagged).find(k=>ex.name.toLowerCase().includes(k)||k.includes(ex.name.toLowerCase()));
+            const reason=flagKey?flagged[flagKey]:null;
+            const sug=suggesting[ex.name];
+            return (
+              <div key={ei} style={{marginBottom:reason?10:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0",borderBottom:`1px solid ${C.s2}`,opacity:reason?0.55:1}}>
+                  <span style={{flex:1,fontSize:13,color:reason?C.am:C.tx,fontWeight:400,textDecoration:reason?"line-through":"none"}}>{ex.name}</span>
+                  {ex.cols[0]&&<span style={{fontSize:11,color:C.t2,minWidth:52,textAlign:"right",whiteSpace:"nowrap"}}>{ex.cols[0]}</span>}
+                  {ex.cols[1]&&<span style={{fontSize:11,color:C.t2,minWidth:46,textAlign:"right",whiteSpace:"nowrap"}}>{ex.cols[1]}</span>}
+                  {ex.cols[2]&&<span style={{fontSize:11,color:C.t3,minWidth:44,textAlign:"right",whiteSpace:"nowrap"}}>{ex.cols[2]}</span>}
+                </div>
+                {reason&&(
+                  <div style={{background:"rgba(245,158,11,0.08)",borderRadius:6,padding:"7px 10px",marginTop:3,marginLeft:0}}>
+                    <div style={{fontSize:11,color:C.am,marginBottom:6,lineHeight:1.5}}>⚠️ {reason}</div>
+                    {!sug&&<button onClick={()=>suggest(ex,reason)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Suggest replacement</button>}
+                    {sug?.loading&&<span style={{fontSize:11,color:C.t2}}>Finding safe alternative...</span>}
+                    {sug?.suggestion&&(
+                      <div>
+                        <div style={{fontSize:12,color:C.tx,marginBottom:6,padding:"5px 8px",background:C.s2,borderRadius:5,lineHeight:1.5}}>{sug.suggestion}</div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>accept(ex.name,sug.suggestion)} style={{...s.btn("p"),...s.btnSm,fontSize:11}}>Use this</button>
+                          <button onClick={()=>setSuggesting(sg=>({...sg,[ex.name]:null}))} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Try again</button>
+                          <button onClick={()=>setSuggesting(sg=>({...sg,[ex.name]:undefined}))} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Dismiss</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}, apiKey}) {
   // Section A — editable personal info
   const [pa, setPa] = useState({
@@ -2449,8 +2541,8 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
           </>
         ) : (
           <>
-            <StructuredView text={workoutPlan}/>
-            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm,marginTop:10}}>Edit</button>
+            <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}}/>
+            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm,marginTop:12}}>Edit</button>
           </>
         )}
       </Card>
