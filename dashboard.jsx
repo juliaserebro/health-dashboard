@@ -2174,7 +2174,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:600,messages:[{role:"user",content:prompt}]})
+      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2000,messages:[{role:"user",content:prompt}]})
     });
     const d=await res.json();
     return d.content?.[0]?.text||"";
@@ -2524,8 +2524,23 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       <Card style={{marginBottom:14}}>
         {editPlan ? (
           <>
-            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it into a proper plan and flag anything that conflicts with your health notes.</div>
-            <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s..." style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it and flag anything that conflicts with your health notes.</div>
+            {apiKey&&!workoutPlan.trim()&&<button disabled={processingPlan} onClick={async()=>{
+              setProcessingPlan(true);
+              const goals=(profileData?.goals||[]).map(g=>g.label||g.id).join(", ")||"general fitness";
+              const at=profileData?.activity_targets||{};
+              const prompt=`Build a complete, structured weekly workout plan for this person:\n\nGoals: ${goals}\nStrength sessions/week: ${at.strength||2}, Mobility: ${at.mobility||1}, Cardio: ${at.cardio||2}\nHealth restrictions: ${healthNotes||"none"}\nProfile: ${profileData?.gender||"female"}, ${profileData?.age||40} years old, weight ${profileData?.weight_kg||"unknown"}kg\n\nCreate a realistic plan with specific exercises, weights (estimate if unknown), sets×reps, and rest times. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY). Each exercise: Exercise name — weight · sets×reps · rest. If any exercise conflicts with health restrictions add: ⚠️ FLAGGED: Exercise — reason. Return only the formatted plan, nothing else.`;
+              try{
+                const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2000,messages:[{role:"user",content:prompt}]})});
+                const d=await res.json();
+                const plan=d.content?.[0]?.text?.trim()||"";
+                if(plan){setWorkoutPlan(plan);await persist({workout_plan:plan});setEditPlan(false);}
+              }catch(e){console.log("Build plan error:",e.message);}
+              setProcessingPlan(false);
+            }} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
+              {processingPlan?"Building your plan...":"Build a plan for me with AI"}
+            </button>}
+            <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
               <button disabled={processingPlan||!workoutPlan.trim()} onClick={async()=>{
                 const structured=await analysePlan(workoutPlan,healthNotes);
