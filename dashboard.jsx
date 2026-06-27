@@ -252,9 +252,9 @@ function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=fals
   const mobilityCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="mobility").length;
   const cardioCount=monthWorkouts.filter(w=>getActivityCategory(w.type, profileData?.activity_mapping)==="cardio").length;
   const at=profileData?.activity_targets||{};
-  const tStr=Math.round((Number(at.strength)||2)*4.3);
-  const tMov=Math.round((Number(at.mobility)||Number(at.movement)||2)*4.3);
-  const tCard=Math.round((Number(at.cardio)||2)*4.3);
+  const tStr=(Number(at.strength)||2)*4;
+  const tMov=(Number(at.mobility)||Number(at.movement)||2)*4;
+  const tCard=(Number(at.cardio)||2)*4;
   const proteinDays=Object.entries(allFood).filter(([date,meals])=>{
     if(!date.startsWith(month)) return false;
     return meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt;
@@ -689,9 +689,10 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
     return `[${e.tag}|${recency}] ${e.txt}`;
   });
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
-  const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const _allSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date));
+  const lastSleep=_allSleep[0]?.date===todayKey?_allSleep[0]:null;
   const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
-  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: no data";
+  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: not tracked last night — do NOT mention sleep stats or give sleep guidance.";
   const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
   const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
   const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
@@ -787,9 +788,10 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     // Yesterday alcohol from log
     const yKey = new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
     const yAlc = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&/wine|alcohol|beer|drink/i.test(e.txt||"")).map(e=>e.txt).join("; ");
-    // Last sleep
-    const lastSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:"no sleep data";
+    // Last sleep — only use if tracked last night (today's date)
+    const _todayKeyAI=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+    const lastSleep=(fitbitData.sleep||[]).find(s=>s.date===_todayKeyAI)||null;
+    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:"not tracked last night — skip sleep analysis";
     // Today workouts
     const todayWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===todayKey);
     const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
@@ -1070,11 +1072,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         {/* SLEEP LAST NIGHT */}
         <Card style={{marginBottom:0}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
-            Last night — {(()=>{const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];if(!r)return "—";const d=new Date(r.date);return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});})()}
+            Last night — {new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}
           </div>
           {(()=>{
-            const r=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
-            if(!r) return <div style={{color:C.t3,fontSize:13}}>No sleep data</div>;
+            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            const r=(fitbitData.sleep||[]).find(s=>s.date===todayStr);
+            if(!r) return <div style={{color:C.t3,fontSize:13}}>Not tracked last night</div>;
             const h=Math.floor(r.total/60),m=r.total%60;
             const tot=r.deep+r.rem+r.light+r.awake;
             const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
@@ -1196,13 +1199,28 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <Card style={{marginBottom:0}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep — last 7 days</div>
           {(()=>{
-            // Last 7 sleep records from fitbitData
-            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7).reverse();
-            return recs.map((d,i)=>{
-              const tot=d.deep+d.rem+d.light+d.awake;
-              const h=Math.floor(d.total/60),m=d.total%60;
-              const dateObj=new Date(d.date);
+            const todayILs=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            // Build array of last 7 calendar dates (oldest→newest)
+            const dates=Array.from({length:7},(_,i)=>{
+              const d=new Date(todayILs+"T12:00:00");
+              d.setDate(d.getDate()-(6-i));
+              return d.toISOString().slice(0,10);
+            });
+            const sleepByDate={};
+            (fitbitData.sleep||[]).forEach(s=>{sleepByDate[s.date]=s;});
+            return dates.map((date,i)=>{
+              const d=sleepByDate[date];
+              const dateObj=new Date(date+"T12:00:00");
               const lbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+              if(!d) return (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+                  <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
+                  <div style={{flex:1,height:7,borderRadius:4,background:C.s2}}/>
+                  <span style={{width:36,textAlign:"right",color:C.t3,fontSize:10}}>N/A</span>
+                </div>
+              );
+              const tot=d.deep+d.rem+d.light+d.awake||1;
+              const h=Math.floor(d.total/60),m=d.total%60;
               return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
                 <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
                 <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
@@ -1456,13 +1474,14 @@ function SupplementStack({suppState={}, setSupp, profileData, onSaveSupps}) {
   const done = SUPPS.filter(s=>suppState[s.id]).length;
   return (
     <Card style={{marginTop:8}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>
           Supplements today — {done}/{SUPPS.length} taken
           {SUPPS.length>0&&done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
         </div>
         <button onClick={()=>setEditing(true)} style={{...s.btn("s"),...s.btnSm,fontSize:10}}>Edit stack</button>
       </div>
+      <div style={{fontSize:10,color:C.t3,marginBottom:8}}>Daily reminder — tap each supplement as you take it. Resets every morning.</div>
       {SUPPS.length===0
         ? <div style={{fontSize:12,color:C.t3}}>No supplements added yet. Tap Edit stack to set up your daily supplements.</div>
         : <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
@@ -2256,8 +2275,10 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
               const total=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);
               return (
                 <>
-                  <div style={{fontSize:12,color:total===5?C.teal:C.am,marginBottom:4,fontWeight:500}}>{total} sessions / week = {total*4} sessions / month{total!==5?" — aim for 5 total":""}</div>
-                  <div style={{fontSize:11,color:C.t3,marginBottom:10}}>These numbers are based on your goals and longevity research. Adjust them to whatever works for your life.</div>
+                  <div style={{background:C.s2,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+                    <div style={{fontSize:13,color:total===5?C.teal:C.am,fontWeight:600,marginBottom:3}}>{total} sessions / week = {total*4} sessions / month{total!==5?" — aim for 5 total":""}</div>
+                    <div style={{fontSize:11,color:C.t3}}>Based on your goals and longevity research. Adjust to whatever works for your life.</div>
+                  </div>
                   <div style={saveRow}>
                     <button disabled={total!==5||(targets.strength||0)<1||(targets.mobility||0)<1||(targets.cardio||0)<1} onClick={()=>{persist({activity_targets:targets}, setSavedTargets);setEditTargets(false);}} style={{...s.btn("p"),opacity:(total===5&&(targets.strength||0)>=1&&(targets.mobility||0)>=1&&(targets.cardio||0)>=1)?1:0.5}}>Save targets</button>
                     {profileData?.activity_targets&&<button onClick={()=>setEditTargets(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
@@ -2325,12 +2346,13 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         )}
       </Card>
 
-      {/* Health notes */}
+      <SecLabel>Health Notes</SecLabel>
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Health notes</div>
-        <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="Injuries, restrictions, medical context…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+        <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Any injuries, restrictions, or medical context your coach should know about. If you're all good — say so, that's useful info too.</div>
+        {!healthNotes&&<button onClick={()=>setHealthNotes("All good — no injuries or restrictions to report.")} style={{...s.btn("s"),...s.btnSm,marginBottom:8}}>I'm all good right now</button>}
+        <textarea value={healthNotes} onChange={e=>setHealthNotes(e.target.value)} placeholder="e.g. All good — no current injuries. Or: left knee pain, avoiding high-impact for now." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:8}}/>
         <div style={saveRow}>
-          <button onClick={()=>persist({health_notes:healthNotes}, setSavedNotes)} style={s.btn("p")}>Save notes</button>
+          <button onClick={()=>persist({health_notes:healthNotes}, setSavedNotes)} style={s.btn("p")}>Save</button>
           {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
         </div>
       </Card>
