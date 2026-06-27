@@ -368,10 +368,9 @@ function WeeklyStepsMetric({fitbitData}) {
 
 function SleepTileMetric({fitbitData}) {
   const todayIL = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-  // Sleep date = the morning date (when you woke up)
-  const rec = (fitbitData.sleep||[]).find(s=>s.date===todayIL)
-           || (fitbitData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date))[0];
-  if(!rec) return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>no data</div></div>;
+  // Sleep records use wake-up date (= today). Only show if actually tracked last night.
+  const rec = (fitbitData.sleep||[]).find(s=>s.date===todayIL);
+  if(!rec) return <div style={s.mc}><div style={s.ml}>Sleep last night</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>not tracked</div></div>;
   const h=Math.floor(rec.total/60),m=rec.total%60;
   const col=rec.total>=420?C.sl:rec.total>=360?C.slm:C.red;
   const todayNap=(fitbitData.naps||[]).find(n=>n.date===todayIL);
@@ -880,8 +879,19 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       {/* READINESS */}
       {(()=>{
         // ── Shared readiness calculation ─────────────────────────────────
+        const todayIL2 = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
         const sleepRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date));
-        const lastSleep = sleepRecords[0];
+        // Only use sleep from today (wake-up date). If not tracked, show no-sleep card.
+        const lastSleep = sleepRecords[0]?.date === todayIL2 ? sleepRecords[0] : null;
+        if(!lastSleep) return (
+          <Card>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
+              Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
+            </div>
+            <div style={{fontSize:14,color:C.t2,padding:"10px 0"}}>No sleep tracked last night — readiness score unavailable.</div>
+            <div style={{fontSize:11,color:C.t3}}>Wear your watch tonight to get a full readiness score tomorrow.</div>
+          </Card>
+        );
 
         // Luteal phase detection
         const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
@@ -1382,6 +1392,16 @@ function HeatmapGrid({allFood={}, protTgt=100, fitbitData={steps:[],workouts:[]}
 }
 
 // ── SUPPLEMENT CHECKLIST COMPONENT ───────────────────────────────────────
+const SUPPLEMENT_LIST = [
+  "Vitamin A","Vitamin B12","Vitamin B Complex","Vitamin C","Vitamin D3","Vitamin D3+K2","Vitamin E","Vitamin K2",
+  "Magnesium","Magnesium Bisglycinate","Magnesium Glycinate","Zinc","Iron","Calcium","Iodine","Selenium","Folate","Biotin",
+  "Creatine","Creatine Monohydrate","Protein Powder","Whey Protein","Collagen","Collagen Peptides","BCAA","Beta-Alanine",
+  "Caffeine","Pre-workout","Glutamine","Electrolytes",
+  "Omega-3","Fish Oil","Multivitamin","Probiotics","Prebiotics","CoQ10","Alpha Lipoic Acid","NAC","Turmeric","Curcumin",
+  "Ashwagandha","Rhodiola","Melatonin","L-Theanine","Maca"
+];
+const SUPP_TIMING = ["Morning","With meal","Evening","Before workout","Before bed"];
+
 // Preserve stable ids for the original 6 supplements so existing supplement_log
 // rows keep matching; unknown supplements get a slug id from their name.
 const LEGACY_SUPP_IDS = {
@@ -1421,8 +1441,78 @@ function SupplementChecklist({suppState={}, setSupp, profileData}) {
   );
 }
 
+function SupplementStack({suppState={}, setSupp, profileData, onSaveSupps}) {
+  const [editing, setEditing] = useState(false);
+  const [localSupps, setLocalSupps] = useState(()=>profileData?.supplements||[]);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [query, setQuery] = useState({});
+
+  // Sync when profileData changes
+  React.useEffect(()=>{ setLocalSupps(profileData?.supplements||[]); },[profileData?.supplements]);
+
+  if(editing) return (
+    <Card style={{marginTop:8}}>
+      <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>My supplement stack</div>
+      {localSupps.map((sup,i)=>{
+        const q=query[i]||"";
+        const suggestions=q?SUPPLEMENT_LIST.filter(s=>s.toLowerCase().includes(q.toLowerCase())).slice(0,6):[];
+        return (
+          <div key={i} style={{display:"flex",gap:8,marginBottom:10,alignItems:"flex-start",position:"relative"}}>
+            <div style={{flex:2,position:"relative"}}>
+              <input value={sup.name} onChange={e=>{const v=e.target.value;setLocalSupps(a=>a.map((x,j)=>j===i?{...x,name:v}:x));setQuery(q=>({...q,[i]:v}));}} placeholder="Supplement name" style={s.input}/>
+              {suggestions.length>0&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.sf,border:`.5px solid ${C.bd}`,borderRadius:8,zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,.08)"}}>
+                {suggestions.map(sg=><div key={sg} onClick={()=>{setLocalSupps(a=>a.map((x,j)=>j===i?{...x,name:sg}:x));setQuery(q=>({...q,[i]:""}));}} style={{padding:"8px 12px",fontSize:13,cursor:"pointer"}}>{sg}</div>)}
+              </div>}
+            </div>
+            <input value={sup.dose||""} onChange={e=>setLocalSupps(a=>a.map((x,j)=>j===i?{...x,dose:e.target.value}:x))} placeholder="Dose (e.g. 500mg)" style={{...s.input,flex:1}}/>
+            <select value={sup.timing||""} onChange={e=>setLocalSupps(a=>a.map((x,j)=>j===i?{...x,timing:e.target.value}:x))} style={{...s.input,flex:1}}>
+              <option value="">Timing</option>
+              {SUPP_TIMING.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+            <button onClick={()=>setLocalSupps(a=>a.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.t3,fontSize:18,cursor:"pointer",padding:"6px 4px",lineHeight:1}}>×</button>
+          </div>
+        );
+      })}
+      <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>setLocalSupps(a=>[...a,{name:"",dose:"",timing:""}])} style={{...s.btn("s"),...s.btnSm}}>+ Add supplement</button>
+        <button onClick={async()=>{const clean=localSupps.filter(x=>x.name&&x.name.trim());await onSaveSupps(clean);setSavedMsg("Saved");setTimeout(()=>setSavedMsg(""),2000);setEditing(false);}} style={s.btn("p")}>Save</button>
+        <button onClick={()=>{setLocalSupps(profileData?.supplements||[]);setEditing(false);}} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>
+        {savedMsg&&<span style={{fontSize:12,color:C.teal}}>{savedMsg}</span>}
+      </div>
+    </Card>
+  );
+
+  const SUPPS = suppsFromProfile(profileData);
+  const done = SUPPS.filter(s=>suppState[s.id]).length;
+  return (
+    <Card style={{marginTop:8}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>
+          Supplements today — {done}/{SUPPS.length} taken
+          {SUPPS.length>0&&done===SUPPS.length&&<span style={{color:C.tm,marginLeft:8}}>✓ all done</span>}
+        </div>
+        <button onClick={()=>setEditing(true)} style={{...s.btn("s"),...s.btnSm,fontSize:10}}>Edit stack</button>
+      </div>
+      {SUPPS.length===0
+        ? <div style={{fontSize:12,color:C.t3}}>No supplements added yet. Tap Edit stack to set up your daily supplements.</div>
+        : <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+          {SUPPS.map(sup=>{
+            const checked=!!suppState[sup.id];
+            return (
+              <div key={sup.id} onClick={()=>setSupp&&setSupp(sup.id,!checked)} style={{background:checked?C.tl:C.s2,border:`.5px solid ${checked?C.tm:C.bd}`,borderRadius:8,padding:"8px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}>
+                <div style={{width:16,height:16,borderRadius:"50%",border:`2px solid ${checked?C.tm:C.t3}`,background:checked?C.tm:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,flexShrink:0}}>{checked?"✓":""}</div>
+                <div><div style={{fontSize:11,fontWeight:500,lineHeight:1.2}}>{sup.name}</div><div style={{fontSize:9,color:C.t3}}>{sup.time}</div></div>
+              </div>
+            );
+          })}
+        </div>
+      }
+    </Card>
+  );
+}
+
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData, onSaveSupps}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -1607,8 +1697,8 @@ Input: ${txtInput}`;
         </div>
       )}
 
-      {/* SUPPLEMENTS CHECKLIST */}
-      <SupplementChecklist suppState={suppState} setSupp={setSupp} profileData={profileData}/>
+      {/* SUPPLEMENTS */}
+      <SupplementStack suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={onSaveSupps}/>
 
       {/* EDIT MODAL */}
       {editIdx!==null&&(
@@ -1867,7 +1957,7 @@ const GOAL_SUBS = {
   ]},
   more_energy:{label:"More energy & recovery",prompt:"How do you want to measure progress?",options:[
     {id:"readiness",label:"Improve my readiness score over time"},
-    {id:"both",label:"Both energy and recovery"},
+    {id:"both",label:"Improve readiness AND feel more energised day-to-day"},
   ]},
   improve_endurance:{label:"Improve endurance",prompt:"How do you want to measure progress?",options:[
     {id:"sessions",label:"Hit my weekly cardio sessions"},
@@ -1880,7 +1970,7 @@ const GOAL_SUBS = {
   body_composition:{label:"Improve body composition",prompt:"How do you want to measure progress?",options:[
     {id:"body_fat",label:"Reduce body fat %",input:{type:"number",label:"Target body fat %",unit:"%",optional:true}},
     {id:"muscle",label:"Build muscle and feel stronger"},
-    {id:"both",label:"Both"},
+    {id:"both",label:"Build muscle AND reduce body fat"},
   ]},
 };
 
@@ -1903,16 +1993,6 @@ function getDefaultProteinTarget(weightKg, goals) {
   return Math.round(parseFloat(weightKg) * multiplier);
 }
 
-const SUPPLEMENT_LIST = [
-  "Vitamin A","Vitamin B12","Vitamin B Complex","Vitamin C","Vitamin D3","Vitamin D3+K2","Vitamin E","Vitamin K2",
-  "Magnesium","Magnesium Bisglycinate","Magnesium Glycinate","Zinc","Iron","Calcium","Iodine","Selenium","Folate","Biotin",
-  "Creatine","Creatine Monohydrate","Protein Powder","Whey Protein","Collagen","Collagen Peptides","BCAA","Beta-Alanine",
-  "Caffeine","Pre-workout","Glutamine","Electrolytes",
-  "Omega-3","Fish Oil","Multivitamin","Probiotics","Prebiotics","CoQ10","Alpha Lipoic Acid","NAC","Turmeric","Curcumin",
-  "Ashwagandha","Rhodiola","Melatonin","L-Theanine","Maca"
-];
-const SUPP_TIMING = ["Morning","With meal","Evening","Before workout","Before bed"];
-
 function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}}) {
   // Section A — editable personal info
   const [pa, setPa] = useState({
@@ -1923,7 +2003,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     weight_kg: profileData?.weight_kg||"",
     body_fat_pct: profileData?.body_fat_pct||"",
     body_fat_target_pct: profileData?.body_fat_target_pct||"",
-    timezone: profileData?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,
+    // timezone lives in Settings, not here
   });
   const [savedA, setSavedA] = useState("");
   const [editPersonal, setEditPersonal] = useState(!profileData?.name);
@@ -2018,8 +2098,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                 <input type="number" step="0.1" value={pa.weight_kg} onChange={e=>setPa(p=>({...p,weight_kg:e.target.value}))} style={s.input}/></div>
               <div style={fieldWrap}><label style={lbl}>Body fat % (from body scan)</label>
                 <input type="number" step="0.1" value={pa.body_fat_pct} onChange={e=>setPa(p=>({...p,body_fat_pct:e.target.value}))} style={s.input}/></div>
-              <div style={fieldWrap}><label style={lbl}>Timezone</label>
-                <input type="text" value={pa.timezone} onChange={e=>setPa(p=>({...p,timezone:e.target.value}))} style={s.input}/></div>
             </div>
             <div style={saveRow}>
               <button onClick={async()=>{
@@ -2028,7 +2106,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                   height_cm:pa.height_cm===""?null:parseFloat(pa.height_cm),
                   weight_kg:pa.weight_kg===""?null:parseFloat(pa.weight_kg),
                   body_fat_pct:pa.body_fat_pct===""?null:parseFloat(pa.body_fat_pct),
-                  timezone:pa.timezone
                 }, setSavedA);
                 setEditPersonal(false);
               }} style={s.btn("p")}>Save</button>
@@ -2046,7 +2123,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                 ["Height", pa.height_cm ? pa.height_cm+" cm" : "—"],
                 ["Weight", pa.weight_kg ? pa.weight_kg+" kg" : "—"],
                 ["Body fat", pa.body_fat_pct ? pa.body_fat_pct+"%" : "—"],
-                ["Timezone", pa.timezone||"—"],
               ].map(([label,val])=>(
                 <div key={label}>
                   <div style={{fontSize:10,color:C.t3,marginBottom:1,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{label}</div>
@@ -2073,60 +2149,15 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
               <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
                 <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
                 <div style={{fontSize:16,fontWeight:600}}>{v}</div>
-                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l==="BMI"?"calculated from height & weight":"basal metabolic rate (Mifflin-St Jeor)"}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l==="BMI"?"Body Mass Index — weight relative to height. Doesn't distinguish muscle from fat.":"Basal Metabolic Rate — calories your body burns at rest, before any activity. Your daily calorie floor."}</div>
               </div>
             ))}
           </div>
         );
       })():null}
 
-      <SecLabel>Nutrition &amp; Supplements</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily supplements</div>
-        <div style={{fontSize:12,color:C.t2,marginBottom:10,lineHeight:1.6}}>Interactive checklist is in the <strong>Food tab</strong>. Edit your stack below.</div>
-        {supps.map((sup,i)=>{
-          const query=suppDropdowns[i];
-          const suggestions=query?SUPPLEMENT_LIST.filter(s=>s.toLowerCase().includes(query.toLowerCase())).slice(0,6):[];
-          return (
-            <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
-              <div style={{flex:2,position:"relative"}}><label style={lbl}>Name</label>
-                <input type="text" value={sup.name||""} onChange={e=>{
-                  const v=e.target.value;
-                  setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:v}:x));
-                  setSuppDropdowns(d=>({...d,[i]:v}));
-                }} onBlur={()=>setTimeout(()=>setSuppDropdowns(d=>({...d,[i]:""})),150)} style={s.input}/>
-                {suggestions.length>0&&suppDropdowns[i]&&(
-                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.sf,border:`.5px solid ${C.bd}`,borderRadius:8,maxHeight:200,overflowY:"auto",zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,.1)"}}>
-                    {suggestions.map(s=>(
-                      <div key={s} onMouseDown={()=>{
-                        setSupps(arr=>arr.map((x,j)=>j===i?{...x,name:s}:x));
-                        setSuppDropdowns(d=>({...d,[i]:""}));
-                      }} style={{padding:"6px 10px",cursor:"pointer",fontSize:13}} onMouseEnter={e=>e.target.style.background=C.s2} onMouseLeave={e=>e.target.style.background=""}>{s}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{flex:1}}><label style={lbl}>Dose</label>
-                <input type="text" value={sup.dose||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,dose:e.target.value}:x))} style={s.input}/></div>
-              <div style={{flex:2}}><label style={lbl}>Timing</label>
-                <select value={sup.timing||""} onChange={e=>setSupps(arr=>arr.map((x,j)=>j===i?{...x,timing:e.target.value}:x))} style={s.input}>
-                  <option value="">— select —</option>
-                  {SUPP_TIMING.map(t=><option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <button onClick={()=>setSupps(arr=>arr.filter((_,j)=>j!==i))} style={{...s.btn("s"),...s.btnSm}}>Remove</button>
-            </div>
-          );
-        })}
-        <div style={saveRow}>
-          <button onClick={()=>setSupps(arr=>[...arr,{name:"",dose:"",timing:""}])} style={{...s.btn("s"),...s.btnSm}}>+ Add supplement</button>
-          <button onClick={()=>persist({supplements:supps.filter(x=>x.name&&x.name.trim())}, setSavedSupps)} style={s.btn("p")}>Save</button>
-          {savedSupps&&<span style={{fontSize:12,color:C.teal}}>{savedSupps}</span>}
-        </div>
-      </Card>
-
-      {/* ── SECTION B — SETTINGS & TARGETS ───────────────────────────────── */}
-      <SecLabel>Settings &amp; Targets</SecLabel>
+      {/* ── SECTION B — GOALS & TARGETS ───────────────────────────────── */}
+      <SecLabel>Goals &amp; Targets</SecLabel>
 
       {/* Goals */}
       <Card style={{marginBottom:14}}>
@@ -2240,20 +2271,22 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
               {k:"cardio",label:"Cardio",color:C.teal,desc:"Activities that raise your heart rate — improving endurance, heart health, and energy levels.",examples:"running, cycling, swimming, hiking, elliptical, HIIT"},
             ].map(({k,label,color,desc,examples})=>(
               <div key={k} style={{marginBottom:14}}>
-                <div style={{fontWeight:600,color,fontSize:13,marginBottom:3}}>{label}</div>
-                <div style={{fontSize:11,color:C.t2,lineHeight:1.6,marginBottom:2}}>{desc}</div>
-                <div style={{fontSize:10,color:C.t3,marginBottom:6}}>Examples: {examples}</div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <input type="number" min="1" max="5" value={targets[k]??1} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||1}))} style={{...s.input,width:90}}/>
-                  <span style={{fontSize:11,color:C.t3}}>sessions/week</span>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                  <div style={{fontWeight:600,color,fontSize:14}}>{label}</div>
+                  <div style={{textAlign:"right"}}>
+                    <input type="number" min="1" max="5" value={targets[k]??1} onChange={e=>setTargets(t=>({...t,[k]:parseInt(e.target.value)||1}))} style={{...s.input,width:64,textAlign:"center",fontSize:18,fontWeight:700,padding:"6px 0"}}/>
+                    <div style={{fontSize:10,color:C.t3,marginTop:2}}>sessions per week</div>
+                  </div>
                 </div>
+                <div style={{fontSize:11,color:C.t2,lineHeight:1.6,marginBottom:2}}>{desc}</div>
+                <div style={{fontSize:10,color:C.t3}}>Examples: {examples}</div>
               </div>
             ))}
             {(()=>{
               const total=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);
               return (
                 <>
-                  <div style={{fontSize:12,color:total===5?C.teal:C.am,marginBottom:4,fontWeight:500}}>Total: {total} sessions / week · {Math.round(total*4.3)} sessions / month{total!==5?" ⚠ aim for 5 total":""}</div>
+                  <div style={{fontSize:12,color:total===5?C.teal:C.am,marginBottom:4,fontWeight:500}}>{total} sessions / week = {total*4} sessions / month{total!==5?" — aim for 5 total":""}</div>
                   <div style={{fontSize:11,color:C.t3,marginBottom:10}}>These numbers are based on your goals and longevity research. Adjust them to whatever works for your life.</div>
                   <div style={saveRow}>
                     <button disabled={total!==5||(targets.strength||0)<1||(targets.mobility||0)<1||(targets.cardio||0)<1} onClick={()=>{persist({activity_targets:targets}, setSavedTargets);setEditTargets(false);}} style={{...s.btn("p"),opacity:(total===5&&(targets.strength||0)>=1&&(targets.mobility||0)>=1&&(targets.cardio||0)>=1)?1:0.5}}>Save targets</button>
@@ -2277,47 +2310,11 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
                 </div>
               );
             })}
-            <div style={{fontSize:11,color:C.t3,marginTop:4,marginBottom:8}}>Total: {(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0)} sessions/week · {Math.round(((targets.strength||0)+(targets.mobility||0)+(targets.cardio||0))*4.3)}/month</div>
+            {(()=>{const tot=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);return <div style={{fontSize:11,color:C.t3,marginTop:4,marginBottom:8}}>{tot} sessions/week = {tot*4} sessions/month</div>;})()}
             <button onClick={()=>setEditTargets(true)} style={{...s.btn("s"),...s.btnSm}}>Edit targets</button>
           </>
         )}
       </Card>
-
-      {/* Activity mapping — only show types that need user decision */}
-      {(()=>{
-        const needsDecision = seenTypes.filter(t=>getActivityCategory(t,{})==="uncategorized"&&!mapping[t]);
-        const userOverrides = seenTypes.filter(t=>mapping[t]&&mapping[t]!==DEFAULT_ACTIVITY_MAPPING[t]);
-        if(needsDecision.length===0&&userOverrides.length===0) return null;
-        return (
-          <Card style={{marginBottom:14}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity mapping</div>
-            <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>These activity types from your Fitbit data need categorising. Everything else is auto-mapped.</div>
-            {needsDecision.map(t=>(
-              <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                <span style={{flex:1,fontSize:13,fontWeight:500}}>{t}</span>
-                <select value={mapping[t]||""} onChange={e=>{const v=e.target.value;setMapping(m=>({...m,[t]:v}));if(e.target.value)persist({activity_mapping:{...mapping,[t]:v}});}} style={{...s.input,width:170}}>
-                  <option value="">— categorise —</option>
-                  <option value="strength">Strength</option>
-                  <option value="mobility">Mobility</option>
-                  <option value="cardio">Cardio</option>
-                </select>
-              </div>
-            ))}
-            {userOverrides.length>0&&(
-              <>
-                <div style={{fontSize:11,color:C.t3,marginTop:8,marginBottom:6}}>Your overrides</div>
-                {userOverrides.map(t=>(
-                  <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6,fontSize:12}}>
-                    <span style={{flex:1,color:C.t2}}>{t}</span>
-                    <span style={{color:C.tx,fontWeight:500}}>{mapping[t]}</span>
-                    <button onClick={()=>{const m={...mapping};delete m[t];setMapping(m);persist({activity_mapping:m});}} style={{fontSize:10,background:"none",border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px 6px",cursor:"pointer",color:C.t3}}>reset</button>
-                  </div>
-                ))}
-              </>
-            )}
-          </Card>
-        );
-      })()}
 
       {/* Goal Foundations */}
       <Card style={{marginBottom:14}}>
@@ -2358,16 +2355,6 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         )}
       </Card>
 
-      <SecLabel>Workout plan</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
-        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
-        <div style={saveRow}>
-          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
-          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
-        </div>
-      </Card>
-
       {/* Health notes */}
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Health notes</div>
@@ -2378,18 +2365,51 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         </div>
       </Card>
 
-      {/* Cycle tracking */}
-      {pa.gender==="female"&&(
-        <Card style={{marginBottom:14}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:500}}>Cycle tracking</div>
-              <div style={{fontSize:11,color:C.t3}}>Show cycle phase across the app</div>
-            </div>
-            <button onClick={()=>{const v=!cycleTracking; setCycleTracking(v); persist({cycle_tracking:v});}} style={{...s.btn(cycleTracking?"p":"s"),...s.btnSm}}>{cycleTracking?"On":"Off"}</button>
-          </div>
-        </Card>
-      )}
+      <SecLabel>Workout plan</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>My plan</div>
+        <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="Describe your current workout plan…" style={{...s.input,resize:"vertical",minHeight:90,marginBottom:8}}/>
+        <div style={saveRow}>
+          <button onClick={()=>persist({workout_plan:workoutPlan}, setSavedPlan)} style={s.btn("p")}>Save plan</button>
+          {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
+        </div>
+      </Card>
+
+      {/* Activity mapping — moved here, after Workout Plan */}
+      {(()=>{
+        const needsDecision2 = seenTypes.filter(t=>getActivityCategory(t,{})==="uncategorized"&&!mapping[t]);
+        const userOverrides2 = seenTypes.filter(t=>mapping[t]&&mapping[t]!==DEFAULT_ACTIVITY_MAPPING[t]);
+        if(needsDecision2.length===0&&userOverrides2.length===0) return null;
+        return (
+          <Card style={{marginBottom:14}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity mapping</div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:10,lineHeight:1.6}}>These activity types from your Fitbit data need categorising. Everything else is auto-mapped.</div>
+            {needsDecision2.map(t=>(
+              <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{flex:1,fontSize:13,fontWeight:500}}>{t}</span>
+                <select value={mapping[t]||""} onChange={e=>{const v=e.target.value;setMapping(m=>({...m,[t]:v}));if(e.target.value)persist({activity_mapping:{...mapping,[t]:v}});}} style={{...s.input,width:170}}>
+                  <option value="">— categorise —</option>
+                  <option value="strength">Strength</option>
+                  <option value="mobility">Mobility</option>
+                  <option value="cardio">Cardio</option>
+                </select>
+              </div>
+            ))}
+            {userOverrides2.length>0&&(
+              <>
+                <div style={{fontSize:11,color:C.t3,marginTop:8,marginBottom:6}}>Your overrides</div>
+                {userOverrides2.map(t=>(
+                  <div key={t} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6,fontSize:12}}>
+                    <span style={{flex:1,color:C.t2}}>{t}</span>
+                    <span style={{color:C.tx,fontWeight:500}}>{mapping[t]}</span>
+                    <button onClick={()=>{const m={...mapping};delete m[t];setMapping(m);persist({activity_mapping:m});}} style={{fontSize:10,background:"none",border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px 6px",cursor:"pointer",color:C.t3}}>reset</button>
+                  </div>
+                ))}
+              </>
+            )}
+          </Card>
+        );
+      })()}
     </div>
   );
 }
@@ -2438,6 +2458,8 @@ function App() {
   const [syncStatus, setSyncStatus] = useState("Updated Mon 15 Jun 2026, 10:15");
   const [settKey, setSettKey] = useState(apiKey);
   const [settProt, setSettProt] = useState(100);
+  const [settTimezone, setSettTimezone] = useState("Asia/Jerusalem");
+  const [settCycle, setSettCycle] = useState(true);
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   // Keep Settings modal protein field in sync once profile loads
@@ -2643,7 +2665,19 @@ function App() {
     localStorage.setItem("jkey",settKey);
     setApiKey(settKey);
     try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey},"on_conflict=user_id");}catch(e){}
+    try{
+      await supa("POST","profiles",{uid:UID,timezone:settTimezone,cycle_tracking:settCycle},"on_conflict=uid");
+      setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle}));
+      setActiveTz(settTimezone);
+    }catch(e){}
     setShowSett(false);
+  }
+
+  async function saveSupplementsFromFood(newSupps){
+    try{
+      await supa("POST","profiles",{uid:UID,supplements:newSupps},"on_conflict=uid");
+      setProfileData(p=>({...p,supplements:newSupps}));
+    }catch(e){ console.log("Supp save error:",e.message); }
   }
 
   async function setSupp(id,val){
@@ -2700,7 +2734,7 @@ function App() {
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
           <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
-          <button onClick={()=>setShowSett(true)} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+          <button onClick={()=>{setSettTimezone(profileData?.timezone||"Asia/Jerusalem");setSettCycle(profileData?.cycle_tracking!==false);setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
       </div>
 
@@ -2709,7 +2743,7 @@ function App() {
       </div>
 
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData}/>}
@@ -2780,7 +2814,19 @@ function App() {
             <h3 style={{fontSize:16,fontWeight:600,marginBottom:16}}>Settings</h3>
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
             <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
-            <p style={{fontSize:11,color:C.t3,marginBottom:16}}>Stored locally in your browser only.</p>
+            <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Stored locally in your browser only.</p>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Timezone</label>
+            <input value={settTimezone} onChange={e=>setSettTimezone(e.target.value)} placeholder="e.g. Asia/Jerusalem" style={{...s.input,marginBottom:4}}/>
+            <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Controls all date/time calculations in the app.</p>
+            {profileData?.gender==="female"&&(
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:500}}>Cycle tracking</div>
+                  <div style={{fontSize:11,color:C.t3}}>Show cycle phase across the app</div>
+                </div>
+                <button onClick={()=>setSettCycle(v=>!v)} style={{...s.btn(settCycle?"p":"s"),...s.btnSm}}>{settCycle?"On":"Off"}</button>
+              </div>
+            )}
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowSett(false)} style={s.btn("s")}>Cancel</button>
               <button onClick={saveSett} style={s.btn("p")}>Save</button>
