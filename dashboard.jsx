@@ -91,6 +91,45 @@ function calcCycleDay(startDateStr) {
   return (diff % 28) + 1;
 }
 
+function calculateCyclePhase(lastPeriodStart, avgCycleLength=28, avgPeriodLength=5) {
+  if(!lastPeriodStart) return {phase:'unknown',cycleDay:null,nextPeriod:null};
+  const today = new Date();
+  const lastPeriod = new Date(lastPeriodStart+"T12:00:00");
+  const rawDay = Math.floor((today - lastPeriod) / (1000*60*60*24)) + 1;
+  const cl = avgCycleLength || 28;
+  const pl = avgPeriodLength || 5;
+  const dayInCycle = ((rawDay - 1) % cl) + 1;
+  const lutealStart = cl - 14;
+  const ovulatoryStart = lutealStart - 2;
+  let phase;
+  if(dayInCycle <= pl) phase='menstrual';
+  else if(dayInCycle < ovulatoryStart) phase='follicular';
+  else if(dayInCycle <= lutealStart) phase='ovulatory';
+  else phase='luteal';
+  const nextPeriod = new Date(lastPeriod);
+  nextPeriod.setDate(lastPeriod.getDate() + cl * Math.ceil(rawDay / cl));
+  return {phase, cycleDay:dayInCycle, nextPeriod:nextPeriod.toISOString().slice(0,10)};
+}
+
+async function saveCycleDates(newDate) {
+  // Fetch existing, merge, deduplicate, sort descending, keep 6 most recent
+  let existingDates = [];
+  try {
+    const existing = await supa("GET","cycle_logs",null,`uid=eq.${UID}&limit=1`);
+    existingDates = existing?.[0]?.period_start_dates || [];
+  } catch(e){}
+  const merged = [...new Set([...existingDates, newDate])]
+    .sort((a,b)=>new Date(b)-new Date(a))
+    .slice(0,6);
+  const cycleLengths = [];
+  for(let i=0;i<merged.length-1;i++){
+    cycleLengths.push(Math.round((new Date(merged[i])-new Date(merged[i+1]))/864e5));
+  }
+  const avgCycleLength = cycleLengths.length ? Math.round(cycleLengths.reduce((a,b)=>a+b,0)/cycleLengths.length) : 28;
+  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,last_period_start:merged[0]},"on_conflict=uid");
+  return {merged, avgCycleLength};
+}
+
 async function supa(method, table, body, query) {
   let url, hdrs, fetchOpts;
   if (method === "GET") {
@@ -218,12 +257,12 @@ function Spinner() {
   return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
 }
 
-function CyclePhaseMetric({cycleDates}) {
-  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
-  if(!conf.length) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
-  const cd = calcCycleDay(conf[0].d);
-  const ph = cd<=5?"Menstrual":cd<=13?"Follicular":cd<=16?"Ovulatory":"Luteal";
-  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {cd} of cycle</div></div>;
+function CyclePhaseMetric({cycleDates, cycleLog}) {
+  const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
+  if(!lastPeriodStart) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
+  const {phase,cycleDay} = calculateCyclePhase(lastPeriodStart, cycleLog?.avg_cycle_length||28);
+  const ph = phase?phase.charAt(0).toUpperCase()+phase.slice(1):"—";
+  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {cycleDay||"—"} of cycle</div></div>;
 }
 
 // ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
@@ -951,7 +990,7 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   return goalsCtx + actTargCtx + suppsCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
 }
 
-function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
+function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
@@ -999,9 +1038,9 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
       const lastSleep = (fitbitData.sleep||[]).find(s=>s.date===todayKey)||null;
       const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
       const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
-      const confDates = (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+      const _lps = cycleLog?.last_period_start || (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
       let cyclePhaseStr = null;
-      if(confDates.length){const cd=calcCycleDay(confDates[0].d);const ph=cd<=5?'menstrual':cd<=13?'follicular':cd<=16?'ovulatory':'luteal';cyclePhaseStr=`Day ${cd}/28, ${ph} phase`;}
+      if(_lps){const {phase,cycleDay}=calculateCyclePhase(_lps,cycleLog?.avg_cycle_length||28);cyclePhaseStr=`Day ${cycleDay}/${cycleLog?.avg_cycle_length||28}, ${phase} phase`;}
       const prot = Math.round((allFood[todayKey]||[]).reduce((s,e)=>s+(e.p||0),0));
       const todayData = {
         sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:'Sleep: not tracked last night',
@@ -1094,11 +1133,11 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
     const isEvening = hourIL >= 19;
     const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
-    // Cycle phase
-    const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+    // Cycle phase — use cycleLog for accuracy
+    const _lpsAI = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
     let cyclePhase = "cycle phase unknown";
     let cyclePhaseName = "unknown";
-    if(confDates.length){const cd=calcCycleDay(confDates[0].d);cyclePhaseName=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cyclePhase=`cycle day ${cd}/28, ${cyclePhaseName} phase`;}
+    if(_lpsAI){const {phase,cycleDay}=calculateCyclePhase(_lpsAI,cycleLog?.avg_cycle_length||28);cyclePhaseName=phase;cyclePhase=`cycle day ${cycleDay}/${cycleLog?.avg_cycle_length||28}, ${phase} phase`;}
     // Today nutrition
     const todayFoodKey = todayKey; // already timezone-aware (en-CA local)
     const tf = allFood[todayFoodKey]||[];
@@ -1214,12 +1253,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         );
 
         // Luteal phase detection
-        const confDates = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+        const _lpsR = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
         let isLuteal = false;
-        if(confDates.length){
-          const cd = calcCycleDay(confDates[0].d);
-          isLuteal = cd>=15 && cd<=28;
-        }
+        if(_lpsR){const {phase}=calculateCyclePhase(_lpsR,cycleLog?.avg_cycle_length||28);isLuteal=phase==="luteal";}
 
         // "Yesterday" = calendar date of last sleep's date minus 1 day
         const yDate = lastSleep ? (()=>{
@@ -1387,7 +1423,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <StepsMetric fitbitData={fitbitData} profileData={profileData}/>
         <SleepTileMetric fitbitData={fitbitData}/>
         <Metric label="Protein today" value={<span style={{color:C.am}}>{Math.round(tp)}g</span>} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={C.am}/>
-        <CyclePhaseMetric cycleDates={cycleDates}/>
+        <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
       </div>
 
       {/* AI TODAY */}
@@ -2064,76 +2100,119 @@ Input: ${txtInput}`;
 }
 
 // ── CYCLE TAB ─────────────────────────────────────────────────────────────
-function TabCycle({cycleDates, setCycleDates}) {
+function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [dateInput, setDateInput] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const confirmed = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  const avgCycleLen = cycleLog?.avg_cycle_length || 28;
+  const lastPeriodStart = cycleLog?.last_period_start || null;
+  const periodDates = cycleLog?.period_start_dates || [];
+  const cycleCount = periodDates.length;
 
-  function cycleInfo(){
-    if(!confirmed.length) return null;
-    const day=calcCycleDay(confirmed[0].d);
-    const phase=day<=5?"menstrual":day<=13?"follicular":day<=16?"ovulatory":"luteal";
-    return {day,phase};
-  }
+  const info = lastPeriodStart ? calculateCyclePhase(lastPeriodStart, avgCycleLen) : null;
 
-  const info=cycleInfo();
+  const lutealS = avgCycleLen - 14;
   const PHASES={
-    menstrual:{n:"Menstrual",days:"Days 1-5",c:C.red,bg:C.rl},
-    follicular:{n:"Follicular",days:"Days 6-13",c:C.teal,bg:C.tl},
-    ovulatory:{n:"Ovulatory",days:"Days 14-16",c:C.am,bg:C.al},
-    luteal:{n:"Luteal",days:"Days 17-28",c:C.pu,bg:C.pl},
+    menstrual:{n:"Menstrual",days:"Days 1–5",c:C.red,bg:C.rl},
+    follicular:{n:"Follicular",days:`Days 6–${lutealS-3}`,c:C.teal,bg:C.tl},
+    ovulatory:{n:"Ovulatory",days:`Days ${lutealS-2}–${lutealS}`,c:C.am,bg:C.al},
+    luteal:{n:"Luteal",days:`Days ${lutealS+1}–${avgCycleLen}`,c:C.pu,bg:C.pl},
   };
+  const phase = info?.phase ? PHASES[info.phase] : null;
 
   async function addDate(){
-    if(!dateInput) return;
-    if(cycleDates.find(x=>x.d===dateInput)) return;
-    const newEntry={d:dateInput,ok:true,id:Date.now()};
+    if(!dateInput||saving) return;
+    setSaving(true);
     try {
-      const rows=await supa("POST","cycle_dates",{user_id:UID,date:dateInput,confirmed:true});
-      if(rows&&rows[0]) newEntry.id=rows[0].id;
-      console.log("Cycle saved to Supabase:",dateInput);
-      localStorage.setItem("jcycle_backup",JSON.stringify([...cycleDates,newEntry]));
+      const {merged, avgCycleLength} = await saveCycleDates(dateInput);
+      const newLog = {uid:UID, period_start_dates:merged, avg_cycle_length:avgCycleLength, last_period_start:merged[0]};
+      const newDates = merged.map((d,i)=>({id:i,d,ok:true}));
+      setCycleLog(newLog);
+      setCycleDates(newDates);
+      localStorage.setItem("jcycle_log",JSON.stringify(newLog));
+      localStorage.setItem("jcycle_backup",JSON.stringify(newDates));
+      setDateInput("");
     } catch(e){
       console.error("Cycle save error:",e.message);
-      // Still save locally even if Supabase fails
-      localStorage.setItem("jcycle_backup",JSON.stringify([...cycleDates,newEntry]));
+      // Optimistic local update
+      const newDates=[...cycleDates,{d:dateInput,ok:true,id:Date.now()}];
+      setCycleDates(newDates);
+      localStorage.setItem("jcycle_backup",JSON.stringify(newDates));
+      setDateInput("");
     }
-    setCycleDates(prev=>[...prev,newEntry]);
-    setDateInput("");
+    setSaving(false);
   }
 
-  async function delDate(id){
-    setCycleDates(prev=>prev.filter(x=>x.id!==id));
-    try{await supa("DELETE","cycle_dates",null,"id=eq."+id);}catch(e){}
+  async function delDate(dateStr){
+    const newDates = periodDates.filter(d=>d!==dateStr);
+    if(newDates.length===0){
+      const empty={uid:UID,period_start_dates:[],avg_cycle_length:28,last_period_start:null};
+      setCycleLog(empty);
+      setCycleDates([]);
+      localStorage.removeItem("jcycle_log");
+      localStorage.removeItem("jcycle_backup");
+      try{await supa("POST","cycle_logs",empty,"on_conflict=uid");}catch(e){}
+      return;
+    }
+    const cycleLens=[]; for(let i=0;i<newDates.length-1;i++) cycleLens.push(Math.round((new Date(newDates[i])-new Date(newDates[i+1]))/864e5));
+    const avg=cycleLens.length?Math.round(cycleLens.reduce((a,b)=>a+b,0)/cycleLens.length):28;
+    const newLog={uid:UID,period_start_dates:newDates,avg_cycle_length:avg,last_period_start:newDates[0]};
+    setCycleLog(newLog);
+    setCycleDates(newDates.map((d,i)=>({id:i,d,ok:true})));
+    localStorage.setItem("jcycle_log",JSON.stringify(newLog));
+    try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
   }
 
-  const phase=info?PHASES[info.phase]:null;
+  const fmtDate = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) : "—";
 
   return (
     <div>
+      {/* Current phase hero */}
       <div style={{background:phase?phase.bg:C.pil,borderRadius:12,padding:"16px 18px",border:`.5px solid ${phase?phase.c+"33":C.pi+"33"}`,marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Current phase</div>
         <div style={{fontSize:18,fontWeight:600,color:phase?phase.c:C.pi,marginBottom:4}}>
           {phase?phase.n+" — "+phase.days:"Add your cycle dates to get started"}
         </div>
-        <div style={{fontSize:12,color:C.t2}}>{phase?"Day "+info.day+" of cycle":"Enter your last period start date below."}</div>
+        <div style={{fontSize:12,color:C.t2}}>{info?.cycleDay?"Day "+info.cycleDay+" of cycle":"Enter your last period start date below."}</div>
       </div>
+
+      {/* Calculated stats */}
+      {lastPeriodStart&&(
+        <Card style={{marginBottom:14}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Cycle stats</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 16px"}}>
+            {[
+              ["Last period started",fmtDate(lastPeriodStart)],
+              ["Current phase",info?.phase?info.phase.charAt(0).toUpperCase()+info.phase.slice(1):"—"],
+              ["Cycle day","Day "+(info?.cycleDay||"—")],
+              ["Avg cycle length",avgCycleLen+" days"+(cycleCount>=2?" (from "+Math.max(1,cycleCount-1)+" cycle"+(cycleCount>2?"s":"")+")" :"")],
+              ["Next period est.",fmtDate(info?.nextPeriod)],
+            ].map(([label,val])=>(
+              <div key={label}>
+                <div style={{fontSize:10,color:C.t3,marginBottom:2}}>{label}</div>
+                <div style={{fontSize:13,fontWeight:500,color:C.tx}}>{val}</div>
+              </div>
+            ))}
+          </div>
+          {cycleCount<3&&<div style={{marginTop:10,fontSize:11,color:C.am}}>Add more cycle dates for a more accurate prediction — need at least 3.</div>}
+        </Card>
+      )}
 
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
-        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date as it happens. The app calculates your current phase from your most recent confirmed date.</p>
+        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date. The app calculates phase from your most recent date and personalises the cycle length from your history.</p>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
           <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
-          <button onClick={addDate} style={{...s.btn("p"),...s.btnSm}}>Add</button>
+          <button onClick={addDate} disabled={saving} style={{...s.btn("p"),...s.btnSm}}>{saving?"Saving...":"Add"}</button>
         </div>
-        {confirmed.length===0
+        {periodDates.length===0
           ? <div style={{textAlign:"center",padding:"12px 0",color:C.t3,fontSize:13}}><strong style={{display:"block",color:C.t2}}>No dates added yet</strong>Add your most recent period start date above.</div>
-          : confirmed.map((e,i)=>(
-            <div key={e.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:i<confirmed.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
-              <strong>{new Date(e.d).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"})}</strong>
+          : periodDates.map((d,i)=>(
+            <div key={d} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:i<periodDates.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
+              <strong>{fmtDate(d)}</strong>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Confirmed</span>
-                <button onClick={()=>delDate(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
+                {i===0&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Most recent</span>}
+                <button onClick={()=>delDate(d)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
               </div>
             </div>
           ))
@@ -2994,15 +3073,14 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
   );
 }
 
-function CycleHeaderPill({cycleDates, onPress}) {
-  const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+function CycleHeaderPill({cycleDates, cycleLog, onPress}) {
+  const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
   let label="cycle", bg=C.pil, col=C.pi;
-  if(conf.length){
-    const cd=calcCycleDay(conf[0].d);
-    const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";
-    label=`Day ${cd} · ${ph}`;
-    bg=cd<=5?C.rl:cd<=13?C.tl:cd<=16?C.al:C.pl;
-    col=cd<=5?C.red:cd<=13?C.teal:cd<=16?C.am:C.pu;
+  if(lastPeriodStart){
+    const {phase,cycleDay}=calculateCyclePhase(lastPeriodStart,cycleLog?.avg_cycle_length||28);
+    label=`Day ${cycleDay} · ${phase}`;
+    bg=phase==="menstrual"?C.rl:phase==="follicular"?C.tl:phase==="ovulatory"?C.al:C.pl;
+    col=phase==="menstrual"?C.red:phase==="follicular"?C.teal:phase==="ovulatory"?C.am:C.pu;
   }
   return <button onClick={onPress} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:col,border:"none",cursor:"pointer",fontFamily:"inherit"}}>{label}</button>;
 }
@@ -3017,6 +3095,9 @@ export default function App() {
 
   const [cycleDates, setCycleDates] = useState(()=>{
     try{const b=localStorage.getItem("jcycle_backup");return b?JSON.parse(b):[]}catch{return [];}
+  });
+  const [cycleLog, setCycleLog] = useState(()=>{
+    try{const b=localStorage.getItem("jcycle_log");return b?JSON.parse(b):null;}catch{return null;}
   });
   const [suppState, setSuppState] = useState({});
   const [fitbitData, setFitbitData] = useState(FITBIT_SEED); // starts with seed, Supabase overwrites
@@ -3157,12 +3238,13 @@ export default function App() {
       }
       // Load data
       try{
-        const [food,log,cyc,supp,fitbit]=await Promise.all([
+        const [food,log,cyc,supp,fitbit,cycLog]=await Promise.all([
           supa("GET","food_log",null,"user_id=eq."+UID+"&order=created_at.asc&select=*"),
           supa("GET","journal_entries",null,"user_id=eq."+UID+"&order=created_at.desc&limit=100"),
           supa("GET","cycle_dates",null,"user_id=eq."+UID+"&order=date.asc"),
           supa("GET","supplement_log",null,"user_id=eq."+UID+"&log_date=eq."+tkey()),
           supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
+          supa("GET","cycle_logs",null,"uid=eq."+UID+"&limit=1").catch(()=>null),
         ]);
         // Also load legacy "julia" food entries (pre-UID-migration)
         let legacyFood=[];
@@ -3176,18 +3258,38 @@ export default function App() {
         }
         const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
         setLogEntries(logData);
-        // Keep localStorage in sync as backup
         localStorage.setItem("jlog_backup",JSON.stringify(logData));
-        const cycleParsed=(cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed}));
-        console.log("Cycle from Supabase:",cycleParsed.length,"entries");
-        if(cycleParsed.length>0){
-          setCycleDates(cycleParsed);
-          localStorage.setItem("jcycle_backup",JSON.stringify(cycleParsed));
-        }
-        // Always try localStorage backup as safety net
-        if(cycleParsed.length===0){
-          const cb=localStorage.getItem("jcycle_backup");
-          if(cb){try{const parsed=JSON.parse(cb);if(parsed.length>0){setCycleDates(parsed);console.log("Cycle from localStorage backup:",parsed.length,"entries");}}catch(ex){}}
+
+        // Load cycle data — prefer cycle_logs (merge-based) over cycle_dates (row-based)
+        const cycLogRecord = cycLog?.[0] || null;
+        if(cycLogRecord?.period_start_dates?.length) {
+          // cycle_logs is authoritative
+          const dates = cycLogRecord.period_start_dates;
+          const parsed = dates.map((d,i)=>({id:i,d,ok:true}));
+          setCycleDates(parsed);
+          setCycleLog(cycLogRecord);
+          localStorage.setItem("jcycle_backup",JSON.stringify(parsed));
+          localStorage.setItem("jcycle_log",JSON.stringify(cycLogRecord));
+        } else {
+          // Fall back to cycle_dates rows — and migrate them into cycle_logs
+          const cycleParsed=(cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed}));
+          if(cycleParsed.length>0){
+            setCycleDates(cycleParsed);
+            localStorage.setItem("jcycle_backup",JSON.stringify(cycleParsed));
+            // Migrate to cycle_logs silently
+            const dates=cycleParsed.filter(x=>x.ok).map(x=>x.d).sort((a,b)=>new Date(b)-new Date(a)).slice(0,6);
+            if(dates.length>0){
+              const cycleLens=[]; for(let i=0;i<dates.length-1;i++) cycleLens.push(Math.round((new Date(dates[i])-new Date(dates[i+1]))/864e5));
+              const avg=cycleLens.length?Math.round(cycleLens.reduce((a,b)=>a+b,0)/cycleLens.length):28;
+              const migrated={uid:UID,period_start_dates:dates,avg_cycle_length:avg,last_period_start:dates[0]};
+              supa("POST","cycle_logs",migrated,"on_conflict=uid").then(()=>{setCycleLog(migrated);localStorage.setItem("jcycle_log",JSON.stringify(migrated));}).catch(()=>{});
+            }
+          } else {
+            const cb=localStorage.getItem("jcycle_backup");
+            if(cb){try{const parsed=JSON.parse(cb);if(parsed.length>0)setCycleDates(parsed);}catch(ex){}}
+            const cl=localStorage.getItem("jcycle_log");
+            if(cl){try{setCycleLog(JSON.parse(cl));}catch(ex){}}
+          }
         }
         // Only load supplements for TODAY - reset daily
         const todayKey2=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -3343,9 +3445,9 @@ export default function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
-      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood}/>}
-      {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates}/>}
+      {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey}/>}
 
