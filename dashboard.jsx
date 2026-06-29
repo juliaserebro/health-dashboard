@@ -111,13 +111,11 @@ function calculateCyclePhase(lastPeriodStart, avgCycleLength=28, avgPeriodLength
   return {phase, cycleDay:dayInCycle, nextPeriod:nextPeriod.toISOString().slice(0,10)};
 }
 
-async function saveCycleDates(newDate) {
-  // Fetch existing, merge, deduplicate, sort descending, keep 6 most recent
-  let existingDates = [];
-  try {
-    const existing = await supa("GET","cycle_logs",null,`uid=eq.${UID}&limit=1`);
-    existingDates = existing?.[0]?.period_start_dates || [];
-  } catch(e){}
+async function saveCycleDates(newDate, avgPeriodLen=5) {
+  let existing = null;
+  try { existing = await supa("GET","cycle_logs",null,`uid=eq.${UID}&limit=1`); } catch(e){}
+  const existingDates = existing?.[0]?.period_start_dates || [];
+  const existingPeriodLen = existing?.[0]?.avg_period_length || avgPeriodLen;
   const merged = [...new Set([...existingDates, newDate])]
     .sort((a,b)=>new Date(b)-new Date(a))
     .slice(0,6);
@@ -126,7 +124,7 @@ async function saveCycleDates(newDate) {
     cycleLengths.push(Math.round((new Date(merged[i])-new Date(merged[i+1]))/864e5));
   }
   const avgCycleLength = cycleLengths.length ? Math.round(cycleLengths.reduce((a,b)=>a+b,0)/cycleLengths.length) : 28;
-  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,last_period_start:merged[0]},"on_conflict=uid");
+  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
   return {merged, avgCycleLength};
 }
 
@@ -2103,41 +2101,62 @@ Input: ${txtInput}`;
 function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [dateInput, setDateInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [periodLenInput, setPeriodLenInput] = useState("");
+  const [savingPeriodLen, setSavingPeriodLen] = useState(false);
 
-  const avgCycleLen = cycleLog?.avg_cycle_length || 28;
-  const lastPeriodStart = cycleLog?.last_period_start || null;
-  const periodDates = cycleLog?.period_start_dates || [];
+  // Show dates from cycle_logs if available, else fall back to legacy cycle_dates rows
+  const periodDates = cycleLog?.period_start_dates?.length
+    ? cycleLog.period_start_dates
+    : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
+
+  const avgPeriodLen = cycleLog?.avg_period_length || 5;
+  const lastPeriodStart = cycleLog?.last_period_start || periodDates[0] || null;
   const cycleCount = periodDates.length;
 
-  const info = lastPeriodStart ? calculateCyclePhase(lastPeriodStart, avgCycleLen) : null;
+  // Avg cycle length: calculated from gaps between dates
+  const calcAvgFromDates = (dates) => {
+    const lens=[];
+    for(let i=0;i<dates.length-1;i++) lens.push(Math.round((new Date(dates[i])-new Date(dates[i+1]))/864e5));
+    return lens.length ? Math.round(lens.reduce((a,b)=>a+b,0)/lens.length) : null;
+  };
+  const calculatedAvgCycle = calcAvgFromDates(periodDates);
+  const avgCycleLen = cycleLog?.avg_cycle_length || calculatedAvgCycle || 28;
+
+  const info = lastPeriodStart ? calculateCyclePhase(lastPeriodStart, avgCycleLen, avgPeriodLen) : null;
 
   const lutealS = avgCycleLen - 14;
   const PHASES={
-    menstrual:{n:"Menstrual",days:"Days 1–5",c:C.red,bg:C.rl},
-    follicular:{n:"Follicular",days:`Days 6–${lutealS-3}`,c:C.teal,bg:C.tl},
+    menstrual:{n:"Menstrual",days:`Days 1–${avgPeriodLen}`,c:C.red,bg:C.rl},
+    follicular:{n:"Follicular",days:`Days ${avgPeriodLen+1}–${lutealS-3}`,c:C.teal,bg:C.tl},
     ovulatory:{n:"Ovulatory",days:`Days ${lutealS-2}–${lutealS}`,c:C.am,bg:C.al},
     luteal:{n:"Luteal",days:`Days ${lutealS+1}–${avgCycleLen}`,c:C.pu,bg:C.pl},
   };
   const phase = info?.phase ? PHASES[info.phase] : null;
 
+  function buildLog(dates, overridePeriodLen) {
+    const lens=[];
+    for(let i=0;i<dates.length-1;i++) lens.push(Math.round((new Date(dates[i])-new Date(dates[i+1]))/864e5));
+    const avg=lens.length?Math.round(lens.reduce((a,b)=>a+b,0)/lens.length):28;
+    return {uid:UID,period_start_dates:dates,avg_cycle_length:avg,avg_period_length:overridePeriodLen||avgPeriodLen,last_period_start:dates[0]};
+  }
+
   async function addDate(){
     if(!dateInput||saving) return;
     setSaving(true);
     try {
-      const {merged, avgCycleLength} = await saveCycleDates(dateInput);
-      const newLog = {uid:UID, period_start_dates:merged, avg_cycle_length:avgCycleLength, last_period_start:merged[0]};
-      const newDates = merged.map((d,i)=>({id:i,d,ok:true}));
+      const {merged, avgCycleLength} = await saveCycleDates(dateInput, avgPeriodLen);
+      const newLog = {uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:avgPeriodLen,last_period_start:merged[0]};
       setCycleLog(newLog);
-      setCycleDates(newDates);
+      setCycleDates(merged.map((d,i)=>({id:i,d,ok:true})));
       localStorage.setItem("jcycle_log",JSON.stringify(newLog));
-      localStorage.setItem("jcycle_backup",JSON.stringify(newDates));
       setDateInput("");
     } catch(e){
       console.error("Cycle save error:",e.message);
-      // Optimistic local update
-      const newDates=[...cycleDates,{d:dateInput,ok:true,id:Date.now()}];
-      setCycleDates(newDates);
-      localStorage.setItem("jcycle_backup",JSON.stringify(newDates));
+      const sorted=[dateInput,...periodDates].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>new Date(b)-new Date(a)).slice(0,6);
+      const newLog=buildLog(sorted, avgPeriodLen);
+      setCycleLog(newLog);
+      setCycleDates(sorted.map((d,i)=>({id:i,d,ok:true})));
+      localStorage.setItem("jcycle_log",JSON.stringify(newLog));
       setDateInput("");
     }
     setSaving(false);
@@ -2146,21 +2165,30 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   async function delDate(dateStr){
     const newDates = periodDates.filter(d=>d!==dateStr);
     if(newDates.length===0){
-      const empty={uid:UID,period_start_dates:[],avg_cycle_length:28,last_period_start:null};
+      const empty={uid:UID,period_start_dates:[],avg_cycle_length:28,avg_period_length:avgPeriodLen,last_period_start:null};
       setCycleLog(empty);
       setCycleDates([]);
       localStorage.removeItem("jcycle_log");
-      localStorage.removeItem("jcycle_backup");
       try{await supa("POST","cycle_logs",empty,"on_conflict=uid");}catch(e){}
       return;
     }
-    const cycleLens=[]; for(let i=0;i<newDates.length-1;i++) cycleLens.push(Math.round((new Date(newDates[i])-new Date(newDates[i+1]))/864e5));
-    const avg=cycleLens.length?Math.round(cycleLens.reduce((a,b)=>a+b,0)/cycleLens.length):28;
-    const newLog={uid:UID,period_start_dates:newDates,avg_cycle_length:avg,last_period_start:newDates[0]};
+    const newLog=buildLog(newDates, avgPeriodLen);
     setCycleLog(newLog);
     setCycleDates(newDates.map((d,i)=>({id:i,d,ok:true})));
     localStorage.setItem("jcycle_log",JSON.stringify(newLog));
     try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
+  }
+
+  async function savePeriodLen(){
+    const v=parseInt(periodLenInput,10);
+    if(!v||v<1||v>14) return;
+    setSavingPeriodLen(true);
+    const newLog={...buildLog(periodDates,v),avg_period_length:v};
+    setCycleLog(newLog);
+    localStorage.setItem("jcycle_log",JSON.stringify(newLog));
+    try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
+    setPeriodLenInput("");
+    setSavingPeriodLen(false);
   }
 
   const fmtDate = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) : "—";
@@ -2180,27 +2208,41 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       {lastPeriodStart&&(
         <Card style={{marginBottom:14}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Cycle stats</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 16px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px 16px"}}>
             {[
               ["Last period started",fmtDate(lastPeriodStart)],
               ["Current phase",info?.phase?info.phase.charAt(0).toUpperCase()+info.phase.slice(1):"—"],
               ["Cycle day","Day "+(info?.cycleDay||"—")],
-              ["Avg cycle length",avgCycleLen+" days"+(cycleCount>=2?" (from "+Math.max(1,cycleCount-1)+" cycle"+(cycleCount>2?"s":"")+")" :"")],
+              ["Avg cycle length",calculatedAvgCycle
+                ? calculatedAvgCycle+" days (calculated from "+(cycleCount-1)+" gap"+(cycleCount>2?"s":"")+")"
+                : "28 days (default — add more dates)"],
+              ["Avg period length",avgPeriodLen+" days"],
               ["Next period est.",fmtDate(info?.nextPeriod)],
             ].map(([label,val])=>(
               <div key={label}>
                 <div style={{fontSize:10,color:C.t3,marginBottom:2}}>{label}</div>
-                <div style={{fontSize:13,fontWeight:500,color:C.tx}}>{val}</div>
+                <div style={{fontSize:12,fontWeight:500,color:C.tx}}>{val}</div>
               </div>
             ))}
           </div>
-          {cycleCount<3&&<div style={{marginTop:10,fontSize:11,color:C.am}}>Add more cycle dates for a more accurate prediction — need at least 3.</div>}
+          {cycleCount<3&&<div style={{marginTop:10,fontSize:11,color:C.am}}>Add at least 3 period dates for an accurate cycle length average.</div>}
         </Card>
       )}
 
+      {/* Period length input */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Average period length</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:10}}>How many days does your period typically last? Currently set to <strong>{avgPeriodLen} days</strong>.</div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input type="number" min="1" max="14" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}}/>
+          <span style={{fontSize:12,color:C.t2}}>days</span>
+          <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),...s.btnSm}}>{savingPeriodLen?"Saving...":"Save"}</button>
+        </div>
+      </Card>
+
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
-        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date. The app calculates phase from your most recent date and personalises the cycle length from your history.</p>
+        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date. Average cycle length is calculated automatically from the gaps between dates.</p>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
           <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
           <button onClick={addDate} disabled={saving} style={{...s.btn("p"),...s.btnSm}}>{saving?"Saving...":"Add"}</button>
