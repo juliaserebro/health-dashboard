@@ -76,7 +76,7 @@ function getActivityCategory(activityType, userMapping) {
 
 // Active timezone — set from the loaded profile, falls back to Asia/Jerusalem.
 // Used by the many standalone metric components that compute Israel-local dates.
-let ACTIVE_TZ = "Asia/Jerusalem";
+let ACTIVE_TZ = "Asia/Jerusalem"; // overwritten on profile load via setActiveTz()
 function setActiveTz(tz){ if(tz) ACTIVE_TZ = tz; }
 function getTz(){ return ACTIVE_TZ || "Asia/Jerusalem"; }
 
@@ -275,7 +275,7 @@ function ProteinAvgMetric({allFood, protTgt}) {
 
 function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=false}) {
   const now=new Date();
-  const month=now.toLocaleDateString("en-CA",{timeZone:profileData?.timezone||"Asia/Jerusalem"}).slice(0,7); // "2026-06"
+  const month=now.toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7); // "2026-06"
   const stepTarget=profileData?.step_target||8000;
   // Active days = step target+ steps OR workout
   const monthSteps=(fitbitData.steps||[]).filter(s=>s.date.startsWith(month));
@@ -375,7 +375,7 @@ function SleepTileMetric({fitbitData}) {
 }
 
 function StepsMetric({fitbitData, profileData}) {
-  const today = new Date().toLocaleDateString("en-CA",{timeZone:profileData?.timezone||"Asia/Jerusalem"});
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
   const todayRec = (fitbitData.steps||[]).find(s=>s.date===today);
   const steps = todayRec ? todayRec.steps : 0;
   const sub = steps >= (profileData?.step_target||8000) ? "active day ✓" : steps > 0 ? "keep going" : "no data yet";
@@ -760,7 +760,7 @@ CRITICAL RULES — follow these without exception:
 1. OBSERVE BEFORE CONCLUDING. Never draw a causal conclusion from fewer than 3 data points. Say "we noticed" not "this is because."
 2. TENTATIVE LANGUAGE ALWAYS. Use: "it might be," "in some people," "we've noticed," "this could be connected to." Never use: "you slept badly because," "this is causing."
 3. MISSING DATA IS NOT BEHAVIOR. If food hasn't been logged, never assume the person wasn't hungry.
-4. NEVER REFERENCE SPECIFIC MUSCLE GROUPS FOR GYM SESSIONS. Fitbit cannot see inside a strength session. Frame around goals and energy.
+4. STRENGTH SESSION RULE: Never reference specific muscle groups or body parts (glutes, legs, upper body, lower body, back, chest, arms, core) when coaching around gym or strength sessions. Fitbit cannot see inside a workout. Frame all strength coaching around goals, energy, and readiness only. Example — WRONG: "focus on your lower body today". CORRECT: "your recovery metrics support a strong training session today".
 5. ANOMALY VS PATTERN. A single outlier gets one curious question. A pattern (3+ occurrences) gets a tentative observation.
 6. NEVER GUILT. Never frame missed workouts, late meals, or bad nights as failures. Everything is information and opportunity.
 7. ONE SUGGESTION PER INSIGHT. Every observation leads to one specific, actionable suggestion. Not three. One.
@@ -1006,7 +1006,8 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   const goalsCtx = (profileData?.goals||[]).length>0 ? '\nUSER GOALS:\n'+(profileData.goals.map(g=>'- '+g.label+': '+g.definition+(g.target_value?' (target: '+g.target_value+' '+(g.target_unit||'')+')':'')).join('\n')) : '';
   const actTargCtx = profileData?.activity_targets ? `\nACTIVITY TARGETS: Strength ${profileData.activity_targets.strength}x/week, Mobility ${profileData.activity_targets.mobility||2}x/week, Cardio ${profileData.activity_targets.cardio}x/week` : '';
   const suppsCtx = (profileData?.supplements||[]).filter(s=>s.name).length>0 ? '\nSUPPLEMENTS: '+(profileData.supplements.filter(s=>s.name).map(s=>`${s.name} ${s.dose||''} ${s.timing?'('+s.timing+')':''}`).join(', ')) : '';
-  return goalsCtx + actTargCtx + suppsCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left glute pain (physio pending). Goals: (1)build glute/leg muscle (2)upper body strength baseline~5 push-ups (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+  // STRENGTH SESSION RULE applied here: goals described without body-part framing
+  return goalsCtx + actTargCtx + suppsCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
 }
 
 function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
@@ -1072,7 +1073,11 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const recentSleep=(fitbitData.sleep||[]).filter(s=>last14Keys.includes(s.date));
       const avgSleep=recentSleep.length?(recentSleep.reduce((s,r)=>s+r.total,0)/recentSleep.length/60).toFixed(1)+"h":"insufficient data";
       const pendingFeedback=(profileData?.coach_suggestion_log||[]).filter(l=>{if(!l.date)return false;return(new Date()-new Date(l.date))/864e5<=7&&l.followed===null;});
-      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback};
+      // Days since last workout (for micro workout suggestion)
+      const sortedWorkoutDates=[...(fitbitData.workouts||[])].map(w=>w.date).sort((a,b)=>b.localeCompare(a));
+      const lastWorkoutDate=sortedWorkoutDates[0]||null;
+      const daysSinceLastWorkout=lastWorkoutDate?Math.floor((new Date()-new Date(lastWorkoutDate+"T12:00:00"))/864e5):99;
+      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback,daysSinceLastWorkout};
       const hour=parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
       const dow=new Date(todayKey+"T12:00:00").getDay();
       const isWeekly=dow===0&&hour>=18;
@@ -1094,7 +1099,8 @@ Return ONLY valid JSON, nothing else:
   "headline": "1-2 sentences. The big picture today based on your overall_signal. Never mention subsection-specific topics (recovery detail, tonight plan, nutrition) — those go in their own fields.",
   "recovery": "1 sentence. Supports the overall_signal. Goes deeper on recovery — HRV trend, training load detail, or readiness nuance NOT in headline. Does not contradict headline.",
   "tonight": "1 sentence. Supports the overall_signal. One specific suggestion for tonight.",
-  "nutrition": "1 sentence. Supports the overall_signal. Based ONLY on actual food logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If overall_signal is recover, nutrition supports recovery. If push, nutrition supports performance. If protein target is close to met, acknowledge that."
+  "nutrition": "1 sentence. Supports the overall_signal. Based ONLY on actual food logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If overall_signal is recover, nutrition supports recovery. If push, nutrition supports performance. If protein target is close to met, acknowledge that.",
+  "micro_workout": ${daysSinceLastWorkout>=5 ? `"It has been ${daysSinceLastWorkout} days since the last logged session. Include 2-3 simple bodyweight exercises as a micro-session. Keep the tone light — takes 5 minutes, keeps the streak alive. Example: 3 sets of 10 push-ups, 15 squats, 30-second plank. Use actual moves, not placeholders. Never guilt-based. Return as a single string with exercises separated by · (middle dot)."` : 'null'}
 }
 
 Rules:
@@ -1102,7 +1108,9 @@ Rules:
 - No section contradicts any other section
 - No section repeats content from another section
 - All language warm, tentative, non-guilt
-- Never suggest a food already eaten today`;
+- Never suggest a food already eaten today
+- micro_workout must be null if daysSinceLastWorkout < 5
+- Never mention specific muscle groups or body parts in any field`;
       const raw = await callCoachAI(userMsg, systemPrompt);
       const clean = raw.replace(/```json|```/g,"").trim();
       const m = clean.match(/\{[\s\S]*\}/);
@@ -1233,7 +1241,7 @@ Return plain text only — no JSON, no headers, no bullet points. Just the parag
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
     const hourIL = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
-    const isEvening = hourIL >= 19;
+    const isEvening = hourIL >= 21; // night mode at 9pm, not 7pm
     const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
     // Cycle phase — use cycleLog for accuracy
@@ -1544,6 +1552,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               {key:"recovery", label:"💪 Recovery"},
               {key:"tonight",  label:"🌙 Tonight"},
               {key:"nutrition",label:"🥗 Nutrition"},
+              ...(coachContent?.micro_workout?[{key:"micro_workout",label:"⚡ 5-min move"}]:[]),
             ];
             if(!coachContent&&!coachLoading&&!apiKey) return <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>;
             return (
@@ -2042,13 +2051,18 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
   const [mealDate, setMealDate] = useState(tkey());
-  const [mealTime, setMealTime] = useState(new Date().toTimeString().slice(0,5));
+  const [eatenTime, setEatenTime] = useState(new Date().toTimeString().slice(0,5));
   const [analysing, setAnalysing] = useState(false);
   const [aiMsg, setAiMsg] = useState("");
   const [editIdx, setEditIdx] = useState(null);
   const [editEntry, setEditEntry] = useState({});
 
-  const food = allFood[foodDate]||[];
+  // Sort by eaten_time (when they ate it), falling back to logged time
+  const food = [...(allFood[foodDate]||[])].sort((a,b)=>{
+    const ta = a.eaten_time || a.time || "";
+    const tb = b.eaten_time || b.time || "";
+    return ta.localeCompare(tb);
+  });
   const tp=food.reduce((s,e)=>s+(e.p||0),0);
   const tc=food.reduce((s,e)=>s+(e.c||0),0);
   const tf=food.reduce((s,e)=>s+(e.f||0),0);
@@ -2068,15 +2082,24 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
       const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
 
 Rules:
-- Preserve exact quantities mentioned (e.g. "2 bowls", "150g", "5 spoons")
-- If quantity is vague (e.g. "bowl", "plate"), assume a realistic serving size and state it in det
-- Be accurate — do not overestimate protein. Most soups have 5-15g protein per bowl unless protein-rich (lentil, chicken, bean)
+- Break down into individual items (each ingredient or component separately)
+- Preserve exact quantities mentioned. If vague, assume a realistic serving and state it in the name
+- Be accurate — do not overestimate protein
 - For Israeli foods or brands, use accurate Israeli nutritional values
 - Translate non-English to English but keep all quantities
-- The det field should state your assumptions (e.g. "2 x 350ml bowls, estimated lentil soup")
+- All macro values are integers representing the total for that item
 
-Return format: {"n":"food name in English","det":"description with quantity and assumptions","p":12,"c":30,"f":4,"k":200}
-All macro values must be integers representing TOTAL for the full entry (not per 100g).
+Return format:
+{
+  "n": "meal name in English (brief summary)",
+  "det": "description with quantities and assumptions",
+  "parsed_items": [
+    {"name": "Greek yogurt", "qty": 150, "unit": "g", "p": 13, "c": 6, "f": 0, "k": 79},
+    {"name": "Honey", "qty": 1, "unit": "tbsp", "p": 0, "c": 17, "f": 0, "k": 64}
+  ],
+  "p": 13, "c": 23, "f": 0, "k": 143
+}
+Totals p/c/f/k must equal the sum of parsed_items. All values are integers.
 
 Input: ${txtInput}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -2088,14 +2111,17 @@ Input: ${txtInput}`;
       if(d.error) throw new Error(d.error.message);
       const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
       const entry = JSON.parse(raw);
-      entry.time = mealTime;
+      entry.eaten_time = eatenTime;
+      entry.time = eatenTime; // keep for display compat
       entry.source = "estimated";
+      entry.parsed_items = entry.parsed_items || null;
       const targetDate = mealDate || foodDate;
       try {
         const rows = await supa("POST","food_log",{
-          user_id:UID, log_date:targetDate, meal_time:mealTime,
+          user_id:UID, log_date:targetDate, meal_time:eatenTime, eaten_time:eatenTime,
           name:entry.n, detail:entry.det||null,
-          protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+          protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k,
+          parsed_items: entry.parsed_items ? JSON.stringify(entry.parsed_items) : null
         });
         if(rows&&rows[0]) entry.dbid = rows[0].id;
       } catch(e) { console.log("Supabase save:", e.message); }
@@ -2164,11 +2190,19 @@ Input: ${txtInput}`;
           <span>{pct}%</span><span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
         </div>
         {feedbackMsg()&&<div style={{fontSize:11,color:C.am,textAlign:"center",paddingTop:8,borderTop:`.5px solid ${C.bd}`}}>{feedbackMsg()}</div>}
+        {(()=>{
+          if(food.length<2||tp<protTgt*0.7) return null;
+          const lastP=food[food.length-1]?.p||0;
+          const firstP=food[0]?.p||0;
+          if(lastP/tp>0.5) return <div style={{fontSize:11,color:C.t3,marginTop:8,paddingTop:8,borderTop:`.5px solid ${C.bd}`}}>{Math.round(lastP)}g of your protein came from your last meal. Spreading it across meals supports muscle synthesis more effectively.</div>;
+          if(firstP/tp>0.5) return <div style={{fontSize:11,color:C.t3,marginTop:8,paddingTop:8,borderTop:`.5px solid ${C.bd}`}}>Most of your protein came early in the day. Spreading it across meals helps your body use it more efficiently.</div>;
+          return null;
+        })()}
       </Card>
 
       {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
 
-      <button onClick={()=>{setMealDate(tkey());setMealTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
+      <button onClick={()=>{setMealDate(tkey());setEatenTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
         📝 Log a meal
       </button>
 
@@ -2195,7 +2229,7 @@ Input: ${txtInput}`;
                 </div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0)});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
+                <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0),parsed_items:e.parsed_items?JSON.parse(JSON.stringify(e.parsed_items)):null});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
                 <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
               </div>
             </div>
@@ -2211,7 +2245,7 @@ Input: ${txtInput}`;
             <p style={{fontSize:13,color:C.t2,marginBottom:16}}>Type what you ate and how much.</p>
             <div style={{display:"flex",gap:8,marginBottom:8}}>
               <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label><input type="date" value={mealDate} onChange={e=>setMealDate(e.target.value)} style={s.input}/></div>
-              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Time</label><input type="time" value={mealTime} onChange={e=>setMealTime(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>When did you eat this?</label><input type="time" value={eatenTime} onChange={e=>setEatenTime(e.target.value)} style={s.input}/></div>
             </div>
             <textarea value={txtInput} onChange={e=>setTxtInput(e.target.value)} placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style={{...s.input,resize:"vertical",minHeight:72,marginBottom:16}}/>
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -2226,27 +2260,73 @@ Input: ${txtInput}`;
       <SupplementStack suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={onSaveSupps}/>
 
       {/* EDIT MODAL */}
-      {editIdx!==null&&(
-        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setEditIdx(null);}}>
-          <div style={s.modal}>
-            <h3 style={{marginBottom:16,fontSize:16,fontWeight:600}}>Edit food entry</h3>
-            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Food name</label>
-            <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
-            <div style={{display:"flex",gap:8,marginBottom:16}}>
-              {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
-                <div key={k} style={{flex:1}}>
-                  <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
-                  <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
+      {editIdx!==null&&(()=>{
+        const hasParsed = (editEntry.parsed_items||[]).length > 0;
+        const totP = hasParsed ? editEntry.parsed_items.reduce((s,i)=>s+(i.p||0),0) : (editEntry.p||0);
+        const totC = hasParsed ? editEntry.parsed_items.reduce((s,i)=>s+(i.c||0),0) : (editEntry.c||0);
+        const totF = hasParsed ? editEntry.parsed_items.reduce((s,i)=>s+(i.f||0),0) : (editEntry.f||0);
+        const totK = hasParsed ? editEntry.parsed_items.reduce((s,i)=>s+(i.k||0),0) : (editEntry.k||0);
+        return (
+          <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setEditIdx(null);}}>
+            <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
+              <h3 style={{marginBottom:4,fontSize:16,fontWeight:600}}>Edit meal</h3>
+              <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
+              {hasParsed ? (
+                <>
+                  <div style={{fontSize:11,color:C.t3,marginBottom:6}}>Tap a quantity to edit. Macros recalculate proportionally.</div>
+                  {editEntry.parsed_items.map((item,ii)=>(
+                    <div key={ii} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0",borderBottom:`.5px solid ${C.bd}`,fontSize:12}}>
+                      <span style={{flex:"0 0 110px",color:C.tx,fontSize:11}}>{item.name}</span>
+                      <input type="number" value={item.qty} onChange={e=>{
+                        const newQty = parseFloat(e.target.value)||0;
+                        const ratio = item._origQty ? newQty/item._origQty : newQty/(item.qty||1);
+                        const orig = item._orig || item;
+                        const updated = {...item, qty:newQty, _orig:orig, _origQty:item._origQty||item.qty,
+                          p:Math.round(orig.p*newQty/(item._origQty||item.qty)*10)/10,
+                          c:Math.round(orig.c*newQty/(item._origQty||item.qty)*10)/10,
+                          f:Math.round(orig.f*newQty/(item._origQty||item.qty)*10)/10,
+                          k:Math.round(orig.k*newQty/(item._origQty||item.qty))};
+                        const newItems=[...editEntry.parsed_items];newItems[ii]=updated;
+                        setEditEntry(p=>({...p,parsed_items:newItems}));
+                      }} style={{...s.input,width:54,padding:"4px 6px",textAlign:"center"}}/>
+                      <span style={{flex:"0 0 28px",color:C.t3,fontSize:10}}>{item.unit}</span>
+                      <span style={{fontSize:10,color:C.am,whiteSpace:"nowrap"}}>P:{Math.round(item.p)} C:{Math.round(item.c)} F:{Math.round(item.f)}</span>
+                      <button onClick={()=>{const ni=editEntry.parsed_items.filter((_,j)=>j!==ii);setEditEntry(p=>({...p,parsed_items:ni}));}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"flex-end",gap:10,padding:"6px 0",fontSize:12,fontWeight:600,color:C.t2,borderTop:`.5px solid ${C.bd}`,marginTop:4}}>
+                    <span>P:{Math.round(totP)}</span><span>C:{Math.round(totC)}</span><span>F:{Math.round(totF)}</span><span style={{color:C.tx}}>{Math.round(totK)} kcal</span>
+                  </div>
+                </>
+              ) : (
+                <div style={{display:"flex",gap:8,marginBottom:4}}>
+                  {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
+                    <div key={k} style={{flex:1}}>
+                      <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
+                      <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-              <button onClick={()=>setEditIdx(null)} style={s.btn("s")}>Cancel</button>
-              <button onClick={saveEdit} style={s.btn("p")}>Save</button>
+              )}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+                <button onClick={()=>setEditIdx(null)} style={s.btn("s")}>Cancel</button>
+                <button onClick={async()=>{
+                  const hasParsedSave=(editEntry.parsed_items||[]).length>0;
+                  const newP=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.p||0),0)):parseFloat(editEntry.p)||0;
+                  const newC=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.c||0),0)):parseFloat(editEntry.c)||0;
+                  const newF=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.f||0),0)):parseFloat(editEntry.f)||0;
+                  const newK=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.k||0),0)):Math.round(newP*4+newC*4+newF*9);
+                  const cleanItems=hasParsedSave?editEntry.parsed_items.map(({_orig,_origQty,...rest})=>rest):null;
+                  const updated={...food[editIdx],n:editEntry.n,p:newP,c:newC,f:newF,k:newK,parsed_items:cleanItems};
+                  if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,protein:newP,carbs:newC,fat:newF,kcal:newK,parsed_items:cleanItems?JSON.stringify(cleanItems):null},"id=eq."+updated.dbid);}catch(e){}}
+                  setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)}));
+                  setEditIdx(null);
+                }} style={s.btn("p")}>Save</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -3315,7 +3395,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("Updated Mon 15 Jun 2026, 10:15");
   const [settKey, setSettKey] = useState(apiKey);
   const [settProt, setSettProt] = useState(100);
-  const [settTimezone, setSettTimezone] = useState("Asia/Jerusalem");
+  const [settTimezone, setSettTimezone] = useState(getTz());
   const [settCycle, setSettCycle] = useState(true);
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
@@ -3406,7 +3486,7 @@ export default function App() {
             ],
             health_notes:"L4-L5 disc herniation with nerve root compression, history of radicular leg pain now largely resolved. T9-T10 thoracic spinal cord compression, surgically decompressed. Loaded hip extension movements currently restricted pending MRI clearance. Physiotherapy consultation planned.",
             cycle_tracking:true,
-            timezone:"Asia/Jerusalem",
+            timezone:getTz(),
             fitbit_connected:true,
             onboarding_complete:true
           };
@@ -3447,7 +3527,12 @@ export default function App() {
         try{legacyFood=await supa("GET","food_log",null,"user_id=eq.julia&order=created_at.asc&select=*");}catch(e){}
         const allFoodRows=[...(legacyFood||[]),...(food||[])];
         const foodMap={};
-        allFoodRows.forEach(r=>{if(!foodMap[r.log_date])foodMap[r.log_date]=[];foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time});});
+        allFoodRows.forEach(r=>{
+          if(!foodMap[r.log_date])foodMap[r.log_date]=[];
+          let parsedItems=null;
+          try{if(r.parsed_items)parsedItems=typeof r.parsed_items==="string"?JSON.parse(r.parsed_items):r.parsed_items;}catch(e){}
+          foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
+        });
         if(Object.keys(foodMap).length>0){
           setAllFood(foodMap);
           localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
@@ -3526,7 +3611,15 @@ export default function App() {
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
       // Auto-sync Google Health if token is valid
       if(isGTokenValid(getGToken())) {
-        ghFullSync(setSyncStatus, setFitbitData).catch(e=>console.log("Auto-sync:",e.message));
+        // On first connection (no historical pull yet), show a specific loading message
+        const profSnap = await supa("GET","profiles",null,"uid=eq."+UID+"&limit=1").catch(()=>[]);
+        const needsHistorical = profSnap?.[0]?.fitbit_connected && !profSnap?.[0]?.historical_pull_complete;
+        if(needsHistorical) setSyncStatus("Your coach is reviewing the last 14 days...");
+        ghFullSync(setSyncStatus, setFitbitData).then(()=>{
+          if(needsHistorical){
+            supa("PATCH","profiles",{historical_pull_complete:true,historical_pull_date:new Date().toISOString()},"uid=eq."+UID).catch(()=>{});
+          }
+        }).catch(e=>console.log("Auto-sync:",e.message));
       }
       }catch(e){
         const msg = e.message||String(e);
@@ -3633,7 +3726,7 @@ export default function App() {
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
           <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
-          <button onClick={()=>{setSettTimezone(profileData?.timezone||"Asia/Jerusalem");setSettCycle(profileData?.cycle_tracking!==false);setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+          <button onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
       </div>
 
