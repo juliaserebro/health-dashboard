@@ -663,6 +663,251 @@ async function ghFullSync(setSyncStatus,setFitbitData){
 }
 
 // ── STANDALONE buildCtx (called by TabDash and App chat) ────────────────
+// ─────────────────────────────────────────────────────────────
+// COACH INTELLIGENCE LAYER
+// ─────────────────────────────────────────────────────────────
+
+const COACH_FEW_SHOT_EXAMPLES = `
+EXAMPLE COACHING EXCHANGES (voice and tone reference — internalize these):
+
+Situation: User had one unusually bad night of sleep with no obvious cause
+Coach: "Last night looked rougher than usual — sometimes that just happens, and one night doesn't change much. If it becomes a pattern we'll look at it together. How are you feeling today?"
+
+Situation: Pattern detected — deep sleep shorter on nights with late meals, observed 4 times
+Coach: "We've noticed something worth paying attention to — on nights when your last meal was after 9pm, your deep sleep tended to be shorter. This has come up a few times now. It might be worth trying an earlier cutoff and seeing if you notice a difference. In some people, eating closer to sleep affects sleep architecture."
+
+Situation: User is in luteal phase, appetite may be increasing
+Coach: "You're likely in your luteal phase right now. If you've been feeling hungrier than usual, that's completely biological — progesterone increases appetite in the second half of the cycle. Leaning into protein-forward snacks during this window can help you feel satisfied without derailing your goals."
+
+Situation: User has trained 10 of the last 14 days with no full rest day
+Coach: "You've been incredibly consistent lately — 10 training days in the last two weeks. One thing worth considering: adaptation actually happens during rest, not during the workout itself. A full rest day or a gentle mobility session today might pay off more than another hard session right now."
+
+Situation: Food not logged in 2 days
+Coach: "We notice food hasn't been logged the last couple of days — no assumptions here, life gets busy. If you'd like your coach to give you more specific nutrition insights, logging when you can helps a lot. Even a rough log is more useful than none."
+
+Situation: Pattern — consistent skip day detected
+Coach: "We've noticed Wednesdays tend to be quiet movement-wise over the past few weeks. That might just be how your week flows — if so, it's worth building your plan around it rather than against it. Is Wednesday a rest day by design, or does something keep getting in the way?"
+
+Situation: Rising resting HR trend over 10 days
+Coach: "Your resting heart rate has been creeping slightly higher over the past week and a half. This can sometimes mean your body is carrying more stress than usual — physical or otherwise. It doesn't mean anything is wrong, but it's worth prioritising recovery this week and seeing if it settles."
+
+Situation: Weekly coach letter — Sunday evening
+Coach: "Here's your week. You trained four times, hit your step target five days, and your sleep averaged 7h 10min — just above your target. The standout thing I noticed: your readiness scores were consistently higher on days you had a mobility session before a strength session. That sequence seems to work well for you. Next week, one thing to try: protect your sleep on Wednesday — it's been your weakest night three weeks in a row. Small adjustment, potentially big payoff."
+
+Situation: Coach has 4+ weeks of data
+Coach: "Four weeks in, here's what I've learned about you: you're a night person who does best when you stop fighting it. Your strongest training days follow good sleep — almost without exception. You rarely eat before noon and that seems to work fine for you. Your luteal phase is genuinely harder on your energy, and that's biology, not weakness. And you're more consistent than you probably give yourself credit for."
+`;
+
+function buildCoachSystemPrompt(profileData, todayData, detectedPatterns, behavioralBaseline, recentHistory) {
+  const calcAge = dob => {
+    if (!dob) return "unknown";
+    const d = new Date(dob), now = new Date();
+    return now.getFullYear() - d.getFullYear() - (now < new Date(now.getFullYear(), d.getMonth(), d.getDate()) ? 1 : 0);
+  };
+  const goals = (profileData?.goals||[]).map(g=>`${g.label}${g.definition?' ('+g.definition+')':''}`).join(', ') || 'general fitness';
+  const at = profileData?.activity_targets || {};
+  const supps = (profileData?.supplements||[]).filter(s=>s.name).map(s=>`${s.name}${s.dose?' '+s.dose:''}${s.timing?' ('+s.timing+')':''}`).join(', ') || 'none';
+  const bl = behavioralBaseline || {};
+  const patternsText = (detectedPatterns||[]).length > 0
+    ? detectedPatterns.map(p=>`- ${p.description} (observed ${p.occurrences} times, confidence: ${p.confidence})`).join('\n')
+    : 'Still building pattern library — less than 14 days of data.';
+  const pendingText = (recentHistory?.pendingFeedback||[]).length > 0
+    ? recentHistory.pendingFeedback.map(f=>`- Suggested "${f.suggestion}" on ${f.date}. Metric change: ${f.metricChange||'unknown'}`).join('\n')
+    : 'none';
+  const baselineOk = !!(profileData?.behavioral_baseline?.established_at);
+
+  return `You are a personal AI health coach. You are warm, direct, curious, and non-judgmental. You speak like a knowledgeable friend who happens to be an expert in health, fitness, nutrition, sleep, and women's health — not like a medical device or a generic wellness app.
+
+CRITICAL RULES — follow these without exception:
+1. OBSERVE BEFORE CONCLUDING. Never draw a causal conclusion from fewer than 3 data points. Say "we noticed" not "this is because."
+2. TENTATIVE LANGUAGE ALWAYS. Use: "it might be," "in some people," "we've noticed," "this could be connected to." Never use: "you slept badly because," "this is causing."
+3. MISSING DATA IS NOT BEHAVIOR. If food hasn't been logged, never assume the person wasn't hungry.
+4. NEVER REFERENCE SPECIFIC MUSCLE GROUPS FOR GYM SESSIONS. Fitbit cannot see inside a strength session. Frame around goals and energy.
+5. ANOMALY VS PATTERN. A single outlier gets one curious question. A pattern (3+ occurrences) gets a tentative observation.
+6. NEVER GUILT. Never frame missed workouts, late meals, or bad nights as failures. Everything is information and opportunity.
+7. ONE SUGGESTION PER INSIGHT. Every observation leads to one specific, actionable suggestion. Not three. One.
+8. THE SCIENCE IS OPTIONAL. Lead with observation and suggestion. Offer science as a "why?" — never lecture unprompted.
+9. YOU ARE NOT A DOCTOR. Never diagnose. For anything recurring over 2+ weeks, suggest speaking to a professional.
+10. YOU GET BETTER OVER TIME. After 4+ weeks, reference accumulated knowledge: "I've learned that you..." or "three months in..."
+
+USER PROFILE:
+Name: ${profileData?.name||'Julia'}
+Age: ${calcAge(profileData?.birth_date)}
+Gender: ${profileData?.gender||'female'}
+Goals: ${goals}
+Activity targets: Strength ${at.strength||2}x/week, Mobility ${at.mobility||2}x/week, Cardio ${at.cardio||2}x/week
+Protein target: ${profileData?.protein_target||100}g/day
+Step target: ${profileData?.step_target||8000} steps/day
+Supplements: ${supps}
+Health notes: ${profileData?.health_notes||'none'}
+Cycle tracking: ${profileData?.cycle_tracking?'active':'not tracking'}
+
+BEHAVIORAL BASELINE (inferred from 14+ days of actual behaviour):
+Typical sleep duration: ${bl.typical_sleep_hours?bl.typical_sleep_hours+'h':'not yet established'}
+Typical bedtime: ${bl.typical_bedtime||'not yet established'}
+Avg resting HR: ${bl.avg_resting_hr?bl.avg_resting_hr+' bpm':'establishing'}
+Avg deep sleep: ${bl.avg_deep_sleep_pct?bl.avg_deep_sleep_pct+'%':'establishing'}
+
+TODAY:
+${todayData?.sleepSummary||'Sleep: not tracked last night'}
+${todayData?.stepsLine||'Steps: no data'}
+${todayData?.workoutsLine||'Workouts: none today'}
+${todayData?.nutritionLine||'Nutrition: not logged'}${todayData?.cyclePhase?'\nCycle: '+todayData.cyclePhase:''}
+
+RECENT 14 DAYS:
+Training days: ${recentHistory?.trainingDays||0}/14
+Protein target hit: ${recentHistory?.proteinDaysHit||0} days
+Step target hit: ${recentHistory?.stepDaysHit||0} days
+Avg sleep: ${recentHistory?.avgSleep||'insufficient data'}
+
+DETECTED PATTERNS (confirmed 3+ occurrences):
+${patternsText}
+
+PENDING RECOMMENDATION FOLLOW-UPS:
+${pendingText}
+
+BASELINE STATUS: ${baselineOk?'Baseline established.':'Still in calibration (first 14 days). Do not judge against targets.'}
+
+${COACH_FEW_SHOT_EXAMPLES}`;
+}
+
+function buildLast30Days(fitbitData, allFood, cycleDates, profileData) {
+  const now = new Date();
+  const tz = profileData?.timezone || getTz();
+  const protTgt = profileData?.protein_target || 100;
+  const stepTgt = profileData?.step_target || 8000;
+  const confDates = (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+  const days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 864e5);
+    const dk = d.toLocaleDateString("en-CA", {timeZone: tz});
+    const sleepRec = (fitbitData.sleep||[]).find(s=>s.date===dk);
+    const stepsRec = (fitbitData.steps||[]).find(s=>s.date===dk);
+    const dayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===dk);
+    const foodEntries = allFood[dk] || [];
+    let cyclePhase = null;
+    if (confDates.length) {
+      const startD = new Date(confDates[0].d+"T12:00:00");
+      const targetD = new Date(dk+"T12:00:00");
+      const diff = Math.round((targetD - startD) / 864e5);
+      if (diff >= 0) { const cd = (diff % 28) + 1; cyclePhase = cd<=5?'menstrual':cd<=13?'follicular':cd<=16?'ovulatory':'luteal'; }
+    }
+    const proteinG = Math.round(foodEntries.reduce((s,e)=>s+(e.p||0),0));
+    const last7Count = Array.from({length:7},(_,j)=>{
+      const pd = new Date(d.getTime()-j*864e5);
+      return pd.toLocaleDateString("en-CA",{timeZone:tz});
+    }).filter(pk=>(fitbitData.workouts||[]).some(w=>w.date===pk)).length;
+    days.push({
+      date:dk, sleepHours:sleepRec?sleepRec.total/60:null,
+      deepSleepMinutes:sleepRec?sleepRec.deep:null, remSleepMinutes:sleepRec?sleepRec.rem:null,
+      bedtime:sleepRec?sleepRec.bedtime:null, steps:stepsRec?stepsRec.steps:null,
+      stepsHit:stepsRec?stepsRec.steps>=stepTgt:false, hasWorkout:dayWorkouts.length>0,
+      trainingDaysLast7:last7Count, cyclePhase, proteinG,
+      proteinHit:proteinG>=protTgt*0.9, foodLogged:foodEntries.length>0
+    });
+  }
+  return days;
+}
+
+async function runPatternDetection(profileData, fitbitData, allFood, cycleDates) {
+  const last30 = buildLast30Days(fitbitData, allFood, cycleDates, profileData);
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+  const patterns = [];
+
+  // Day-of-week skip pattern
+  const skipCounts={0:0,1:0,2:0,3:0,4:0,5:0,6:0}, totalCounts={0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+  last30.forEach(d=>{const dow=new Date(d.date+"T12:00:00").getDay();totalCounts[dow]++;if(!d.hasWorkout)skipCounts[dow]++;});
+  const maxSkip=Object.entries(skipCounts).sort((a,b)=>b[1]-a[1])[0];
+  if(parseInt(maxSkip[1])>=3&&totalCounts[maxSkip[0]]>=3){
+    const dn=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    patterns.push({id:'consistent_skip_day',description:`${dn[maxSkip[0]]}s are consistently rest days`,occurrences:parseInt(maxSkip[1]),confidence:'moderate',suggestion:null});
+  }
+
+  // High training load
+  const highLoad=last30.filter(d=>d.trainingDaysLast7>=5);
+  if(highLoad.length>=3) patterns.push({id:'high_training_load',description:'Training 5+ days in a row detected consistently',occurrences:highLoad.length,confidence:'moderate',suggestion:'Consider a rest or mobility day when reaching 5 consecutive training days'});
+
+  // Cycle × sleep
+  if(profileData?.cycle_tracking){
+    const lut=last30.filter(d=>d.cyclePhase==='luteal'&&d.sleepHours);
+    const fol=last30.filter(d=>d.cyclePhase==='follicular'&&d.sleepHours);
+    if(lut.length>=4&&fol.length>=4){
+      const diff=avg(fol.map(d=>d.sleepHours))-avg(lut.map(d=>d.sleepHours));
+      if(diff>0.4) patterns.push({id:'cycle_sleep_drop',description:`Sleep averages ${diff.toFixed(1)}h less during luteal phase`,occurrences:lut.length,confidence:'high',suggestion:'Prioritise earlier bedtimes during your luteal phase'});
+    }
+  }
+
+  // Protein consistency
+  const logged=last30.filter(d=>d.foodLogged), hit=logged.filter(d=>d.proteinHit);
+  if(logged.length>=7&&hit.length/logged.length<0.4) patterns.push({id:'low_protein_consistency',description:`Protein target hit only ${Math.round(hit.length/logged.length*100)}% of logged days`,occurrences:logged.length,confidence:'high',suggestion:'Adding a protein-focused snack mid-morning may help hit the daily target'});
+
+  // Deep sleep trend (declining)
+  const slDays=last30.filter(d=>d.deepSleepMinutes!==null&&d.deepSleepMinutes>0);
+  if(slDays.length>=10){
+    const half=Math.floor(slDays.length/2);
+    const drop=avg(slDays.slice(0,half).map(d=>d.deepSleepMinutes))-avg(slDays.slice(half).map(d=>d.deepSleepMinutes));
+    if(drop>10) patterns.push({id:'declining_deep_sleep',description:`Deep sleep has been trending down over 30 days (~${Math.round(drop)}min less)`,occurrences:slDays.length,confidence:'moderate',suggestion:'Focus on consistent bedtime — same time every night for 2 weeks'});
+  }
+
+  // Step consistency (positive)
+  const stepDays=last30.filter(d=>d.steps!==null), stepHit=stepDays.filter(d=>d.stepsHit);
+  if(stepDays.length>=7&&stepHit.length/stepDays.length>=0.7) patterns.push({id:'strong_step_consistency',description:`Step target hit ${Math.round(stepHit.length/stepDays.length*100)}% of days — excellent movement consistency`,occurrences:stepHit.length,confidence:'high',suggestion:null});
+
+  try{ await supa("POST","profiles",{uid:UID,detected_patterns:patterns},"on_conflict=uid"); }catch(e){ console.log("Pattern save:",e.message); }
+  return patterns;
+}
+
+async function buildBehavioralBaseline(last30Days) {
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const mode = arr => { if(!arr.length)return null; const f={}; arr.forEach(v=>f[v]=(f[v]||0)+1); return Object.entries(f).sort((a,b)=>b[1]-a[1])[0][0]; };
+  const roundH = t => t ? `${parseInt(t.split(':')[0])}:00` : null;
+  const slDays = last30Days.filter(d=>d.sleepHours);
+  if(slDays.length<14) return null;
+  const baseline={
+    typical_sleep_hours:Math.round(avg(slDays.map(d=>d.sleepHours))*10)/10,
+    typical_bedtime:mode(slDays.map(d=>roundH(d.bedtime)).filter(Boolean)),
+    avg_deep_sleep_pct:slDays.some(d=>d.deepSleepMinutes)?Math.round(avg(slDays.filter(d=>d.deepSleepMinutes).map(d=>d.deepSleepMinutes/(d.sleepHours*60)*100))):null,
+    established_at:new Date().toISOString()
+  };
+  try{ await supa("POST","profiles",{uid:UID,behavioral_baseline:baseline},"on_conflict=uid"); }catch(e){ console.log("Baseline save:",e.message); }
+  return baseline;
+}
+
+async function logCoachSuggestion(profileData, suggestion, relatedMetric) {
+  const entry={suggestion,related_metric:relatedMetric,date:new Date().toISOString(),followed:null,metricChange:null};
+  const existing=profileData?.coach_suggestion_log||[];
+  try{ await supa("POST","profiles",{uid:UID,coach_suggestion_log:[...existing.slice(-19),entry]},"on_conflict=uid"); }catch(e){}
+}
+
+const MILESTONE_DEFS = [
+  {id:'seven_day_food_streak',check:(last30)=>{
+    let streak=0; for(let i=last30.length-1;i>=0;i--){if(last30[i].foodLogged)streak++;else break;} return streak===7;
+  },message:"Seven days of food logging in a row. Your coach now has enough data to start seeing real nutrition patterns — this consistency is what makes personalised coaching possible."},
+  {id:'five_sleep_nights',check:(last30)=>{
+    let streak=0; for(let i=last30.length-1;i>=0;i--){const d=last30[i];if(d.sleepHours&&d.sleepHours>=7)streak++;else break;} return streak===5;
+  },message:"Five nights in a row hitting your sleep target. Sleep consistency is one of the hardest habits to build and one of the highest-leverage ones. Your recovery numbers should reflect it."},
+  {id:'protein_five_streak',check:(last30)=>{
+    let streak=0; for(let i=last30.length-1;i>=0;i--){if(last30[i].proteinHit)streak++;else break;} return streak===5;
+  },message:"Five days in a row hitting your protein target. This is the kind of nutritional consistency that supports muscle building and recovery. Your body notices."},
+];
+
+async function checkMilestones(profileData, last30Days) {
+  const triggered = profileData?.triggered_milestones || [];
+  const newMilestones = [];
+  for (const m of MILESTONE_DEFS) {
+    if (triggered.includes(m.id)) continue;
+    if (m.check(last30Days)) {
+      newMilestones.push({id:m.id, message:m.message, date:new Date().toISOString()});
+    }
+  }
+  if (newMilestones.length > 0) {
+    const allTriggered = [...triggered, ...newMilestones.map(m=>m.id)];
+    try{ await supa("POST","profiles",{uid:UID,triggered_milestones:allTriggered},"on_conflict=uid"); }catch(e){}
+    return newMilestones;
+  }
+  return [];
+}
+
 function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData}) {
   const now = new Date();
   const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:getTz()});
@@ -710,12 +955,87 @@ function TabDash({allFood, logEntries, cycleDates, apiKey, protTgt, aiRefreshTic
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
+  const [coachCard, setCoachCard] = useState(null);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [coachDismissed, setCoachDismissed] = useState(false);
+  const [coachWhy, setCoachWhy] = useState(false);
+  const [pendingMilestone, setPendingMilestone] = useState(null);
 
   const todayFood = allFood[tkey()]||[];
   const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
 
   function buildCtx() {
     return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
+  }
+
+  async function callCoachAI(userMessage, systemPrompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:systemPrompt,messages:[{role:"user",content:userMessage}]})
+    });
+    const d = await res.json();
+    if(d.error) throw new Error(d.error.message);
+    return d.content[0].text.trim();
+  }
+
+  async function generateCoachCard() {
+    if(!apiKey) return;
+    const now = new Date();
+    const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+    // Check localStorage cache — only regenerate once per day
+    try {
+      const cached = localStorage.getItem("coach_card_"+todayKey);
+      if(cached) { setCoachCard(JSON.parse(cached)); return; }
+    } catch(e){}
+    // Check if enough data exists (need at least 7 sleep records)
+    const sleepCount = (fitbitData.sleep||[]).length;
+    if(sleepCount < 3) {
+      setCoachCard({insight:"Your coach is learning your patterns — check back in a few days for your first personalised insight.", why:null, isLearning:true});
+      return;
+    }
+    setCoachLoading(true);
+    try {
+      const lastSleep = (fitbitData.sleep||[]).find(s=>s.date===todayKey)||null;
+      const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
+      const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
+      const confDates = (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
+      let cyclePhaseStr = null;
+      if(confDates.length){const cd=calcCycleDay(confDates[0].d);const ph=cd<=5?'menstrual':cd<=13?'follicular':cd<=16?'ovulatory':'luteal';cyclePhaseStr=`Day ${cd}/28, ${ph} phase`;}
+      const prot = Math.round((allFood[todayKey]||[]).reduce((s,e)=>s+(e.p||0),0));
+      const todayData = {
+        sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:'Sleep: not tracked last night',
+        stepsLine:todaySteps?`Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target||8000})`:'Steps: no data yet',
+        workoutsLine:todayWorkouts.length?`Workouts today: ${todayWorkouts.map(w=>w.type).join(', ')}`:'Workouts: none yet today',
+        nutritionLine:(allFood[todayKey]||[]).length?`Nutrition today: ${prot}g protein (target ${protTgt}g)`:'Nutrition: not logged yet',
+        cyclePhase:cyclePhaseStr
+      };
+      const last14Keys = Array.from({length:14},(_,i)=>{const d=new Date(now.getTime()-i*864e5);return d.toLocaleDateString("en-CA",{timeZone:getTz()});});
+      const trainingDays = (fitbitData.workouts||[]).filter(w=>last14Keys.includes(w.date)).map(w=>w.date).filter((v,i,a)=>a.indexOf(v)===i).length;
+      const proteinHitDays = last14Keys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
+      const stepHitDays = last14Keys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
+      const recentSleep = (fitbitData.sleep||[]).filter(s=>last14Keys.includes(s.date));
+      const avgSleep = recentSleep.length?(recentSleep.reduce((s,r)=>s+r.total,0)/recentSleep.length/60).toFixed(1)+'h':'insufficient data';
+      const pendingFeedback = (profileData?.coach_suggestion_log||[]).filter(l=>{if(!l.date)return false;return(new Date()-new Date(l.date))/864e5<=7&&l.followed===null;});
+      const recentHistory = {trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback};
+      const hour = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
+      const dow = new Date(todayKey+"T12:00:00").getDay();
+      const isWeekly = dow===0&&hour>=18;
+      const systemPrompt = buildCoachSystemPrompt(profileData,todayData,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
+      const userMsg = isWeekly
+        ? `Write the weekly coach letter. It is Sunday evening. One paragraph (4–6 sentences): name one specific thing that went well this week with real data, name one pattern you noticed, give one specific suggestion for next week. Warm, first-person coach voice. Real numbers only. Also write a 1-sentence "why?" explanation. Respond as JSON: {"insight":"...","why":"...","isWeekly":true}`
+        : `Generate today's coaching insight. One observation (1 sentence) + one suggestion (1 sentence). If there's a pending follow-up with a positive outcome, lead with that instead. If nothing notable, warm positive reinforcement of something going well. Never invent data. Also write a 1-sentence "why?" explanation. Respond as JSON: {"insight":"...","why":"..."}`;
+      const raw = await callCoachAI(userMsg, systemPrompt);
+      const m = raw.match(/\{[\s\S]*?\}/);
+      if(m){
+        const card = JSON.parse(m[0]);
+        setCoachCard(card);
+        localStorage.setItem("coach_card_"+todayKey, JSON.stringify(card));
+        // Log the suggestion if there is one
+        if(card.suggestion) logCoachSuggestion(profileData, card.suggestion, null).catch(()=>{});
+      }
+    } catch(e){ console.log("Coach card error:",e.message); }
+    setCoachLoading(false);
   }
 
   async function callAI(prompt) {
@@ -844,10 +1164,38 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const sevenDaysAgo=new Date(Date.now()-7*864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
   useEffect(()=>{ if(apiKey && fitbitReady){genAI("today");genAI("week");} },[apiKey, aiRefreshTick, latestSleepDate]);
+  useEffect(()=>{ if(apiKey && profileData) generateCoachCard(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
   return (
     <div>
+      {/* ── COACH CARD ─────────────────────────────────────── */}
+      {!coachDismissed&&(()=>{
+        // Milestone takes priority
+        const milestone = pendingMilestone || (profileData?.triggered_milestones&&false); // shown via pendingMilestone state only
+        if(coachLoading&&!coachCard) return <Card style={{marginBottom:14}}><div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Your coach is thinking...</div></Card>;
+        if(!coachCard&&!apiKey) return null;
+        if(!coachCard) return null;
+        return (
+          <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>{coachCard.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
+                <div style={{fontSize:13,color:C.tx,lineHeight:1.65}}>{coachCard.isLearning?<span style={{color:C.t2}}>{coachCard.insight}</span>:coachCard.insight}</div>
+                {coachCard.why&&coachWhy&&<div style={{fontSize:12,color:C.t2,marginTop:6,lineHeight:1.55,paddingTop:6,borderTop:`1px solid ${C.s2}`}}>{coachCard.why}</div>}
+              </div>
+              <button onClick={()=>setCoachDismissed(true)} style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.t3,flexShrink:0,marginTop:-2}}>×</button>
+            </div>
+            {!coachCard.isLearning&&coachCard.why&&(
+              <div style={{marginTop:8,display:"flex",gap:6}}>
+                <button onClick={()=>setCoachWhy(v=>!v)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>{coachWhy?"Hide why":"Why?"}</button>
+                <button onClick={()=>{const todayKey=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});localStorage.removeItem("coach_card_"+todayKey);setCoachCard(null);generateCoachCard();}} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Refresh</button>
+              </div>
+            )}
+          </Card>
+        );
+      })()}
+
       {/* READINESS */}
       {(()=>{
         // ── Shared readiness calculation ─────────────────────────────────
@@ -2597,6 +2945,51 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
           </Card>
         );
       })()}
+
+      {/* ── COACH MEMORY SUMMARY (after 28 days) ─────────────── */}
+      {(()=>{
+        const firstSleep=(fitbitData.sleep||[]).map(s=>s.date).sort()[0];
+        if(!firstSleep) return null;
+        const daysInApp=Math.round((new Date()-new Date(firstSleep+"T12:00:00"))/864e5);
+        if(daysInApp<28) return null;
+        return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
+      })()}
+    </div>
+  );
+}
+
+function CoachMemoryCard({profileData, fitbitData, apiKey}) {
+  const CACHE_KEY="coach_memory_"+new Date().toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7); // per-month
+  const [memory, setMemory] = React.useState(()=>{try{return localStorage.getItem(CACHE_KEY)||null;}catch{return null;}});
+  const [loading, setLoading] = React.useState(false);
+
+  async function generate() {
+    if(!apiKey||loading) return;
+    setLoading(true);
+    const bl=profileData?.behavioral_baseline||{};
+    const patterns=(profileData?.detected_patterns||[]).map(p=>`- ${p.description}`).join('\n')||'still learning';
+    const goals=(profileData?.goals||[]).map(g=>g.label).join(', ')||'general fitness';
+    const prompt=`You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name||'Julia'}, ${profileData?.gender||'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours||'?'}h, bedtime ${bl.typical_bedtime||'?'}, avg deep sleep ${bl.avg_deep_sleep_pct||'?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes||'none'}\n\nWrite 4–6 sentences. Reference the user's actual baseline, their strongest patterns, and one thing that makes them unique. Warm, direct, first person. They should feel genuinely seen. Start with "After [X] weeks together..."`;
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:prompt}]})});
+      const d=await res.json();
+      const txt=d.content?.[0]?.text?.trim()||"";
+      if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{}}
+    }catch(e){console.log("Memory card error:",e.message);}
+    setLoading(false);
+  }
+
+  React.useEffect(()=>{ if(!memory&&apiKey) generate(); },[apiKey]);
+
+  return (
+    <div>
+      <SecLabel>What your coach knows about you</SecLabel>
+      <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
+        {loading&&<div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Generating your coach summary...</div>}
+        {memory&&<div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>{memory}</div>}
+        {!loading&&memory&&<button onClick={()=>{setMemory(null);try{localStorage.removeItem(CACHE_KEY);}catch{}}} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
+        {!loading&&!memory&&!apiKey&&<div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to generate your coach summary.</div>}
+      </Card>
     </div>
   );
 }
@@ -2653,6 +3046,27 @@ export default function App() {
   useEffect(()=>{ if(profileData?.protein_target) setSettProt(profileData.protein_target); },[profileData?.protein_target]);
   // Publish the profile timezone to the module-level helper used by metric components
   useEffect(()=>{ if(profileData?.timezone) setActiveTz(profileData.timezone); },[profileData?.timezone]);
+
+  // Intelligence layer — runs once after data loads, then after each sync
+  const _intelligenceTs = React.useRef(0);
+  useEffect(()=>{
+    if(!profileData||!fitbitData||(fitbitData.sleep||[]).length<3) return;
+    const now=Date.now();
+    if(now-_intelligenceTs.current<60000) return; // debounce: 60s minimum between runs
+    _intelligenceTs.current=now;
+    const last30=buildLast30Days(fitbitData,allFood,cycleDates,profileData);
+    runPatternDetection(profileData,fitbitData,allFood,cycleDates).then(patterns=>{
+      setProfileData(p=>({...p,detected_patterns:patterns}));
+      return buildBehavioralBaseline(last30);
+    }).then(baseline=>{
+      if(baseline) setProfileData(p=>({...p,behavioral_baseline:baseline}));
+      return checkMilestones(profileData,last30);
+    }).then(newM=>{
+      if(newM.length>0){
+        setProfileData(p=>({...p,triggered_milestones:[...(p?.triggered_milestones||[]),...newM.map(m=>m.id)]}));
+      }
+    }).catch(e=>console.log("Intelligence layer:",e.message));
+  },[fitbitData?.sleep?.length,Object.keys(allFood).length]);
 
   useEffect(()=>{
     // Handle Google OAuth callback (token in URL hash)
