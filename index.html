@@ -363,44 +363,33 @@ function WeeklySleepMetric({fitbitData}) {
 }
 
 function WeeklyWorkoutsMetric({fitbitData}) {
-  const now=new Date();
-  // Compute day-of-week from Israel timezone, not browser local time
-  const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-  // Parse date parts directly to avoid timezone issues with getDay()
-  const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
-  const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon... // 0=Sun in Israel
+  const weekStart=getWeekStartDate();
   const weekDates=[];
-  for(let i=0;i<=dowIL;i++){
-    const d=new Date(now.getTime()-i*864e5);
+  for(let i=0;i<7;i++){
+    const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
     weekDates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));
   }
   const weekWorkouts=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
-  const weekWorkouts_=(fitbitData.workouts||[]).filter(w=>weekDates.includes(w.date));
-  console.log("WeeklyWorkouts: weekDates=",weekDates,"workouts=",fitbitData.workouts?.map(w=>w.date),"matched=",weekWorkouts_.length);
   const types=[...new Set(weekWorkouts.map(w=>w.type))];
   const sub=types.length?types.join(" · "):"rest so far";
-  // Also compute last 7 days for context
-  const last7Dates=[];
-  for(let i=0;i<7;i++){const d=new Date(now.getTime()-i*864e5);last7Dates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));}
-  const last7Count=(fitbitData.workouts||[]).filter(w=>last7Dates.includes(w.date)).length;
-  return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.pu:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.pu}}>{sub}{last7Count>weekWorkouts.length?` · ${last7Count} last 7d`:""}</div></div>;
+  return <div style={s.mc}><div style={s.ml}>This week</div><div style={{...s.mv,color:weekWorkouts.length>0?C.pu:C.t3}}>{weekWorkouts.length}</div><div style={{...s.ms,color:C.pu}}>{sub}</div></div>;
 }
 
 function WeeklyStepsMetric({fitbitData}) {
   const now=new Date();
-  const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-  // Parse date parts directly to avoid timezone issues with getDay()
-  const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
-  const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
+  const todayStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
+  const weekStart=getWeekStartDate();
   let total=0;
-  for(let i=0;i<=dowIL;i++){
-    const d=new Date(now.getTime()-i*864e5);
+  const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  for(let i=0;i<7;i++){
+    const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
     const dateStr=d.toLocaleDateString("en-CA",{timeZone:getTz()});
     const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
     if(rec) total+=rec.steps;
   }
-  const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>Sun–{dayNames[dowIL]} this week</div></div>;
+  const [ty,tm,td]=todayStr.split("-").map(Number);
+  const todayDow=new Date(ty,tm-1,td).getDay();
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>Sun–{dayNames[todayDow]} this week</div></div>;
 }
 
 function SleepTileMetric({fitbitData}) {
@@ -765,6 +754,18 @@ Situation: Coach has 4+ weeks of data
 Coach: "Four weeks in, here's what I've learned about you: you're a night person who does best when you stop fighting it. Your strongest training days follow good sleep — almost without exception. You rarely eat before noon and that seems to work fine for you. Your luteal phase is genuinely harder on your energy, and that's biology, not weakness. And you're more consistent than you probably give yourself credit for."
 `;
 
+function getWeekStartDate() {
+  const now = new Date();
+  const todayIL = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+  const [y,m,d] = todayIL.split("-").map(Number);
+  const dow = new Date(y,m-1,d).getDay(); // 0=Sunday
+  return new Date(y,m-1,d-dow); // go back to Sunday
+}
+function getWeekEndDate() {
+  const sun = getWeekStartDate();
+  return new Date(sun.getFullYear(),sun.getMonth(),sun.getDate()+6,23,59,59,999);
+}
+
 function buildCoachSystemPrompt(profileData, todayData, detectedPatterns, behavioralBaseline, recentHistory) {
   const calcAge = dob => {
     if (!dob) return "unknown";
@@ -834,6 +835,26 @@ PENDING RECOMMENDATION FOLLOW-UPS:
 ${pendingText}
 
 BASELINE STATUS: ${baselineOk?'Baseline established.':'Still in calibration (first 14 days). Do not judge against targets.'}
+
+SIGNAL HIERARCHY — use when data sends conflicting messages:
+1. User logs (what the person said about how they feel) — always highest priority
+2. Cumulative training load (training days in last 14 days) — overrides single-day signals
+3. HRV and resting HR trend — objective recovery markers
+4. Readiness score — good composite but can be inflated by one good night
+5. Cycle phase — tendency not certainty — lowest priority when conflicting with above
+
+WHEN SIGNALS CONFLICT:
+- Name the tension in one sentence
+- State which signal you are weighting more and why, in plain language
+- Give one soft recommendation
+- End with acknowledgment that the user knows their body best
+- Example: "Your sleep was strong and your cycle is favorable — but you have trained 10 of the last 14 days. Your body may feel ready while still carrying cumulative load. A lighter session today might be the smarter play — but if you feel strong, trust that too."
+
+COHERENCE RULE — mandatory:
+The headline and every subsection must reflect the same conclusion.
+If recovery signals caution → headline cannot encourage pushing hard.
+If headline says rest → nutrition and tonight must support recovery, not performance.
+Before generating each subsection, check: does this contradict anything already said? If yes, rewrite until all sections tell one coherent story.
 
 ${COACH_FEW_SHOT_EXAMPLES}`;
 }
@@ -1022,6 +1043,8 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
+  const [weeklyReview, setWeeklyReview] = useState(()=>{try{const s=localStorage.getItem("weekly_review");return s?JSON.parse(s):null;}catch{return null;}});
+  const [weeklyReviewLoading, setWeeklyReviewLoading] = useState(false);
   const [coachContent, setCoachContent] = useState(null); // {headline,recovery,tonight,nutrition,isWeekly,isLearning}
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachDismissed, setCoachDismissed] = useState(false);
@@ -1091,12 +1114,25 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
         cyclePhase:cyclePhaseStr
       };
       const systemPrompt=buildCoachSystemPrompt(profileData,todayDataCtx,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
-      const userMsg = isWeekly
-        ? `Write the weekly Sunday coach letter. Return ONLY valid JSON, nothing else:
-{"headline":"One paragraph (4-6 sentences): what went well this week with real data, one pattern noticed, one specific suggestion for next week. Warm coach voice.","recovery":"One sentence on recovery trend this week specifically — HRV, training load, or sleep quality.","tonight":"One sentence: what to do tonight to set up a strong next week.","nutrition":"One sentence on the week's nutrition pattern. Foods logged this week. Do NOT suggest any specific food as a new idea if it was already logged today (${foodSummary}).","isWeekly":true}`
-        : `Generate today's complete coaching content. Return ONLY valid JSON, nothing else:
-{"headline":"1-2 sentences. Big picture of today based on last night's sleep, readiness, and cycle phase. Do NOT mention nutrition, recovery specifics, or tonight's plan here — those go in their own fields.","recovery":"1 sentence. Go deeper on recovery — HRV trend, training load, or readiness detail NOT already in headline.","tonight":"1 sentence. One specific action for tonight to improve tomorrow (sleep timing, wind-down, supplement if relevant).","nutrition":"1 sentence. Based ONLY on what has been logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If close to protein target, acknowledge that. If nothing logged, suggest the first meal of the day."}
-Rules: headline, recovery, tonight, nutrition must each cover only their own domain and not repeat each other.`;
+      const userMsg = `Generate today's complete coaching content as one coherent story.
+
+First, assess the overall picture using the signal hierarchy: check training load (${trainingDays} training days in last 14), readiness, cycle phase, HRV trend, and any user logs. Decide ONE overall message — push, maintain, or recover. Everything must support that one message.
+
+Return ONLY valid JSON, nothing else:
+{
+  "overall_signal": "push | maintain | recover",
+  "headline": "1-2 sentences. The big picture today based on your overall_signal. Never mention subsection-specific topics (recovery detail, tonight plan, nutrition) — those go in their own fields.",
+  "recovery": "1 sentence. Supports the overall_signal. Goes deeper on recovery — HRV trend, training load detail, or readiness nuance NOT in headline. Does not contradict headline.",
+  "tonight": "1 sentence. Supports the overall_signal. One specific suggestion for tonight.",
+  "nutrition": "1 sentence. Supports the overall_signal. Based ONLY on actual food logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If overall_signal is recover, nutrition supports recovery. If push, nutrition supports performance. If protein target is close to met, acknowledge that."
+}
+
+Rules:
+- Decide overall_signal first — headline and all subsections must reflect it
+- No section contradicts any other section
+- No section repeats content from another section
+- All language warm, tentative, non-guilt
+- Never suggest a food already eaten today`;
       const raw = await callCoachAI(userMsg, systemPrompt);
       const clean = raw.replace(/```json|```/g,"").trim();
       const m = clean.match(/\{[\s\S]*\}/);
@@ -1107,6 +1143,71 @@ Rules: headline, recovery, tonight, nutrition must each cover only their own dom
       }
     }catch(e){ console.log("Coach content error:",e.message); }
     setCoachLoading(false);
+  }
+
+  function shouldShowWeeklyReview() {
+    const now = new Date();
+    const todayIL = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+    const [y,m,d] = todayIL.split("-").map(Number);
+    const dow = new Date(y,m-1,d).getDay();
+    const hour = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
+    const isSaturdayEvening = dow===6 && hour>=18;
+    // Also show if already generated this week and not dismissed
+    const stored = weeklyReview;
+    if(stored?.dismissed) return false;
+    if(stored?.generatedAt) {
+      const weekStart = getWeekStartDate();
+      const genDate = new Date(stored.generatedAt);
+      if(genDate >= weekStart) return true;
+    }
+    return isSaturdayEvening;
+  }
+
+  async function generateWeeklyReview(forceRefresh=false) {
+    if(!apiKey) return;
+    const weekStart = getWeekStartDate();
+    const weekEnd = getWeekEndDate();
+    if(!forceRefresh && weeklyReview?.generatedAt && new Date(weeklyReview.generatedAt) >= weekStart) return;
+    setWeeklyReviewLoading(true);
+    try {
+      const fmt = d => d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+      const dateRange = `${fmt(weekStart)} – ${fmt(weekEnd)}`;
+      // Gather this week's data (Sun–Sat)
+      const weekKeys = [];
+      for(let i=0;i<7;i++){
+        const d = new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
+        weekKeys.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));
+      }
+      const weekWorkouts = (fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date));
+      const weekSleep = (fitbitData.sleep||[]).filter(s=>weekKeys.includes(s.date));
+      const avgSleepMin = weekSleep.length ? Math.round(weekSleep.reduce((s,r)=>s+r.total,0)/weekSleep.length) : null;
+      const protDaysHit = weekKeys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
+      const stepDaysHit = weekKeys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
+      const weekSummary = `Week ${dateRange}: ${weekWorkouts.length} workouts (${[...new Set(weekWorkouts.map(w=>w.type))].join(", ")||"none"}), avg sleep ${avgSleepMin?Math.floor(avgSleepMin/60)+"h"+(avgSleepMin%60)+"m":"not tracked"}, protein target hit ${protDaysHit}/7 days, step target hit ${stepDaysHit}/7 days.`;
+      const now = new Date();
+      const _lps = cycleLog?.last_period_start || null;
+      let cyclePhaseStr = null;
+      if(_lps){const {phase}=calculateCyclePhase(_lps,cycleLog?.avg_cycle_length||28);cyclePhaseStr=phase;}
+      const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePhaseStr?`Cycle phase: ${cyclePhaseStr}`:null},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
+      const userMsg = `Write this week's weekly coach review covering ${dateRange} (Sunday through Saturday — Israeli week convention). Week data: ${weekSummary}
+
+Write 4–6 sentences covering exactly these four things in order:
+1. One trend observed across the full week — not a single day, a pattern across multiple days
+2. One cross-factor insight only visible across a week of data (e.g. best readiness scores followed days with both a workout and 7+ hours of sleep)
+3. One honest acknowledgment of where the week was harder — no guilt, just honesty
+4. One specific focus for the coming week tied to the user's goals — specific and actionable
+
+Warm first-person coach voice. Reference actual numbers. Do not mention any single day in isolation — week-level view only. End naturally, not formally.
+
+Return plain text only — no JSON, no headers, no bullet points. Just the paragraph.`;
+      const text = await callCoachAI(userMsg, systemPrompt);
+      const record = {text, dateRange, generatedAt: now.toISOString(), dismissed: false};
+      setWeeklyReview(record);
+      localStorage.setItem("weekly_review", JSON.stringify(record));
+      // Also save to profiles if columns exist
+      supa("PATCH","profiles",{weekly_review:text,weekly_review_generated_at:now.toISOString(),weekly_review_dismissed:false},`uid=eq.${UID}`).catch(()=>{});
+    } catch(e){ console.log("Weekly review error:",e.message); }
+    setWeeklyReviewLoading(false);
   }
 
   async function callAI(prompt) {
@@ -1236,6 +1337,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
   return (
@@ -1549,12 +1651,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
       <hr style={s.hr}/>
       <SecLabel>{(()=>{
-        const now=new Date();
-        const todayIL=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-        const [wy,wm,wd]=todayIL.split("-").map(Number);
-        const wdow=new Date(wy,wm-1,wd).getDay();
-        const sun=new Date(wy,wm-1,wd-wdow);
-        const sat=new Date(wy,wm-1,wd-wdow+6);
+        const sun=getWeekStartDate();
+        const sat=getWeekEndDate();
         const fmt=(d)=>d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
         return `This week — ${fmt(sun)} – ${fmt(sat)}`;
       })()}</SecLabel>
@@ -1566,17 +1664,71 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
       </div>
 
-      {/* AI WEEK */}
-      <div style={s.aiCard}>
-        <div style={s.aiLbl}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
-          AI coach — weekly review
-          <button onClick={()=>genAI("week")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+      {/* THIS WEEK SO FAR — data only, always visible */}
+      {(()=>{
+        const weekStart=getWeekStartDate();
+        const weekKeys=Array.from({length:7},(_,i)=>{
+          const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
+          return d.toLocaleDateString("en-CA",{timeZone:getTz()});
+        });
+        const at=profileData?.activity_targets||{};
+        const workoutsThisWeek=(fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date));
+        const strengthDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").length;
+        const mobilityDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="mobility").length;
+        const cardioDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio").length;
+        const sleepThisWeek=(fitbitData.sleep||[]).filter(s=>weekKeys.includes(s.date));
+        const avgSleepMin=sleepThisWeek.length?Math.round(sleepThisWeek.reduce((a,r)=>a+r.total,0)/sleepThisWeek.length):null;
+        const protDays=weekKeys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
+        const rows=[
+          ["Strength",strengthDone,at.strength||2],
+          ["Mobility",mobilityDone,at.mobility||2],
+          ["Cardio",cardioDone,at.cardio||2],
+        ];
+        return (
+          <div style={s.aiCard}>
+            <div style={s.aiLbl}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+              This week so far
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 12px",marginBottom:6}}>
+              {rows.map(([label,done,target])=>(
+                <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                  <span style={{color:C.t2}}>{label}</span>
+                  <span style={{fontWeight:600,color:done>=target?C.teal:C.tx}}>{done}<span style={{fontWeight:400,color:C.t3}}>/{target}</span></span>
+                </div>
+              ))}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:C.t2}}>Avg sleep</span>
+                <span style={{fontWeight:600,color:C.tx}}>{avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"—"}</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:C.t2}}>Protein days</span>
+                <span style={{fontWeight:600,color:protDays>=5?C.teal:C.tx}}>{protDays}<span style={{fontWeight:400,color:C.t3}}>/7</span></span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* WEEKLY REVIEW — Saturday evening + persistent until dismissed */}
+      {shouldShowWeeklyReview()&&(
+        <div style={s.aiCard}>
+          <div style={s.aiLbl}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+            Weekly review
+            {weeklyReview?.dateRange&&<span style={{fontSize:10,color:C.t3,marginLeft:6}}>{weeklyReview.dateRange}</span>}
+            <button onClick={()=>{const r={...weeklyReview};r.dismissed=true;setWeeklyReview(r);localStorage.setItem("weekly_review",JSON.stringify(r));}} style={{marginLeft:"auto",fontSize:10,background:"none",border:"none",color:C.t3,cursor:"pointer"}}>dismiss</button>
+          </div>
+          {weeklyReviewLoading&&!weeklyReview?.text
+            ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Writing your weekly review...</div>
+            : weeklyReview?.text
+              ? <div style={{fontSize:13,color:C.tx,lineHeight:1.65}}>{weeklyReview.text}</div>
+              : <div style={{fontSize:12,color:C.t3}}>—</div>}
+          {weeklyReview?.text&&!weeklyReviewLoading&&(
+            <button onClick={()=>generateWeeklyReview(true)} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:8}}>Refresh</button>
+          )}
         </div>
-        {loading.week ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
-         : aiWeek ? formatAI(aiWeek)
-         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
-      </div>
+      )}
 
       {/* STEP BARS */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
@@ -1584,16 +1736,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
           <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
             {(()=>{
-              // Get current week's steps from fitbitData
               const now=new Date();
-              const nowILStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-              const [nowY,nowM,nowD2]=nowILStr.split("-").map(Number);
-              const dow=new Date(nowY,nowM-1,nowD2).getDay(); // 0=Sun
-              // Compute Sunday of this week using date strings to avoid timezone mutation bugs
-              const todayStrBar=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-              const todayPartsBar=todayStrBar.split("-").map(Number);
-              const dowILBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]).getDay();
-              const sundayBar=new Date(todayPartsBar[0],todayPartsBar[1]-1,todayPartsBar[2]-dowILBar);
+              const sundayBar=getWeekStartDate();
               const dayLabels=["S","M","T","W","T","F","S"];
               const weekSteps=dayLabels.map((_,i)=>{
                 const d=new Date(sundayBar.getFullYear(),sundayBar.getMonth(),sundayBar.getDate()+i);
