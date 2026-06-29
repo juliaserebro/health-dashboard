@@ -992,10 +992,9 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
-  const [coachCard, setCoachCard] = useState(null);
+  const [coachContent, setCoachContent] = useState(null); // {headline,recovery,tonight,nutrition,isWeekly,isLearning}
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachDismissed, setCoachDismissed] = useState(false);
-  const [coachWhy, setCoachWhy] = useState(false);
   const [pendingMilestone, setPendingMilestone] = useState(null);
 
   const todayFood = allFood[tkey()]||[];
@@ -1016,62 +1015,67 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     return d.content[0].text.trim();
   }
 
-  async function generateCoachCard() {
+  async function generateAllCoachContent(forceRefresh=false) {
     if(!apiKey) return;
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
-    // Check localStorage cache — only regenerate once per day
-    try {
-      const cached = localStorage.getItem("coach_card_"+todayKey);
-      if(cached) { setCoachCard(JSON.parse(cached)); return; }
-    } catch(e){}
-    // Check if enough data exists (need at least 7 sleep records)
+    if(!forceRefresh){
+      try{
+        const cached = localStorage.getItem("coach_content_"+todayKey);
+        if(cached){ setCoachContent(JSON.parse(cached)); return; }
+      }catch(e){}
+    }
     const sleepCount = (fitbitData.sleep||[]).length;
-    if(sleepCount < 3) {
-      setCoachCard({insight:"Your coach is learning your patterns — check back in a few days for your first personalised insight.", why:null, isLearning:true});
+    if(sleepCount < 3){
+      setCoachContent({isLearning:true,headline:"Your coach is learning your patterns — check back in a few days for your first personalised insight.",recovery:null,tonight:null,nutrition:null});
       return;
     }
     setCoachLoading(true);
-    try {
+    try{
       const lastSleep = (fitbitData.sleep||[]).find(s=>s.date===todayKey)||null;
       const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
       const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
       const _lps = cycleLog?.last_period_start || (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
       let cyclePhaseStr = null;
       if(_lps){const {phase,cycleDay}=calculateCyclePhase(_lps,cycleLog?.avg_cycle_length||28);cyclePhaseStr=`Day ${cycleDay}/${cycleLog?.avg_cycle_length||28}, ${phase} phase`;}
-      const prot = Math.round((allFood[todayKey]||[]).reduce((s,e)=>s+(e.p||0),0));
-      const todayData = {
-        sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:'Sleep: not tracked last night',
-        stepsLine:todaySteps?`Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target||8000})`:'Steps: no data yet',
-        workoutsLine:todayWorkouts.length?`Workouts today: ${todayWorkouts.map(w=>w.type).join(', ')}`:'Workouts: none yet today',
-        nutritionLine:(allFood[todayKey]||[]).length?`Nutrition today: ${prot}g protein (target ${protTgt}g)`:'Nutrition: not logged yet',
+      const todayFoodEntries = allFood[todayKey]||[];
+      const prot = Math.round(todayFoodEntries.reduce((s,e)=>s+(e.p||0),0));
+      const foodNames = todayFoodEntries.map(e=>e.n||e.name||e.description).filter(Boolean);
+      const foodSummary = foodNames.length>0 ? foodNames.join(", ") : "nothing logged yet today";
+      const last14Keys = Array.from({length:14},(_,i)=>{const d=new Date(now.getTime()-i*864e5);return d.toLocaleDateString("en-CA",{timeZone:getTz()});});
+      const trainingDays=(fitbitData.workouts||[]).filter(w=>last14Keys.includes(w.date)).map(w=>w.date).filter((v,i,a)=>a.indexOf(v)===i).length;
+      const proteinHitDays=last14Keys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
+      const stepHitDays=last14Keys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
+      const recentSleep=(fitbitData.sleep||[]).filter(s=>last14Keys.includes(s.date));
+      const avgSleep=recentSleep.length?(recentSleep.reduce((s,r)=>s+r.total,0)/recentSleep.length/60).toFixed(1)+"h":"insufficient data";
+      const pendingFeedback=(profileData?.coach_suggestion_log||[]).filter(l=>{if(!l.date)return false;return(new Date()-new Date(l.date))/864e5<=7&&l.followed===null;});
+      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback};
+      const hour=parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
+      const dow=new Date(todayKey+"T12:00:00").getDay();
+      const isWeekly=dow===0&&hour>=18;
+      const todayDataCtx={
+        sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: not tracked last night",
+        stepsLine:todaySteps?`Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target||8000})`:"Steps: no data yet",
+        workoutsLine:todayWorkouts.length?`Workouts today: ${todayWorkouts.map(w=>w.type).join(", ")}`:"Workouts: none yet today",
+        nutritionLine:todayFoodEntries.length?`Nutrition today: ${prot}g protein (target ${protTgt}g)`:"Nutrition: not logged yet",
         cyclePhase:cyclePhaseStr
       };
-      const last14Keys = Array.from({length:14},(_,i)=>{const d=new Date(now.getTime()-i*864e5);return d.toLocaleDateString("en-CA",{timeZone:getTz()});});
-      const trainingDays = (fitbitData.workouts||[]).filter(w=>last14Keys.includes(w.date)).map(w=>w.date).filter((v,i,a)=>a.indexOf(v)===i).length;
-      const proteinHitDays = last14Keys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
-      const stepHitDays = last14Keys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
-      const recentSleep = (fitbitData.sleep||[]).filter(s=>last14Keys.includes(s.date));
-      const avgSleep = recentSleep.length?(recentSleep.reduce((s,r)=>s+r.total,0)/recentSleep.length/60).toFixed(1)+'h':'insufficient data';
-      const pendingFeedback = (profileData?.coach_suggestion_log||[]).filter(l=>{if(!l.date)return false;return(new Date()-new Date(l.date))/864e5<=7&&l.followed===null;});
-      const recentHistory = {trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback};
-      const hour = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
-      const dow = new Date(todayKey+"T12:00:00").getDay();
-      const isWeekly = dow===0&&hour>=18;
-      const systemPrompt = buildCoachSystemPrompt(profileData,todayData,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
+      const systemPrompt=buildCoachSystemPrompt(profileData,todayDataCtx,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
       const userMsg = isWeekly
-        ? `Write the weekly coach letter. It is Sunday evening. One paragraph (4–6 sentences): name one specific thing that went well this week with real data, name one pattern you noticed, give one specific suggestion for next week. Warm, first-person coach voice. Real numbers only. Also write a 1-sentence "why?" explanation. Respond as JSON: {"insight":"...","why":"...","isWeekly":true}`
-        : `Generate today's coaching insight. One observation (1 sentence) + one suggestion (1 sentence). If there's a pending follow-up with a positive outcome, lead with that instead. If nothing notable, warm positive reinforcement of something going well. Never invent data. Also write a 1-sentence "why?" explanation. Respond as JSON: {"insight":"...","why":"..."}`;
+        ? `Write the weekly Sunday coach letter. Return ONLY valid JSON, nothing else:
+{"headline":"One paragraph (4-6 sentences): what went well this week with real data, one pattern noticed, one specific suggestion for next week. Warm coach voice.","recovery":"One sentence on recovery trend this week specifically — HRV, training load, or sleep quality.","tonight":"One sentence: what to do tonight to set up a strong next week.","nutrition":"One sentence on the week's nutrition pattern. Foods logged this week. Do NOT suggest any specific food as a new idea if it was already logged today (${foodSummary}).","isWeekly":true}`
+        : `Generate today's complete coaching content. Return ONLY valid JSON, nothing else:
+{"headline":"1-2 sentences. Big picture of today based on last night's sleep, readiness, and cycle phase. Do NOT mention nutrition, recovery specifics, or tonight's plan here — those go in their own fields.","recovery":"1 sentence. Go deeper on recovery — HRV trend, training load, or readiness detail NOT already in headline.","tonight":"1 sentence. One specific action for tonight to improve tomorrow (sleep timing, wind-down, supplement if relevant).","nutrition":"1 sentence. Based ONLY on what has been logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If close to protein target, acknowledge that. If nothing logged, suggest the first meal of the day."}
+Rules: headline, recovery, tonight, nutrition must each cover only their own domain and not repeat each other.`;
       const raw = await callCoachAI(userMsg, systemPrompt);
-      const m = raw.match(/\{[\s\S]*?\}/);
+      const clean = raw.replace(/```json|```/g,"").trim();
+      const m = clean.match(/\{[\s\S]*\}/);
       if(m){
-        const card = JSON.parse(m[0]);
-        setCoachCard(card);
-        localStorage.setItem("coach_card_"+todayKey, JSON.stringify(card));
-        // Log the suggestion if there is one
-        if(card.suggestion) logCoachSuggestion(profileData, card.suggestion, null).catch(()=>{});
+        const content = JSON.parse(m[0]);
+        setCoachContent(content);
+        localStorage.setItem("coach_content_"+todayKey, JSON.stringify(content));
       }
-    } catch(e){ console.log("Coach card error:",e.message); }
+    }catch(e){ console.log("Coach content error:",e.message); }
     setCoachLoading(false);
   }
 
@@ -1200,33 +1204,34 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const latestSleepDate=(fitbitData.sleep||[]).reduce((m,s)=>s.date>m?s.date:m,"");
   const sevenDaysAgo=new Date(Date.now()-7*864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
-  useEffect(()=>{ if(apiKey && fitbitReady){genAI("today");genAI("week");} },[apiKey, aiRefreshTick, latestSleepDate]);
-  useEffect(()=>{ if(apiKey && profileData) generateCoachCard(); },[apiKey, latestSleepDate, profileData?.uid]);
+  useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
   return (
     <div>
       {/* ── COACH CARD ─────────────────────────────────────── */}
       {!coachDismissed&&(()=>{
-        // Milestone takes priority
-        const milestone = pendingMilestone || (profileData?.triggered_milestones&&false); // shown via pendingMilestone state only
-        if(coachLoading&&!coachCard) return <Card style={{marginBottom:14}}><div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Your coach is thinking...</div></Card>;
-        if(!coachCard&&!apiKey) return null;
-        if(!coachCard) return null;
+        if(!apiKey) return null;
+        if(coachLoading&&!coachContent) return (
+          <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>🧠 Your coach</div>
+            <div style={{fontSize:13,color:C.t3}}>Your coach is reviewing your night...</div>
+          </Card>
+        );
+        if(!coachContent) return null;
         return (
           <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
             <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
               <div style={{flex:1}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>{coachCard.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
-                <div style={{fontSize:13,color:C.tx,lineHeight:1.65}}>{coachCard.isLearning?<span style={{color:C.t2}}>{coachCard.insight}</span>:coachCard.insight}</div>
-                {coachCard.why&&coachWhy&&<div style={{fontSize:12,color:C.t2,marginTop:6,lineHeight:1.55,paddingTop:6,borderTop:`1px solid ${C.s2}`}}>{coachCard.why}</div>}
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
+                <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{coachContent.headline}</div>
               </div>
               <button onClick={()=>setCoachDismissed(true)} style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.t3,flexShrink:0,marginTop:-2}}>×</button>
             </div>
-            {!coachCard.isLearning&&coachCard.why&&(
+            {!coachContent.isLearning&&(
               <div style={{marginTop:8,display:"flex",gap:6}}>
-                <button onClick={()=>setCoachWhy(v=>!v)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>{coachWhy?"Hide why":"Why?"}</button>
-                <button onClick={()=>{const todayKey=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});localStorage.removeItem("coach_card_"+todayKey);setCoachCard(null);generateCoachCard();}} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Refresh</button>
+                <button onClick={()=>{const tk=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});localStorage.removeItem("coach_content_"+tk);setCoachContent(null);generateAllCoachContent(true);}} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Refresh</button>
               </div>
             )}
           </Card>
@@ -1424,31 +1429,36 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
       </div>
 
-      {/* AI TODAY */}
-      <div style={s.aiCard}>
-        <div style={s.aiLbl}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
-          AI coach — today
-          <button onClick={()=>genAI("today")} style={{marginLeft:"auto",fontSize:10,background:C.pl,color:C.pu,border:"none",borderRadius:20,padding:"2px 8px",cursor:"pointer"}}>refresh</button>
+      {/* TODAY'S INSIGHTS */}
+      {apiKey&&(
+        <div style={s.aiCard}>
+          <div style={s.aiLbl}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+            Today's insights
+          </div>
+          {(()=>{
+            const loading_ = coachLoading && !coachContent;
+            const subsections = [
+              {key:"recovery", label:"💪 Recovery"},
+              {key:"tonight",  label:"🌙 Tonight"},
+              {key:"nutrition",label:"🥗 Nutrition"},
+            ];
+            if(!coachContent&&!coachLoading&&!apiKey) return <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>;
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {subsections.map(({key,label})=>(
+                  <div key={key}>
+                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".08em",color:C.t2,marginBottom:3}}>{label}</div>
+                    {loading_ ? <div style={{fontSize:12,color:C.t3}}>Loading...</div>
+                      : coachContent?.[key] ? <div style={{fontSize:13,color:C.tx,lineHeight:1.6}}>{coachContent[key]}</div>
+                      : <div style={{fontSize:12,color:C.t3}}>—</div>}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
-        {loading.today ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Generating...</div>
-         : aiToday ? formatAI(aiToday)
-         : apiKey ? <div>
-           <div style={{fontSize:12,color:C.t2,marginBottom:8}}>Ready to generate. Tap refresh above or the button below.</div>
-           <button onClick={async()=>{
-             try{
-               setLoading(l=>({...l,today:true}));
-               const ctx=buildCtx();
-               const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,messages:[{role:"user",content:ctx+"\n\nGenerate a brief coaching note for today. FORMAT: emoji + CAPS LABEL on own line, then bold **action**, then one sentence why. Sections: ACTIVITY, NUTRITION, RECOVERY. Max 2 lines each."}]})});
-               const d=await res.json();
-               if(d.error)throw new Error(d.error.message);
-               setAiToday(d.content[0].text.trim());
-             }catch(err){setAiToday("Error: "+err.message);}
-             finally{setLoading(l=>({...l,today:false}));}
-           }} style={{fontSize:12,color:C.pu,background:C.pl,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}}>Generate today&#39;s briefing</button>
-         </div>
-         : <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>}
-      </div>
+      )}
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
         {/* SLEEP LAST NIGHT */}
