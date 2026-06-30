@@ -2286,7 +2286,11 @@ Input: ${txtInput}`;
   async function delFood(i) {
     const entry=food[i];
     if(entry?.dbid){try{await supa("DELETE","food_log",null,"id=eq."+entry.dbid);}catch(e){}}
-    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].filter((_,j)=>j!==i)}));
+    setAllFood(prev=>{
+      const updated={...prev,[foodDate]:(prev[foodDate]||[]).filter((_,j)=>j!==i)};
+      localStorage.setItem("jfood_backup",JSON.stringify(updated));
+      return updated;
+    });
   }
 
   async function saveEdit() {
