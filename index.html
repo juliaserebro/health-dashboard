@@ -143,24 +143,82 @@ function calcCycleDay(startDateStr) {
   return (diff % 28) + 1;
 }
 
-function calculateCyclePhase(lastPeriodStart, avgCycleLength=28, avgPeriodLength=5) {
-  if(!lastPeriodStart) return {phase:'unknown',cycleDay:null,nextPeriod:null};
+// Dr. Shira's clinical model: luteal phase is biologically fixed at 14 days;
+// follicular phase absorbs all cycle-length variability.
+// Accepts an array of period start date strings (most recent first) and avgPeriodLength.
+// Can also be called with a single date string for backward compat (wraps to array).
+function calculateCyclePhase(periodStartDatesOrStr, avgPeriodLength=5) {
+  const periodStartDates = Array.isArray(periodStartDatesOrStr)
+    ? periodStartDatesOrStr
+    : (periodStartDatesOrStr ? [periodStartDatesOrStr] : []);
+  const avgPL = avgPeriodLength || 5;
+
+  if (!periodStartDates || periodStartDates.length === 0) {
+    return {phase:'unknown',cycleDay:null,nextPeriod:null,confidence:'no_data',variability:'insufficient_data',avgCycleLength:28,avgPeriodLength:avgPL,cyclesUsedForCalculation:0};
+  }
+
+  const sorted = [...periodStartDates].filter(Boolean).sort((a,b) => new Date(b)-new Date(a));
+  const lastPeriodStart = sorted[0];
+
+  // Gap lengths between consecutive period starts
+  const cycleLengths = [];
+  for (let i = 0; i < sorted.length-1; i++) {
+    const diff = Math.round((new Date(sorted[i])-new Date(sorted[i+1])) / 864e5);
+    if (diff > 10 && diff < 90) cycleLengths.push(diff); // sanity bounds
+  }
+
+  let avgCycleLength = 28;
+  let confidence = 'low';
+  let variability = 'insufficient_data';
+
+  if (cycleLengths.length === 0) {
+    confidence = 'low';
+  } else if (cycleLengths.length === 1) {
+    avgCycleLength = cycleLengths[0];
+    confidence = 'low';
+  } else {
+    avgCycleLength = Math.round(cycleLengths.reduce((a,b)=>a+b,0) / cycleLengths.length);
+    const variance = cycleLengths.reduce((sum,len)=>sum+Math.pow(len-avgCycleLength,2),0) / cycleLengths.length;
+    const stdDev = Math.sqrt(variance);
+    if (stdDev > 7) {
+      variability = 'highly_irregular';
+      confidence = 'very_low';
+    } else if (stdDev > 4) {
+      variability = 'irregular';
+      confidence = 'moderate';
+    } else {
+      variability = 'regular';
+      confidence = cycleLengths.length >= 3 ? 'high' : 'moderate';
+    }
+  }
+
   const today = new Date();
   const lastPeriod = new Date(lastPeriodStart+"T12:00:00");
-  const rawDay = Math.floor((today - lastPeriod) / (1000*60*60*24)) + 1;
-  const cl = avgCycleLength || 28;
-  const pl = avgPeriodLength || 5;
-  const dayInCycle = ((rawDay - 1) % cl) + 1;
-  const lutealStart = cl - 14;
-  const ovulatoryStart = lutealStart - 2;
+  const daysSince = Math.floor((today - lastPeriod) / 864e5) + 1;
+  const cycleDay = ((daysSince - 1) % avgCycleLength) + 1;
+
+  // Fixed 14-day luteal; ovulatory window is 2 days before luteal; follicular fills the rest
+  const lutealStartDay = avgCycleLength - 14 + 1;
+  const ovulatoryStartDay = lutealStartDay - 2;
+  const follicularStartDay = avgPL + 1;
+
   let phase;
-  if(dayInCycle <= pl) phase='menstrual';
-  else if(dayInCycle < ovulatoryStart) phase='follicular';
-  else if(dayInCycle <= lutealStart) phase='ovulatory';
-  else phase='luteal';
+  if (cycleDay <= avgPL)                 phase = 'menstrual';
+  else if (cycleDay < ovulatoryStartDay) phase = 'follicular';
+  else if (cycleDay < lutealStartDay)    phase = 'ovulatory';
+  else                                    phase = 'luteal';
+
+  const cyclesElapsed = Math.floor((daysSince - 1) / avgCycleLength);
   const nextPeriod = new Date(lastPeriod);
-  nextPeriod.setDate(lastPeriod.getDate() + cl * Math.ceil(rawDay / cl));
-  return {phase, cycleDay:dayInCycle, nextPeriod:nextPeriod.toISOString().slice(0,10)};
+  nextPeriod.setDate(lastPeriod.getDate() + avgCycleLength * (cyclesElapsed + 1));
+
+  return {phase, cycleDay, nextPeriod:nextPeriod.toISOString().slice(0,10), avgCycleLength, avgPeriodLength:avgPL, confidence, variability, cyclesUsedForCalculation:cycleLengths.length};
+}
+
+function getPhaseDisplayText(result) {
+  const labels = {menstrual:'Menstrual',follicular:'Follicular',ovulatory:'Ovulatory',luteal:'Luteal',unknown:'Not enough data yet'};
+  const prefix = {no_data:'',low:'Estimated — ',moderate:'Likely ',high:'',very_low:'Uncertain — '};
+  return (prefix[result.confidence]||'') + (labels[result.phase]||result.phase);
 }
 
 async function saveCycleDates(newDate, avgPeriodLen=5) {
@@ -176,8 +234,14 @@ async function saveCycleDates(newDate, avgPeriodLen=5) {
     cycleLengths.push(Math.round((new Date(merged[i])-new Date(merged[i+1]))/864e5));
   }
   const avgCycleLength = cycleLengths.length ? Math.round(cycleLengths.reduce((a,b)=>a+b,0)/cycleLengths.length) : 28;
-  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
-  return {merged, avgCycleLength};
+  let cycle_variability = 'insufficient_data';
+  if (cycleLengths.length >= 2) {
+    const variance = cycleLengths.reduce((s,l)=>s+Math.pow(l-avgCycleLength,2),0)/cycleLengths.length;
+    const std = Math.sqrt(variance);
+    cycle_variability = std > 7 ? 'highly_irregular' : std > 4 ? 'irregular' : 'regular';
+  }
+  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0],cycle_variability},"on_conflict=uid");
+  return {merged, avgCycleLength, cycle_variability};
 }
 
 async function supa(method, table, body, query) {
@@ -310,9 +374,10 @@ function Spinner() {
 function CyclePhaseMetric({cycleDates, cycleLog}) {
   const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
   if(!lastPeriodStart) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
-  const {phase,cycleDay} = calculateCyclePhase(lastPeriodStart, cycleLog?.avg_cycle_length||28);
-  const ph = phase?phase.charAt(0).toUpperCase()+phase.slice(1):"—";
-  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {cycleDay||"—"} of cycle</div></div>;
+  const datesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : [lastPeriodStart];
+  const res = calculateCyclePhase(datesArr, cycleLog?.avg_period_length||5);
+  const ph = res.phase?getPhaseDisplayText(res):"—";
+  return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {res.cycleDay||"—"} of cycle</div></div>;
 }
 
 // ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
@@ -830,7 +895,12 @@ Protein target: ${profileData?.protein_target||100}g/day
 Step target: ${profileData?.step_target||8000} steps/day
 Supplements: ${supps}
 Health notes: ${profileData?.health_notes||'none'}
-Cycle tracking: ${profileData?.cycle_tracking?'active':'not tracking'}
+Cycle tracking: ${profileData?.cycle_tracking?'active':'not tracking'}${todayData?.cycleResult?`
+Current cycle phase: ${todayData.cycleResult.confidence==='very_low'||todayData.cycleResult.confidence==='no_data'?'uncertain — limited cycle data available':todayData.cycleResult.phase}
+Cycle day: ${todayData.cycleResult.cycleDay||'unknown'} of ${todayData.cycleResult.avgCycleLength}-day cycle
+Cycle data confidence: ${todayData.cycleResult.confidence} (based on ${todayData.cycleResult.cyclesUsedForCalculation} logged cycle gap${todayData.cycleResult.cyclesUsedForCalculation!==1?'s':''})`:''}
+
+CYCLE PHASE RULE: If cycle data confidence is "low" or "very_low" or "no_data", do not make confident cycle-phase-based suggestions. Either omit cycle references entirely, or use very tentative language: "if you're tracking accurately, you may be in your luteal phase — though with limited data this is just an estimate."
 
 BEHAVIORAL BASELINE (inferred from 14+ days of actual behaviour):
 Typical sleep duration: ${bl.typical_sleep_hours?bl.typical_sleep_hours+'h':'not yet established'}
@@ -1112,9 +1182,10 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const sleepStale = isSleepDataStale(fitbitData, getTz());
       const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
       const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
-      const _lps = cycleLog?.last_period_start || (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
+      const _cycleDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
       let cyclePhaseStr = null;
-      if(_lps){const {phase,cycleDay}=calculateCyclePhase(_lps,cycleLog?.avg_cycle_length||28);cyclePhaseStr=`Day ${cycleDay}/${cycleLog?.avg_cycle_length||28}, ${phase} phase`;}
+      let cycleResult = null;
+      if(_cycleDatesArr.length){cycleResult=calculateCyclePhase(_cycleDatesArr,cycleLog?.avg_period_length||5);cyclePhaseStr=`Day ${cycleResult.cycleDay}/${cycleResult.avgCycleLength}, ${cycleResult.phase} phase (confidence: ${cycleResult.confidence})`;}
       const todayFoodEntries = allFood[todayKey]||[];
       const prot = Math.round(todayFoodEntries.reduce((s,e)=>s+(e.p||0),0));
       const foodNames = todayFoodEntries.map(e=>e.n||e.name||e.description).filter(Boolean);
@@ -1139,7 +1210,8 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
         stepsLine:todaySteps?`Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target||8000})`:"Steps: no data yet",
         workoutsLine:todayWorkouts.length?`Workouts today: ${todayWorkouts.map(w=>w.type).join(", ")}`:"Workouts: none yet today",
         nutritionLine:todayFoodEntries.length?`Nutrition today: ${prot}g protein (target ${protTgt}g)`:"Nutrition: not logged yet",
-        cyclePhase:cyclePhaseStr
+        cyclePhase:cyclePhaseStr,
+        cycleResult:cycleResult
       };
       const systemPrompt=buildCoachSystemPrompt(profileData,todayDataCtx,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
       const userMsg = `Generate today's complete coaching content as one coherent story.
@@ -1217,10 +1289,11 @@ Rules:
       const stepDaysHit = weekKeys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
       const weekSummary = `Week ${dateRange}: ${weekWorkouts.length} workouts (${[...new Set(weekWorkouts.map(w=>w.type))].join(", ")||"none"}), avg sleep ${avgSleepMin?Math.floor(avgSleepMin/60)+"h"+(avgSleepMin%60)+"m":"not tracked"}, protein target hit ${protDaysHit}/7 days, step target hit ${stepDaysHit}/7 days.`;
       const now = new Date();
-      const _lps = cycleLog?.last_period_start || null;
+      const _wDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : [];
+      const _wCycleResult = _wDatesArr.length ? calculateCyclePhase(_wDatesArr, cycleLog?.avg_period_length||5) : null;
       let cyclePhaseStr = null;
-      if(_lps){const {phase}=calculateCyclePhase(_lps,cycleLog?.avg_cycle_length||28);cyclePhaseStr=phase;}
-      const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePhaseStr?`Cycle phase: ${cyclePhaseStr}`:null},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
+      if(_wCycleResult){cyclePhaseStr=_wCycleResult.phase;}
+      const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePhaseStr?`Cycle phase: ${cyclePhaseStr}`:null,cycleResult:_wCycleResult},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
       const userMsg = `Write this week's weekly coach review covering ${dateRange} (Sunday through Saturday — Israeli week convention). Week data: ${weekSummary}
 
 Write 4–6 sentences covering exactly these four things in order:
@@ -1298,11 +1371,12 @@ Return plain text only — no JSON, no headers, no bullet points. Just the parag
     const isEvening = hourIL >= 21; // night mode at 9pm, not 7pm
     const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
-    // Cycle phase — use cycleLog for accuracy
-    const _lpsAI = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
+    // Cycle phase — use full dates array for confidence-aware calculation
+    const _aiDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
     let cyclePhase = "cycle phase unknown";
     let cyclePhaseName = "unknown";
-    if(_lpsAI){const {phase,cycleDay}=calculateCyclePhase(_lpsAI,cycleLog?.avg_cycle_length||28);cyclePhaseName=phase;cyclePhase=`cycle day ${cycleDay}/${cycleLog?.avg_cycle_length||28}, ${phase} phase`;}
+    let _aiCycleResult = null;
+    if(_aiDatesArr.length){_aiCycleResult=calculateCyclePhase(_aiDatesArr,cycleLog?.avg_period_length||5);cyclePhaseName=_aiCycleResult.phase;cyclePhase=`cycle day ${_aiCycleResult.cycleDay}/${_aiCycleResult.avgCycleLength}, ${_aiCycleResult.phase} phase (confidence: ${_aiCycleResult.confidence})`;}
     // Today nutrition
     const todayFoodKey = todayKey; // already timezone-aware (en-CA local)
     const tf = allFood[todayFoodKey]||[];
@@ -1421,9 +1495,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         );
 
         // Luteal phase detection
-        const _lpsR = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
+        const _rDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
         let isLuteal = false;
-        if(_lpsR){const {phase}=calculateCyclePhase(_lpsR,cycleLog?.avg_cycle_length||28);isLuteal=phase==="luteal";}
+        if(_rDatesArr.length){const _rRes=calculateCyclePhase(_rDatesArr,cycleLog?.avg_period_length||5);isLuteal=_rRes.phase==="luteal";}
 
         // "Yesterday" = calendar date of last sleep's date minus 1 day
         const yDate = lastSleep ? (()=>{
@@ -2411,7 +2485,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const calculatedAvgCycle = calcAvgFromDates(periodDates);
   const avgCycleLen = cycleLog?.avg_cycle_length || calculatedAvgCycle || 28;
 
-  const info = lastPeriodStart ? calculateCyclePhase(lastPeriodStart, avgCycleLen, avgPeriodLen) : null;
+  const info = periodDates.length ? calculateCyclePhase(periodDates, avgPeriodLen) : null;
 
   const lutealS = avgCycleLen - 14;
   const PHASES={
@@ -2488,9 +2562,16 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       <div style={{background:phase?phase.bg:C.pil,borderRadius:12,padding:"16px 18px",border:`.5px solid ${phase?phase.c+"33":C.pi+"33"}`,marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Current phase</div>
         <div style={{fontSize:18,fontWeight:600,color:phase?phase.c:C.pi,marginBottom:4}}>
-          {phase?phase.n+" — "+phase.days:"Add your cycle dates to get started"}
+          {info ? getPhaseDisplayText(info) : "Add your cycle dates to get started"}
         </div>
-        <div style={{fontSize:12,color:C.t2}}>{info?.cycleDay?"Day "+info.cycleDay+" of cycle":"Enter your last period start date below."}</div>
+        <div style={{fontSize:12,color:C.t2}}>
+          {info?.cycleDay
+            ? `Day ${info.cycleDay} of an estimated ${info.avgCycleLength}-day cycle`
+            : "Enter your last period start date below."}
+        </div>
+        {info&&(info.confidence==="very_low"||info.confidence==="no_data")&&(
+          <div style={{marginTop:8,fontSize:11,color:C.am,lineHeight:1.5}}>Your cycles vary quite a bit, or we don't have enough data yet — these predictions are rough estimates. Logging more dates will help.</div>
+        )}
       </div>
 
       {/* Calculated stats */}
@@ -2500,13 +2581,14 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px 16px"}}>
             {[
               ["Last period started",fmtDate(lastPeriodStart)],
-              ["Current phase",info?.phase?info.phase.charAt(0).toUpperCase()+info.phase.slice(1):"—"],
-              ["Cycle day","Day "+(info?.cycleDay||"—")],
-              ["Avg cycle length",calculatedAvgCycle
-                ? calculatedAvgCycle+" days (calculated from "+(cycleCount-1)+" gap"+(cycleCount>2?"s":"")+")"
+              ["Current phase",info?getPhaseDisplayText(info):"—"],
+              ["Cycle day","Day "+(info?.cycleDay||"—")+" of "+((info?.avgCycleLength||avgCycleLen))],
+              ["Avg cycle length",info?.cyclesUsedForCalculation>0
+                ? (info.avgCycleLength)+" days (from "+info.cyclesUsedForCalculation+" cycle"+(info.cyclesUsedForCalculation!==1?"s":"")+")"
                 : "28 days (default — add more dates)"],
               ["Avg period length",avgPeriodLen+" days"],
               ["Next period est.",fmtDate(info?.nextPeriod)],
+              ["Based on",info?.cyclesUsedForCalculation>0?(info.cyclesUsedForCalculation+" logged cycle"+(info.cyclesUsedForCalculation!==1?"s":"")):"1 date (no gaps yet)"],
             ].map(([label,val])=>(
               <div key={label}>
                 <div style={{fontSize:10,color:C.t3,marginBottom:2}}>{label}</div>
@@ -2514,16 +2596,22 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
               </div>
             ))}
           </div>
-          {cycleCount<3&&<div style={{marginTop:10,fontSize:11,color:C.am}}>Add at least 3 period dates for an accurate cycle length average.</div>}
+          {info&&(info.confidence==="very_low"||info.confidence==="no_data")&&(
+            <div style={{marginTop:10,fontSize:11,color:C.am,lineHeight:1.5}}>Your cycles vary quite a bit, or we don't have enough data yet — these predictions are rough estimates. Logging more dates will help.</div>
+          )}
+          {info&&info.confidence==="low"&&(
+            <div style={{marginTop:10,fontSize:11,color:C.t3}}>Add more period dates to improve accuracy. We'll calculate averages automatically.</div>
+          )}
         </Card>
       )}
 
       {/* Period length input */}
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Average period length</div>
-        <div style={{fontSize:12,color:C.t2,marginBottom:10}}>How many days does your period typically last? Currently set to <strong>{avgPeriodLen} days</strong>.</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:4}}>How many days does your period usually last? Currently set to <strong>{avgPeriodLen} days</strong>.</div>
+        <div style={{fontSize:11,color:C.t3,marginBottom:10}}>Count the days you have any flow, even light.</div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <input type="number" min="1" max="14" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}}/>
+          <input type="number" min="2" max="10" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}}/>
           <span style={{fontSize:12,color:C.t2}}>days</span>
           <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),...s.btnSm}}>{savingPeriodLen?"Saving...":"Save"}</button>
         </div>
@@ -2531,7 +2619,8 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
 
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
-        <p style={{fontSize:12,color:C.t2,marginBottom:12}}>Add each period start date. Average cycle length is calculated automatically from the gaps between dates.</p>
+        <p style={{fontSize:12,color:C.t2,marginBottom:4}}>Add each period start date. Day 1 is the first day of full flow — not spotting.</p>
+        <p style={{fontSize:11,color:C.t3,marginBottom:12}}>The more dates you add, the better we can predict your cycle phases — which helps your coach give you recommendations that match where you are in your cycle.</p>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
           <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
           <button onClick={addDate} disabled={saving} style={{...s.btn("p"),...s.btnSm}}>{saving?"Saving...":"Add"}</button>
@@ -3407,8 +3496,9 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
 function CycleHeaderPill({cycleDates, cycleLog, onPress}) {
   const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
   let label="cycle", bg=C.pil, col=C.pi;
-  if(lastPeriodStart){
-    const {phase,cycleDay}=calculateCyclePhase(lastPeriodStart,cycleLog?.avg_cycle_length||28);
+  const _hDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : (lastPeriodStart?[lastPeriodStart]:[]);
+  if(_hDatesArr.length){
+    const {phase,cycleDay}=calculateCyclePhase(_hDatesArr,cycleLog?.avg_period_length||5);
     label=`Day ${cycleDay} · ${phase}`;
     bg=phase==="menstrual"?C.rl:phase==="follicular"?C.tl:phase==="ovulatory"?C.al:C.pl;
     col=phase==="menstrual"?C.red:phase==="follicular"?C.teal:phase==="ovulatory"?C.am:C.pu;
