@@ -2255,7 +2255,11 @@ Input: ${txtInput}`;
           parsed_items: entry.parsed_items ? JSON.stringify(entry.parsed_items) : null
         });
         if(rows&&rows[0]) entry.dbid = rows[0].id;
-      } catch(e) { console.log("Supabase save:", e.message); }
+      } catch(e) {
+        console.log("Supabase save:", e.message);
+        // Entry saved to local state only — will survive until next Supabase sync
+        setAiMsg(entry.n + " logged locally (sync error — will retry on reload)");
+      }
       setAllFood(prev=>{
         const updated = {...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
         localStorage.setItem("jfood_backup", JSON.stringify(updated));
@@ -3691,10 +3695,22 @@ export default function App() {
           try{if(r.parsed_items)parsedItems=typeof r.parsed_items==="string"?JSON.parse(r.parsed_items):r.parsed_items;}catch(e){}
           foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
         });
-        if(Object.keys(foodMap).length>0){
-          setAllFood(foodMap);
-          localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
-        }
+        // Merge backup: recover any local-only entries (no dbid) not yet in Supabase
+        try {
+          const backup = JSON.parse(localStorage.getItem("jfood_backup")||"{}");
+          Object.entries(backup).forEach(([date, entries]) => {
+            const localOnly = (entries||[]).filter(e=>!e.dbid);
+            if(localOnly.length>0){
+              if(!foodMap[date]) foodMap[date]=[];
+              localOnly.forEach(lo=>{
+                if(!foodMap[date].some(s=>s.n===lo.n&&s.eaten_time===lo.eaten_time))
+                  foodMap[date].push(lo);
+              });
+            }
+          });
+        } catch(e){}
+        setAllFood(foodMap);
+        localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
         const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
         setLogEntries(logData);
         localStorage.setItem("jlog_backup",JSON.stringify(logData));
