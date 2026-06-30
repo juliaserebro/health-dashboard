@@ -1480,7 +1480,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const alcPenalty = alcCount===0?0:alcCount===1?3:alcCount===2?6:10;
 
         // RHR vs baseline — 8 pts
-        const rhrRecords = sleepRecords.filter(s=>s.rhr!=null);
+        const rhrRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(s=>s.rhr!=null);
         let rhrScore = 4; // calibrating default
         let rhrCalibrating = true;
         if(rhrRecords.length>=14){
