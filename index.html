@@ -3740,18 +3740,13 @@ function App() {
           try{if(r.parsed_items)parsedItems=typeof r.parsed_items==="string"?JSON.parse(r.parsed_items):r.parsed_items;}catch(e){}
           foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
         });
-        // Merge backup: recover any local-only entries (no dbid) not yet in Supabase
+        // Merge backup: only recover local-only entries for dates Supabase has NO data for
         try {
           const backup = JSON.parse(localStorage.getItem("jfood_backup")||"{}");
           Object.entries(backup).forEach(([date, entries]) => {
+            if(foodMap[date]?.length>0) return; // Supabase has data for this date — trust it
             const localOnly = (entries||[]).filter(e=>!e.dbid);
-            if(localOnly.length>0){
-              if(!foodMap[date]) foodMap[date]=[];
-              localOnly.forEach(lo=>{
-                if(!foodMap[date].some(s=>s.n===lo.n&&s.eaten_time===lo.eaten_time))
-                  foodMap[date].push(lo);
-              });
-            }
+            if(localOnly.length>0) foodMap[date] = localOnly;
           });
         } catch(e){}
         setAllFood(foodMap);
