@@ -2262,7 +2262,8 @@ Input: ${txtInput}`;
         try {
           const rows2 = await supa("POST","food_log",{
             user_id:UID, log_date:targetDate,
-            name:entry.n, protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+            name:entry.n, detail:entry.det||null,
+            protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
           });
           if(rows2&&rows2[0]) entry.dbid = rows2[0].id;
         } catch(e2) {
