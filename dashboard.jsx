@@ -1135,10 +1135,18 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     if(!apiKey) return;
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+    const todayFoodEntries0 = allFood[todayKey]||[];
+    const currentFoodHash = todayFoodEntries0.map(f=>f.dbid||f.eaten_time||f.n).join("|");
     if(!forceRefresh){
       try{
         const cached = localStorage.getItem("coach_content_"+todayKey);
-        if(cached){ setCoachContent(JSON.parse(cached)); return; }
+        if(cached){
+          const parsed = JSON.parse(cached);
+          // Use cached if food hasn't changed since last generation
+          const cachedFoodHash = parsed._foodHash||"";
+          if(cachedFoodHash === currentFoodHash){ setCoachContent(parsed); return; }
+          // Food changed — fall through to regenerate
+        }
       }catch(e){}
     }
     const sleepCount = (fitbitData.sleep||[]).length;
@@ -1171,7 +1179,12 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const sortedWorkoutDates=[...(fitbitData.workouts||[])].map(w=>w.date).sort((a,b)=>b.localeCompare(a));
       const lastWorkoutDate=sortedWorkoutDates[0]||null;
       const daysSinceLastWorkout=lastWorkoutDate?Math.floor((new Date()-new Date(lastWorkoutDate+"T12:00:00"))/864e5):99;
-      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback,daysSinceLastWorkout};
+      const at = profileData?.activity_targets||{};
+      const weeklyWorkoutTarget = (at.strength||0)+(at.mobility||0)+(at.cardio||0)||6;
+      const fourteenDayTarget = weeklyWorkoutTarget * 2;
+      const adherencePct = fourteenDayTarget>0 ? Math.round(trainingDays/fourteenDayTarget*100) : 100;
+      const adherenceLabel = adherencePct<90?"below target":adherencePct<=110?"on target":"above target";
+      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback,daysSinceLastWorkout,fourteenDayTarget,adherencePct,adherenceLabel};
       const hour=parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
       const dow=new Date(todayKey+"T12:00:00").getDay();
       const isWeekly=dow===0&&hour>=18;
@@ -1186,7 +1199,17 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const systemPrompt=buildCoachSystemPrompt(profileData,todayDataCtx,profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,recentHistory);
       const userMsg = `Generate today's complete coaching content as one coherent story.
 
-First, assess the overall picture using the signal hierarchy: check training load (${trainingDays} training days in last 14), readiness, cycle phase, HRV trend, and any user logs. Decide ONE overall message — push, maintain, or recover. Everything must support that one message.
+TRAINING ADHERENCE (last 14 days):
+Sessions completed: ${trainingDays} of ${fourteenDayTarget} target (${adherencePct}% — ${adherenceLabel})
+Days since last session: ${daysSinceLastWorkout}
+
+MANDATORY RULE — training load framing:
+- adherencePct under 100 means the user is AT OR BELOW their own target. Do NOT call this "heavy load" or "real load." If daysSinceLastWorkout >= 2, encourage activity.
+- adherencePct 100–110 is on target — neutral framing, no rest suggestion unless HRV/RHR independently signals fatigue.
+- adherencePct over 110 is the ONLY case where suggesting rest based on volume alone is appropriate.
+- If you mention the raw session count you MUST also state whether it is above, at, or below target. Never cite a raw number as justification for rest without its percentage context.
+
+First, assess the overall picture using the signal hierarchy: check training adherence (${adherencePct}% of 14-day target), readiness, cycle phase, HRV trend, and any user logs. Decide ONE overall message — push, maintain, or recover. Everything must support that one message.
 
 Return ONLY valid JSON, nothing else:
 {
@@ -1212,6 +1235,8 @@ Rules:
       const m = clean.match(/\{[\s\S]*\}/);
       if(m){
         const content = JSON.parse(m[0]);
+        content._generatedAt = new Date().toISOString();
+        content._foodHash = currentFoodHash;
         setCoachContent(content);
         localStorage.setItem("coach_content_"+todayKey, JSON.stringify(content));
       }
@@ -1411,7 +1436,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const sevenDaysAgo=new Date(Date.now()-7*864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
+  const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) generateAllCoachContent(); },[todayFoodCount]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
@@ -1431,7 +1458,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
             <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
               <div style={{flex:1}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
+                  {coachContent._generatedAt&&<div style={{fontSize:10,color:C.t3}}>{"Updated "+new Date(coachContent._generatedAt).toLocaleTimeString("en-GB",{timeZone:getTz(),hour:"2-digit",minute:"2-digit"})}</div>}
+                </div>
                 <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{coachContent.headline}</div>
                 {coachContent.why&&(
                   <div style={{overflow:"hidden",maxHeight:showWhy?"120px":"0",transition:"max-height .25s ease",marginTop:showWhy?6:0}}>
@@ -1641,9 +1671,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       {/* TODAY'S INSIGHTS */}
       {apiKey&&(
         <div style={s.aiCard}>
-          <div style={s.aiLbl}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
-            Today's insights
+          <div style={{...s.aiLbl,justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+              Today's insights
+            </div>
+            {coachContent?._generatedAt&&<div style={{fontSize:10,color:C.t3}}>{"Updated "+new Date(coachContent._generatedAt).toLocaleTimeString("en-GB",{timeZone:getTz(),hour:"2-digit",minute:"2-digit"})}</div>}
           </div>
           {(()=>{
             const loading_ = coachLoading && !coachContent;
