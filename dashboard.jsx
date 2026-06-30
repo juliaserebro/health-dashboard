@@ -210,7 +210,7 @@ async function saveCycleDates(newDate, avgPeriodLen=5) {
     const std = Math.sqrt(variance);
     cycle_variability = std > 7 ? 'highly_irregular' : std > 4 ? 'irregular' : 'regular';
   }
-  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0],cycle_variability},"on_conflict=uid");
+  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
   return {merged, avgCycleLength, cycle_variability};
 }
 
