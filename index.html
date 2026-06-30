@@ -1248,7 +1248,7 @@ Return ONLY valid JSON, nothing else:
   "why": "One sentence explaining what data or science led to this conclusion — shown only if the user taps 'Why?'. Should add genuine reasoning, not repeat the headline.",
   "recovery": "1 sentence. Supports the overall_signal. Goes deeper on recovery — HRV trend, training load detail, or readiness nuance NOT in headline. Does not contradict headline.",
   "tonight": "1 sentence. Supports the overall_signal. One specific suggestion for tonight.",
-  "nutrition": "1 sentence. Supports the overall_signal. Based ONLY on actual food logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If overall_signal is recover, nutrition supports recovery. If push, nutrition supports performance. If protein target is close to met, acknowledge that.",
+  "nutrition": "1 sentence. Based ONLY on actual food logged today. ALREADY EATEN TODAY — these are forbidden from suggestion: ${foodSummary||'nothing yet'}. You MUST NOT mention, suggest, or reference any item from that list. Protein so far: ${prot}g of ${protTgt}g target. If protein is close to or at target, say so. Otherwise suggest a specific food NOT in the eaten list.",
   "micro_workout": ${daysSinceLastWorkout>=5 ? `"It has been ${daysSinceLastWorkout} days since the last logged session. Include 2-3 simple bodyweight exercises as a micro-session. Keep the tone light — takes 5 minutes, keeps the streak alive. Example: 3 sets of 10 push-ups, 15 squats, 30-second plank. Use actual moves, not placeholders. Never guilt-based. Return as a single string with exercises separated by · (middle dot)."` : 'null'}
 }
 
@@ -1257,7 +1257,6 @@ Rules:
 - No section contradicts any other section
 - No section repeats content from another section
 - All language warm, tentative, non-guilt
-- Never suggest a food already eaten today
 - micro_workout must be null if daysSinceLastWorkout < 5
 - Never mention specific muscle groups or body parts in any field`;
       const raw = await callCoachAI(userMsg, systemPrompt);
@@ -1494,7 +1493,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 </div>
                 <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{coachContent.headline}</div>
                 {coachContent.why&&(
-                  <div style={{overflow:"hidden",maxHeight:showWhy?"120px":"0",transition:"max-height .25s ease",marginTop:showWhy?6:0}}>
+                  <div style={{overflow:"hidden",maxHeight:showWhy?"600px":"0",transition:"max-height .4s ease",marginTop:showWhy?6:0}}>
                     <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{coachContent.why}</div>
                   </div>
                 )}
@@ -2499,6 +2498,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [saving, setSaving] = useState(false);
   const [periodLenInput, setPeriodLenInput] = useState("");
   const [savingPeriodLen, setSavingPeriodLen] = useState(false);
+  const [editingPeriodLen, setEditingPeriodLen] = useState(false);
 
   // Show dates from cycle_logs if available, else fall back to legacy cycle_dates rows
   const periodDates = cycleLog?.period_start_dates?.length
@@ -2585,6 +2585,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
     try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
     setPeriodLenInput("");
     setSavingPeriodLen(false);
+    setEditingPeriodLen(false);
   }
 
   const fmtDate = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) : "—";
@@ -2641,13 +2642,22 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       {/* Period length input */}
       <Card style={{marginBottom:14}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Average period length</div>
-        <div style={{fontSize:12,color:C.t2,marginBottom:4}}>How many days does your period usually last? Currently set to <strong>{avgPeriodLen} days</strong>.</div>
-        <div style={{fontSize:11,color:C.t3,marginBottom:10}}>Count the days you have any flow, even light.</div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <input type="number" min="2" max="10" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}}/>
-          <span style={{fontSize:12,color:C.t2}}>days</span>
-          <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),...s.btnSm}}>{savingPeriodLen?"Saving...":"Save"}</button>
-        </div>
+        {editingPeriodLen ? (
+          <>
+            <div style={{fontSize:11,color:C.t3,marginBottom:10}}>Count the days you have any flow, even light.</div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input type="number" min="2" max="10" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}} autoFocus/>
+              <span style={{fontSize:12,color:C.t2}}>days</span>
+              <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),...s.btnSm}}>{savingPeriodLen?"Saving...":"Save"}</button>
+              <button onClick={()=>{setEditingPeriodLen(false);setPeriodLenInput("");}} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>
+            </div>
+          </>
+        ) : (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{fontSize:14,color:C.t1}}><strong>{avgPeriodLen}</strong> <span style={{fontSize:12,color:C.t2}}>days</span></div>
+            <button onClick={()=>{setEditingPeriodLen(true);setPeriodLenInput(String(avgPeriodLen));}} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+          </div>
+        )}
       </Card>
 
       <Card>
