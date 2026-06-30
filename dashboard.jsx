@@ -80,6 +80,28 @@ let ACTIVE_TZ = "Asia/Jerusalem"; // overwritten on profile load via setActiveTz
 function setActiveTz(tz){ if(tz) ACTIVE_TZ = tz; }
 function getTz(){ return ACTIVE_TZ || "Asia/Jerusalem"; }
 
+// Returns the sleep record that counts as "last night" for a given fitbitData object.
+// Sleep records use the wake-up date. We only accept today's date as current;
+// anything older means last night's data hasn't synced yet.
+function getLastNightSleep(fitbitData, tz) {
+  const todayStr = new Date().toLocaleDateString("en-CA", {timeZone: tz || getTz()});
+  const records = [...(fitbitData.sleep || [])].sort((a, b) => b.date.localeCompare(a.date));
+  return records[0]?.date === todayStr ? records[0] : null;
+}
+
+// Returns true when the most recent sleep is stale: past 2pm local time and the
+// latest sleep record is from 2 or more calendar days ago.
+function isSleepDataStale(fitbitData, tz) {
+  const tzResolved = tz || getTz();
+  const records = [...(fitbitData.sleep || [])].sort((a, b) => b.date.localeCompare(a.date));
+  const latest = records[0];
+  if (!latest) return true;
+  const localHour = parseInt(new Date().toLocaleString("en-CA", {timeZone: tzResolved, hour: "numeric", hour12: false}));
+  const todayStr = new Date().toLocaleDateString("en-CA", {timeZone: tzResolved});
+  const daysDiff = Math.floor((new Date(todayStr + "T12:00:00") - new Date(latest.date + "T12:00:00")) / 864e5);
+  return localHour >= 14 && daysDiff >= 2;
+}
+
 // Safe cycle-day helper — avoids UTC-midnight vs local-midnight bug.
 // Returns 1 on the start date, 28 on day 27, wraps at 28.
 function calcCycleDay(startDateStr) {
@@ -992,10 +1014,9 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
     return `[${e.tag}|${recency}] ${e.txt}`;
   });
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
-  const _allSleep=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date));
-  const lastSleep=_allSleep[0]?.date===todayKey?_allSleep[0]:null;
+  const lastSleep=getLastNightSleep(fitbitData, getTz());
   const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
-  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: not tracked last night — do NOT mention sleep stats or give sleep guidance.";
+  const sleepLine=lastSleep?`Last night (${lastSleep.date}): ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:(isSleepDataStale(fitbitData,getTz())?"Sleep data unavailable or stale — do not reference sleep.":"Sleep: not tracked last night — do NOT mention sleep stats or give sleep guidance.");
   const todayNaps=(fitbitData.naps||[]).filter(n=>n.date===todayKey);
   const napLine=todayNaps.length?`Nap today: ${todayNaps.map(n=>n.total+"min at "+n.start).join(", ")}.`:"No nap today.";
   const recentWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(w=>w.date+" "+w.type+(w.duration_min?" "+w.duration_min+"min":"")).join(", ");
@@ -1019,6 +1040,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const [coachContent, setCoachContent] = useState(null); // {headline,recovery,tonight,nutrition,isWeekly,isLearning}
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachDismissed, setCoachDismissed] = useState(false);
+  const [showWhy, setShowWhy] = useState(false);
   const [pendingMilestone, setPendingMilestone] = useState(null);
 
   const todayFood = allFood[tkey()]||[];
@@ -1056,7 +1078,8 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     }
     setCoachLoading(true);
     try{
-      const lastSleep = (fitbitData.sleep||[]).find(s=>s.date===todayKey)||null;
+      const lastSleep = getLastNightSleep(fitbitData, getTz());
+      const sleepStale = isSleepDataStale(fitbitData, getTz());
       const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
       const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
       const _lps = cycleLog?.last_period_start || (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
@@ -1082,7 +1105,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const dow=new Date(todayKey+"T12:00:00").getDay();
       const isWeekly=dow===0&&hour>=18;
       const todayDataCtx={
-        sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:"Sleep: not tracked last night",
+        sleepSummary:lastSleep?`Sleep last night: ${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}`:(sleepStale?"Sleep data unavailable or stale — do not reference last night's sleep. Focus on other available signals (steps, training load, food, cycle).":"Sleep: not tracked last night"),
         stepsLine:todaySteps?`Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target||8000})`:"Steps: no data yet",
         workoutsLine:todayWorkouts.length?`Workouts today: ${todayWorkouts.map(w=>w.type).join(", ")}`:"Workouts: none yet today",
         nutritionLine:todayFoodEntries.length?`Nutrition today: ${prot}g protein (target ${protTgt}g)`:"Nutrition: not logged yet",
@@ -1097,6 +1120,7 @@ Return ONLY valid JSON, nothing else:
 {
   "overall_signal": "push | maintain | recover",
   "headline": "1-2 sentences. The big picture today based on your overall_signal. Never mention subsection-specific topics (recovery detail, tonight plan, nutrition) — those go in their own fields.",
+  "why": "One sentence explaining what data or science led to this conclusion — shown only if the user taps 'Why?'. Should add genuine reasoning, not repeat the headline.",
   "recovery": "1 sentence. Supports the overall_signal. Goes deeper on recovery — HRV trend, training load detail, or readiness nuance NOT in headline. Does not contradict headline.",
   "tonight": "1 sentence. Supports the overall_signal. One specific suggestion for tonight.",
   "nutrition": "1 sentence. Supports the overall_signal. Based ONLY on actual food logged today. Foods already eaten today: ${foodSummary}. Protein so far: ${prot}g of ${protTgt}g target. Do NOT suggest any food already in that list. If overall_signal is recover, nutrition supports recovery. If push, nutrition supports performance. If protein target is close to met, acknowledge that.",
@@ -1258,10 +1282,9 @@ Return plain text only — no JSON, no headers, no bullet points. Just the parag
     // Yesterday alcohol from log
     const yKey = new Date(now.getTime()-864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
     const yAlc = logEntries.filter(e=>e.dt&&e.dt.slice(0,10)===yKey&&/wine|alcohol|beer|drink/i.test(e.txt||"")).map(e=>e.txt).join("; ");
-    // Last sleep — only use if tracked last night (today's date)
-    const _todayKeyAI=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-    const lastSleep=(fitbitData.sleep||[]).find(s=>s.date===_todayKeyAI)||null;
-    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:"not tracked last night — skip sleep analysis";
+    // Last sleep — use shared function so this matches the sleep card
+    const lastSleep=getLastNightSleep(fitbitData,getTz());
+    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:(isSleepDataStale(fitbitData,getTz())?"stale — skip sleep analysis":"not tracked last night — skip sleep analysis");
     // Today workouts
     const todayWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===todayKey);
     const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
@@ -1336,14 +1359,17 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               <div style={{flex:1}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
                 <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{coachContent.headline}</div>
+                {coachContent.why&&(
+                  <div style={{overflow:"hidden",maxHeight:showWhy?"120px":"0",transition:"max-height .25s ease",marginTop:showWhy?6:0}}>
+                    <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{coachContent.why}</div>
+                  </div>
+                )}
+                {coachContent.why&&!coachContent.isLearning&&(
+                  <button onClick={()=>setShowWhy(v=>!v)} style={{background:"none",border:"none",padding:0,marginTop:6,fontSize:11,color:C.pu,cursor:"pointer",fontWeight:500}}>{showWhy?"▲ Less":"Why?"}</button>
+                )}
               </div>
               <button onClick={()=>setCoachDismissed(true)} style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.t3,flexShrink:0,marginTop:-2}}>×</button>
             </div>
-            {!coachContent.isLearning&&(
-              <div style={{marginTop:8,display:"flex",gap:6}}>
-                <button onClick={()=>{const tk=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});localStorage.removeItem("coach_content_"+tk);setCoachContent(null);generateAllCoachContent(true);}} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Refresh</button>
-              </div>
-            )}
           </Card>
         );
       })()}
@@ -1352,16 +1378,15 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       {(()=>{
         // ── Shared readiness calculation ─────────────────────────────────
         const todayIL2 = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-        const sleepRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date));
-        // Only use sleep from today (wake-up date). If not tracked, show no-sleep card.
-        const lastSleep = sleepRecords[0]?.date === todayIL2 ? sleepRecords[0] : null;
+        const lastSleep = getLastNightSleep(fitbitData, getTz());
+        const sleepStale = isSleepDataStale(fitbitData, getTz());
         if(!lastSleep) return (
           <Card>
             <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
               Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
             </div>
-            <div style={{fontSize:14,color:C.t2,padding:"10px 0"}}>No sleep tracked last night — readiness score unavailable.</div>
-            <div style={{fontSize:11,color:C.t3}}>Wear your watch tonight to get a full readiness score tomorrow.</div>
+            <div style={{fontSize:14,color:C.t2,padding:"10px 0"}}>{sleepStale?"No new sleep data yet — check your Fitbit sync.":"No sleep tracked last night — readiness score unavailable."}</div>
+            <div style={{fontSize:11,color:C.t3}}>{sleepStale?"Pull down to sync, or open your Fitbit app.":"Wear your watch tonight to get a full readiness score tomorrow."}</div>
           </Card>
         );
 
