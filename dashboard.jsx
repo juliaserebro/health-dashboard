@@ -2247,6 +2247,8 @@ Input: ${txtInput}`;
       entry.source = "estimated";
       entry.parsed_items = entry.parsed_items || null;
       const targetDate = mealDate || foodDate;
+      let saveErr = null;
+      // Try full payload first, then fall back to core columns if schema mismatch
       try {
         const rows = await supa("POST","food_log",{
           user_id:UID, log_date:targetDate, meal_time:eatenTime, eaten_time:eatenTime,
@@ -2256,16 +2258,24 @@ Input: ${txtInput}`;
         });
         if(rows&&rows[0]) entry.dbid = rows[0].id;
       } catch(e) {
-        console.log("Supabase save:", e.message);
-        // Entry saved to local state only — will survive until next Supabase sync
-        setAiMsg(entry.n + " logged locally (sync error — will retry on reload)");
+        console.log("Full save failed, trying minimal:", e.message);
+        try {
+          const rows2 = await supa("POST","food_log",{
+            user_id:UID, log_date:targetDate,
+            name:entry.n, protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
+          });
+          if(rows2&&rows2[0]) entry.dbid = rows2[0].id;
+        } catch(e2) {
+          saveErr = e2.message;
+          console.log("Minimal save also failed:", e2.message);
+        }
       }
       setAllFood(prev=>{
         const updated = {...prev,[targetDate]:[...(prev[targetDate]||[]),entry]};
         localStorage.setItem("jfood_backup", JSON.stringify(updated));
         return updated;
       });
-      setAiMsg(entry.n + " logged ✓");
+      setAiMsg(saveErr ? entry.n + " saved locally only — DB error: "+saveErr.slice(0,60) : entry.n + " logged ✓");
       setTxtInput(""); setShowTxt(false);
       if(onFoodLogged) onFoodLogged();
     } catch(e) { setAiMsg("Error: " + e.message); }
