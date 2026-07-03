@@ -746,6 +746,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
     }
 
     // ── RESTING HEART RATE ────────────────────────────────────────────────────
+    console.log("DEBUG: starting RHR fetch");
     try{
       const rhrData=await Promise.race([
         ghGet("/users/me/dataTypes/heart_rate.resting/dataPoints",{
