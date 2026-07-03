@@ -777,10 +777,13 @@ async function ghFullSync(setSyncStatus,setFitbitData){
 
     // ── RESTING HEART RATE ────────────────────────────────────────────────────
     try{
-      const rhrData=await ghGet("/users/me/dataTypes/heart_rate.resting/dataPoints",{
-        filter:`heart_rate.resting.interval.civil_end_time >= "${twoWeeksAgo}" AND heart_rate.resting.interval.civil_end_time < "${tomorrow}"`,
-        pageSize:30
-      });
+      const rhrData=await Promise.race([
+        ghGet("/users/me/dataTypes/heart_rate.resting/dataPoints",{
+          filter:`heart_rate.resting.interval.civil_end_time >= "${twoWeeksAgo}" AND heart_rate.resting.interval.civil_end_time < "${tomorrow}"`,
+          pageSize:30
+        }),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error("RHR timeout")),5000))
+      ]);
       const rhrMap={};
       (rhrData.dataPoints||[]).forEach(pt=>{
         const hr=pt.heartRateResting;
