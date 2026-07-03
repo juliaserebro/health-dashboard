@@ -382,12 +382,20 @@ function CyclePhaseMetric({cycleDates, cycleLog}) {
 
 // ── PROTEIN DAYS METRIC ──────────────────────────────────────────────────
 function ProteinAvgMetric({allFood, protTgt}) {
-  const entries = Object.entries(allFood).filter(([,meals])=>meals.length>0);
-  if(!entries.length) return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>log meals to track</div></div>;
-  const totals = entries.map(([,meals])=>meals.reduce((s,e)=>s+(e.p||0),0));
-  const avg = Math.round(totals.reduce((a,b)=>a+b,0)/totals.length);
+  const weekStart = getWeekStartDate();
+  const weekKeys = Array.from({length:7},(_,i)=>{
+    const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
+    return d.toLocaleDateString("en-CA",{timeZone:getTz()});
+  });
+  const todayStr = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+  const entries = weekKeys
+    .filter(dk=>dk<=todayStr && (allFood[dk]||[]).length>0)
+    .map(dk=>({dk, total:(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)}))
+    .filter(e=>e.total>0);
+  if(!entries.length) return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:C.t3}}>—</div><div style={{...s.ms,color:C.t3}}>this week</div></div>;
+  const avg = Math.round(entries.reduce((s,e)=>s+e.total,0)/entries.length);
   const col = avg>=protTgt?C.am:avg>=protTgt*.75?"#c48a0a":C.red;
-  return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length} days logged</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Protein avg</div><div style={{...s.mv,color:col}}>{avg}g</div><div style={{...s.ms,color:col}}>{entries.length}d this week</div></div>;
 }
 
 function MonthlyMetrics({fitbitData, allFood, protTgt, profileData, compact=false}) {
@@ -1205,16 +1213,17 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const recentSleep=(fitbitData.sleep||[]).filter(s=>last14Keys.includes(s.date));
       const avgSleep=recentSleep.length?(recentSleep.reduce((s,r)=>s+r.total,0)/recentSleep.length/60).toFixed(1)+"h":"insufficient data";
       const pendingFeedback=(profileData?.coach_suggestion_log||[]).filter(l=>{if(!l.date)return false;return(new Date()-new Date(l.date))/864e5<=7&&l.followed===null;});
-      // Days since last workout (for micro workout suggestion)
-      const sortedWorkoutDates=[...(fitbitData.workouts||[])].map(w=>w.date).sort((a,b)=>b.localeCompare(a));
-      const lastWorkoutDate=sortedWorkoutDates[0]||null;
+      // Days since last workout + type (for micro workout suggestion and coach context)
+      const sortedWorkouts=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date));
+      const lastWorkoutDate=sortedWorkouts[0]?.date||null;
+      const lastWorkoutType=lastWorkoutDate?[...new Set(sortedWorkouts.filter(w=>w.date===lastWorkoutDate).map(w=>getActivityCategory(w.type,profileData?.activity_mapping)||w.type))].join("+"):"none";
       const daysSinceLastWorkout=lastWorkoutDate?Math.floor((new Date()-new Date(lastWorkoutDate+"T12:00:00"))/864e5):99;
       const at = profileData?.activity_targets||{};
       const weeklyWorkoutTarget = (at.strength||0)+(at.mobility||0)+(at.cardio||0)||6;
       const fourteenDayTarget = weeklyWorkoutTarget * 2;
       const adherencePct = fourteenDayTarget>0 ? Math.round(trainingDays/fourteenDayTarget*100) : 100;
       const adherenceLabel = adherencePct<90?"below target":adherencePct<=110?"on target":"above target";
-      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback,daysSinceLastWorkout,fourteenDayTarget,adherencePct,adherenceLabel};
+      const recentHistory={trainingDays,proteinDaysHit:proteinHitDays,stepDaysHit:stepHitDays,avgSleep,pendingFeedback,daysSinceLastWorkout,lastWorkoutType,fourteenDayTarget,adherencePct,adherenceLabel};
       const hour=parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
       const dow=new Date(todayKey+"T12:00:00").getDay();
       const isWeekly=dow===0&&hour>=18;
@@ -1232,6 +1241,15 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
 TRAINING ADHERENCE (last 14 days):
 Sessions completed: ${trainingDays} of ${fourteenDayTarget} target (${adherencePct}% — ${adherenceLabel})
 Days since last session: ${daysSinceLastWorkout}
+
+RECENT WORKOUT CONTEXT:
+Last session: ${lastWorkoutType} (${daysSinceLastWorkout} day(s) ago)
+
+TRAINING SUGGESTION RULES:
+- daysSinceLastWorkout === 0 (trained today): acknowledge the session — do NOT suggest training again today
+- daysSinceLastWorkout === 1: acknowledge yesterday's session; suggest a complementary category (e.g. if yesterday was strength → suggest mobility or cardio next; never same category two days running unless adherence and targets support it)
+- daysSinceLastWorkout >= 2: encourage activity; suggest the category most behind on weekly target
+- NEVER say "looks like a good day to train" without naming which category and exactly why that category
 
 MANDATORY RULE — training load framing:
 - adherencePct under 100 means the user is AT OR BELOW their own target. Do NOT call this "heavy load" or "real load." If daysSinceLastWorkout >= 2, encourage activity.
@@ -1271,6 +1289,42 @@ Rules:
       }
     }catch(e){ console.log("Coach content error:",e.message); }
     setCoachLoading(false);
+  }
+
+  async function refreshNutritionOnly() {
+    if(!apiKey||!coachContent||coachContent.isLearning||coachContent.isWeekly) return;
+    const now = new Date();
+    const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
+    const todayFoodEntries = allFood[todayKey]||[];
+    const currentFoodHash = todayFoodEntries.map(f=>f.dbid||f.eaten_time||f.n).join("|");
+    // Skip if food hasn't changed since last generation
+    try {
+      const cached = JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"{}");
+      if(cached._foodHash===currentFoodHash) return;
+    } catch(e){}
+    const prot = Math.round(todayFoodEntries.reduce((s,e)=>s+(e.p||0),0));
+    const protTgt2 = profileData?.protein_target||120;
+    const foodSummary2 = todayFoodEntries.map(e=>e.n||e.name).filter(Boolean).join(", ")||"nothing logged yet";
+    try {
+      const raw = await callCoachAI(
+        `Generate ONLY the nutrition insight for today. One sentence.
+ALREADY EATEN TODAY (forbidden from suggestion): ${foodSummary2}
+Protein so far: ${prot}g of ${protTgt2}g target.
+Rules: do not suggest any food already eaten; if protein is close to or at target acknowledge it positively; if nothing logged say so neutrally; if genuinely nothing new to say return the single word: null`,
+        `You are a warm, precise nutrition coach. Return either one sentence of plain text, or the single word: null`
+      );
+      const txt = raw.replace(/```/g,"").trim();
+      if(txt && txt.toLowerCase()!=="null"){
+        const updated = {...coachContent, nutrition:txt, _foodHash:currentFoodHash, _generatedAt:new Date().toISOString()};
+        setCoachContent(updated);
+        localStorage.setItem("coach_content_"+todayKey, JSON.stringify(updated));
+      } else {
+        // Nothing new to say — just update the hash so we don't keep checking
+        const updated = {...coachContent, _foodHash:currentFoodHash};
+        setCoachContent(updated);
+        localStorage.setItem("coach_content_"+todayKey, JSON.stringify(updated));
+      }
+    } catch(e){ console.log("Nutrition refresh error:",e.message); }
   }
 
   function shouldShowWeeklyReview() {
@@ -1467,7 +1521,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
-  useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) generateAllCoachContent(); },[todayFoodCount]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) refreshNutritionOnly(); },[todayFoodCount]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
@@ -1584,16 +1638,15 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
         // RHR vs baseline — 8 pts
         const rhrRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(s=>s.rhr!=null);
-        let rhrScore = 4; // calibrating default
+        let rhrScore = 4;
         let rhrCalibrating = true;
-        if(rhrRecords.length>=14){
-          rhrCalibrating = false;
+        if(rhrRecords.length>=3){
           const sorted = [...rhrRecords].map(s=>s.rhr).sort((a,b)=>a-b);
           const mid = Math.floor(sorted.length/2);
           const baseline = sorted.length%2===0?(sorted[mid-1]+sorted[mid])/2:sorted[mid];
-          const currentRhr = lastSleep?.rhr;
-          if(currentRhr==null){ rhrScore=4; rhrCalibrating=true; }
-          else {
+          const currentRhr = lastSleep?.rhr ?? rhrRecords[0]?.rhr; // fall back to most recent if no last-night data
+          if(currentRhr!=null){
+            rhrCalibrating = false;
             const diff = currentRhr-baseline;
             rhrScore = diff<=0?8:diff<=3?4:diff<=6?1:0;
           }
@@ -1709,9 +1762,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           </div>
           {(()=>{
             const loading_ = coachLoading && !coachContent;
+            const hourNow=parseInt(new Date().toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
             const subsections = [
               {key:"recovery", label:"💪 Recovery"},
-              {key:"tonight",  label:"🌙 Tonight"},
+              ...(hourNow>=19?[{key:"tonight",label:"🌙 Tonight"}]:[]),
               {key:"nutrition",label:"🥗 Nutrition"},
               ...(coachContent?.micro_workout?[{key:"micro_workout",label:"⚡ 5-min move"}]:[]),
             ];
@@ -1816,9 +1870,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const strengthDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").length;
         const mobilityDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="mobility").length;
         const cardioDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio").length;
-        const sleepThisWeek=(fitbitData.sleep||[]).filter(s=>weekKeys.includes(s.date));
-        const avgSleepMin=sleepThisWeek.length?Math.round(sleepThisWeek.reduce((a,r)=>a+r.total,0)/sleepThisWeek.length):null;
-        const protDays=weekKeys.filter(dk=>(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=(profileData?.protein_target||100)*0.9).length;
+        const totalDone=strengthDone+mobilityDone+cardioDone;
+        const totalTarget=(at.strength||2)+(at.mobility||2)+(at.cardio||2);
         const rows=[
           ["Strength",strengthDone,at.strength||2],
           ["Mobility",mobilityDone,at.mobility||2],
@@ -1830,20 +1883,16 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
               This week so far
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 12px",marginBottom:6}}>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:6}}>
               {rows.map(([label,done,target])=>(
                 <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
                   <span style={{color:C.t2}}>{label}</span>
                   <span style={{fontWeight:600,color:done>=target?C.teal:C.tx}}>{done}<span style={{fontWeight:400,color:C.t3}}>/{target}</span></span>
                 </div>
               ))}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
-                <span style={{color:C.t2}}>Avg sleep</span>
-                <span style={{fontWeight:600,color:C.tx}}>{avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"—"}</span>
-              </div>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
-                <span style={{color:C.t2}}>Protein days</span>
-                <span style={{fontWeight:600,color:protDays>=5?C.teal:C.tx}}>{protDays}<span style={{fontWeight:400,color:C.t3}}>/7</span></span>
+              <div style={{borderTop:`1px solid ${C.bd}`,paddingTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:C.t2,fontWeight:500}}>Total</span>
+                <span style={{fontWeight:600,color:totalDone>=totalTarget?C.teal:C.tx}}>{totalDone}<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span></span>
               </div>
             </div>
           </div>
