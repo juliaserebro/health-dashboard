@@ -1220,7 +1220,13 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     if(!forceRefresh){
       try{
         const cached = localStorage.getItem("coach_content_"+todayKey);
-        if(cached){ setCoachContent(JSON.parse(cached)); return; }
+        if(cached){
+          const parsed = JSON.parse(cached);
+          const isNewFormat = Array.isArray(parsed.domain_insights) || parsed.isLearning || parsed.isWeekly;
+          const generatedAt = parsed._generatedAt ? new Date(parsed._generatedAt) : null;
+          const hoursSince = generatedAt ? (now - generatedAt)/3600000 : 999;
+          if(isNewFormat && hoursSince < 6){ setCoachContent(parsed); return; }
+        }
       }catch(e){}
     }
     const sleepCount = (fitbitData.sleep||[]).length;
