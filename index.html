@@ -784,6 +784,7 @@ async function ghFullSync(setSyncStatus,setFitbitData){
         new Promise((_,reject)=>setTimeout(()=>reject(new Error("RHR timeout")),8000))
       ]);
       const rhrMap={};
+      console.log("RHR raw sample:", JSON.stringify((rhrData.dataPoints||[]).slice(0,2)));
       (rhrData.dataPoints||[]).forEach(pt=>{
         const hr=pt.dailyRestingHeartRate;
         if(!hr) return;
