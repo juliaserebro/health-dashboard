@@ -1753,8 +1753,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           }
         }
 
-        // Base total
-        const baseBeforeAlc = Math.min(100, Math.max(20, durScore+deepScore+remScore+bedtimeScore+loadScore+protScore+rhrScore));
+        // Base total — exclude RHR from score if calibrating (no data)
+        const rhrContrib = rhrCalibrating ? 0 : rhrScore;
+        const baseBeforeAlc = Math.min(100, Math.max(20, durScore+deepScore+remScore+bedtimeScore+loadScore+protScore+rhrContrib));
         const base = Math.max(20, baseBeforeAlc-alcPenalty);
 
         // Sleep quality bonus (above 100)
@@ -1778,7 +1779,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           {name:`bedtime (${lastSleep?.bedtime||"--:--"})`,pts:bedtimeScore,max:10},
           {name:"training load",pts:loadScore,max:12},
           {name:"protein",pts:protScore,max:10},
-          {name:"RHR",pts:rhrScore,max:8},
+          ...(rhrCalibrating?[]:[{name:"RHR",pts:rhrScore,max:8}]),
         ];
         const lowestFactor = [...factors].sort((a,b)=>(a.pts/a.max)-(b.pts/b.max))[0];
         const allFull = factors.every(f=>f.pts===f.max);
@@ -1798,7 +1799,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           [`Bedtime ${lastSleep?.bedtime||"--:--"}`, `${bedtimeScore}/10`, bedtimeScore>=10?C.tm:bedtimeScore>=5?C.am:C.red],
           [`Training load yesterday`, `${loadScore}/12`, loadScore>=12?C.tm:loadScore>=8?C.am:C.red],
           [`Protein yesterday (${yProt}g)`, `${protScore}/10`, protScore>=10?C.tm:protScore>=7?C.am:C.red],
-          [rhrCalibrating?"RHR vs baseline (calibrating)":`RHR vs baseline`, `${rhrScore}/8`, rhrCalibrating?C.t3:rhrScore>=8?C.tm:rhrScore>=4?C.am:C.red],
+          ...(rhrCalibrating?[]:[[ `RHR vs baseline`, `${rhrScore}/8`, rhrScore>=8?C.tm:rhrScore>=4?C.am:C.red]]),
           ...(alcPenalty>0?[[`Alcohol (${alcCount} drink${alcCount>1?"s":""})`,`−${alcPenalty}`,C.red]]:[]),
         ];
 
