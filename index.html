@@ -775,6 +775,30 @@ async function ghFullSync(setSyncStatus,setFitbitData){
       console.log("Workouts error:",e.message);
     }
 
+    // ── RESTING HEART RATE (daily rollup) ────────────────────────────────────
+    try{
+      const rhrData=await Promise.race([
+        ghGet("/users/me/dataTypes/daily-resting-heart-rate/dataPoints",{
+          filter:`dailyRestingHeartRate.interval.civil_end_time >= "${twoWeeksAgo}" AND dailyRestingHeartRate.interval.civil_end_time < "${tomorrow}"`,
+          pageSize:30
+        }),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error("RHR timeout")),8000))
+      ]);
+      const rhrMap={};
+      (rhrData.dataPoints||[]).forEach(pt=>{
+        const hr=pt.dailyRestingHeartRate;
+        if(!hr) return;
+        const date=new Date(hr.interval?.endTime||hr.interval?.startTime).toLocaleDateString("en-CA",{timeZone:getTz()});
+        const bpm=hr.beatsPerMinute;
+        if(date&&bpm!=null) rhrMap[date]=Math.round(parseFloat(bpm));
+      });
+      sleepArr.forEach(s=>{ if(rhrMap[s.date]!=null) s.rhr=rhrMap[s.date]; });
+      console.log("RHR parsed:",Object.keys(rhrMap).length,"days",rhrMap);
+    }catch(e){
+      if(e.message==="NOT_AUTHENTICATED") throw e;
+      console.log("RHR fetch error:",e.message);
+    }
+
     // Only replace each field if we got actual data - never wipe with empty
     setFitbitData(prev=>{
       const merged={
