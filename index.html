@@ -528,11 +528,15 @@ function isGTokenValid(tok){
   return tok.expires_at>Date.now()+60000;
 }
 
-function startGoogleAuth(){
+function startGoogleAuth(forceConsent=false){
+  const hasConsented = localStorage.getItem("gh_consent_granted");
+  const loginHint = localStorage.getItem("gh_login_hint");
+  const prompt = (forceConsent||!hasConsented) ? "consent" : "none";
   const params=new URLSearchParams({
     client_id:GOOGLE_CLIENT_ID,redirect_uri:GOOGLE_REDIRECT_URI,
     response_type:"token",scope:GOOGLE_SCOPES,
-    include_granted_scopes:"true",prompt:"consent"
+    include_granted_scopes:"true",prompt,
+    ...(loginHint?{login_hint:loginHint}:{})
   });
   window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params.toString();
 }
@@ -541,11 +545,24 @@ function handleGoogleCallback(){
   const hash=window.location.hash.substring(1);
   if(!hash) return false;
   const params=new URLSearchParams(hash);
+  const error=params.get("error");
+  if(error){
+    // Silent re-auth failed (prompt:none) — fall back to visible consent
+    if(error==="login_required"||error==="consent_required"||error==="interaction_required"){
+      window.history.replaceState(null,"",window.location.pathname);
+      startGoogleAuth(true);
+    }
+    return false;
+  }
   const access_token=params.get("access_token");
   const expires_in=params.get("expires_in");
   if(!access_token) return false;
-  setGToken({access_token,expires_at:Date.now()+parseInt(expires_in||3600)*1000});
+  const tok={access_token,expires_at:Date.now()+parseInt(expires_in||3600)*1000};
+  setGToken(tok);
+  localStorage.setItem("gh_consent_granted","true");
   window.history.replaceState(null,"",window.location.pathname);
+  // Persist token to Supabase so it survives across devices (fire-and-forget)
+  supa("PATCH","profiles",{google_access_token:access_token,google_token_expiry:new Date(tok.expires_at).toISOString()},"uid=eq."+UID).catch(()=>{});
   return true;
 }
 
@@ -1347,6 +1364,23 @@ Rules: no section repeats another; all language warm and non-guilt; never mentio
     const prot = Math.round(todayFoodEntries.reduce((s,e)=>s+(e.p||0),0));
     const protTgt2 = profileData?.protein_target||120;
     const foodSummary2 = todayFoodEntries.map(e=>e.n||e.name).filter(Boolean).join(", ")||"nothing logged yet";
+
+    // Gate: only call AI for meaningful food events
+    const prevHash = (()=>{try{return JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"{}") ._foodHash||"";}catch{return "";}})();
+    const prevCount = prevHash.split("|").filter(Boolean).length;
+    const isFirstMeal = prevCount===0 && todayFoodEntries.length>0;
+    const prevProt = parseInt(localStorage.getItem("coach_last_protein_"+todayKey)||"0");
+    const proteinJustCrossed = prevProt < protTgt2 && prot >= protTgt2;
+    const insightHistory = (()=>{try{return JSON.parse(localStorage.getItem("coach_insight_history")||"{}");}catch{return {};}})();
+    const lastNutritionMs = insightHistory.food_pattern?.last_surfaced_ms ? new Date(insightHistory.food_pattern.last_surfaced_ms) : null;
+    const hoursSinceNutrition = lastNutritionMs ? (now-lastNutritionMs)/3600000 : 999;
+    if(!isFirstMeal && !proteinJustCrossed && hoursSinceNutrition<4){
+      // Update hash + protein counter without calling AI
+      try{const c=JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"{}");c._foodHash=currentFoodHash;localStorage.setItem("coach_content_"+todayKey,JSON.stringify(c));setCoachContent(prev=>prev?{...prev,_foodHash:currentFoodHash}:prev);}catch(e){}
+      localStorage.setItem("coach_last_protein_"+todayKey,String(prot));
+      return;
+    }
+    localStorage.setItem("coach_last_protein_"+todayKey,String(prot));
     try {
       const raw = await callCoachAI(
         `Generate ONLY a food/nutrition insight for today. One sentence.
@@ -1364,7 +1398,7 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
       setCoachContent(updated);
       localStorage.setItem("coach_content_"+todayKey, JSON.stringify(updated));
       if(newInsight){
-        try{const h=JSON.parse(localStorage.getItem("coach_insight_history")||"{}");h.food_pattern={last_surfaced:todayKey,last_claim:newInsight.claim};localStorage.setItem("coach_insight_history",JSON.stringify(h));}catch(e){}
+        try{const h=JSON.parse(localStorage.getItem("coach_insight_history")||"{}");h.food_pattern={last_surfaced:todayKey,last_claim:newInsight.claim,last_surfaced_ms:new Date().toISOString()};localStorage.setItem("coach_insight_history",JSON.stringify(h));}catch(e){}
       }
     } catch(e){ console.log("Nutrition refresh error:",e.message); }
   }
@@ -3737,8 +3771,8 @@ function App() {
   },[fitbitData?.sleep?.length,Object.keys(allFood).length]);
 
   useEffect(()=>{
-    // Handle Google OAuth callback (token in URL hash)
-    if(window.location.hash.includes("access_token")) {
+    // Handle Google OAuth callback (token or error in URL hash)
+    if(window.location.hash.includes("access_token")||window.location.hash.includes("error=")) {
       const handled = handleGoogleCallback();
       if(handled) {
         setGhConnected(true);
@@ -3767,6 +3801,14 @@ function App() {
           if (!prof.timezone) {
             prof.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
             try{ await supa("POST","profiles",{...prof},"on_conflict=uid"); }catch(e){}
+          }
+          // Restore Google token from Supabase if localStorage is empty or expired
+          if(prof.google_access_token && prof.google_token_expiry) {
+            const expiresAt = new Date(prof.google_token_expiry).getTime();
+            if(expiresAt > Date.now()+60000 && !isGTokenValid(getGToken())) {
+              setGToken({access_token:prof.google_access_token, expires_at:expiresAt});
+              setGhConnected(true);
+            }
           }
           setProfileData(prof);
         } else {
@@ -3959,8 +4001,9 @@ function App() {
 
   async function syncGoogleHealth() {
     if(!isGTokenValid(getGToken())) {
-      // Need to authenticate first
-      startGoogleAuth();
+      // Token expired — try silent re-auth first (instant if Google session still active)
+      setSyncStatus("Reconnecting to Google Health...");
+      startGoogleAuth(false); // uses prompt:none if previously consented
       return;
     }
     setGhSyncing(true);
