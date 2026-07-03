@@ -547,7 +547,6 @@ function handleGoogleCallback(){
   const params=new URLSearchParams(hash);
   const error=params.get("error");
   if(error){
-    // Silent re-auth failed (prompt:none) — fall back to visible consent
     if(error==="login_required"||error==="consent_required"||error==="interaction_required"){
       window.history.replaceState(null,"",window.location.pathname);
       startGoogleAuth(true);
@@ -561,9 +560,56 @@ function handleGoogleCallback(){
   setGToken(tok);
   localStorage.setItem("gh_consent_granted","true");
   window.history.replaceState(null,"",window.location.pathname);
-  // Persist token to Supabase so it survives across devices (fire-and-forget)
+  // Fetch email for login_hint so future silent re-auths skip the account chooser
+  if(!localStorage.getItem("gh_login_hint")){
+    fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{"Authorization":"Bearer "+access_token}})
+      .then(r=>r.json()).then(u=>{if(u.email) localStorage.setItem("gh_login_hint",u.email);}).catch(()=>{});
+  }
   supa("PATCH","profiles",{google_access_token:access_token,google_token_expiry:new Date(tok.expires_at).toISOString()},"uid=eq."+UID).catch(()=>{});
   return true;
+}
+
+// Silent token refresh via hidden iframe — no page navigation, no account chooser
+function silentGoogleRefresh(){
+  return new Promise((resolve,reject)=>{
+    const loginHint=localStorage.getItem("gh_login_hint");
+    if(!loginHint){reject(new Error("no_login_hint"));return;}
+    const params=new URLSearchParams({
+      client_id:GOOGLE_CLIENT_ID,redirect_uri:GOOGLE_REDIRECT_URI,
+      response_type:"token",scope:GOOGLE_SCOPES,
+      include_granted_scopes:"true",prompt:"none",login_hint:loginHint
+    });
+    const iframe=document.createElement("iframe");
+    iframe.style.cssText="display:none;width:1px;height:1px;";
+    const timer=setTimeout(()=>{
+      try{document.body.removeChild(iframe);}catch(e){}
+      reject(new Error("silent_timeout"));
+    },10000);
+    iframe.onload=()=>{
+      try{
+        const h=iframe.contentWindow.location.hash.substring(1);
+        const p=new URLSearchParams(h);
+        const at=p.get("access_token");
+        const ei=p.get("expires_in");
+        clearTimeout(timer);
+        try{document.body.removeChild(iframe);}catch(e){}
+        if(at){
+          const tok={access_token:at,expires_at:Date.now()+parseInt(ei||3600)*1000};
+          setGToken(tok);
+          supa("PATCH","profiles",{google_access_token:at,google_token_expiry:new Date(tok.expires_at).toISOString()},"uid=eq."+UID).catch(()=>{});
+          resolve(tok);
+        } else {
+          reject(new Error("no_token_in_iframe"));
+        }
+      }catch(e){
+        clearTimeout(timer);
+        try{document.body.removeChild(iframe);}catch(e2){}
+        reject(e);
+      }
+    };
+    iframe.src="https://accounts.google.com/o/oauth2/v2/auth?"+params.toString();
+    document.body.appendChild(iframe);
+  });
 }
 
 async function ghGet(path,params={}){
@@ -4035,10 +4081,15 @@ function App() {
 
   async function syncGoogleHealth() {
     if(!isGTokenValid(getGToken())) {
-      // Token expired — try silent re-auth first (instant if Google session still active)
       setSyncStatus("Reconnecting to Google Health...");
-      startGoogleAuth(false); // uses prompt:none if previously consented
-      return;
+      try{
+        await silentGoogleRefresh();
+        // Token refreshed silently — fall through to sync
+      }catch(e){
+        // Silent refresh failed — full page redirect (only happens if Google session expired)
+        startGoogleAuth(false);
+        return;
+      }
     }
     setGhSyncing(true);
     try {
