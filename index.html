@@ -666,7 +666,10 @@ function parseSleepPoint(pt){
   const totalMins=Math.round((new Date(endTime)-new Date(startTime))/60000);
   const asleepMin=totalMins-awakeMin;
   if(asleepMin<60) return null; // too short
-  return {date:wakeDate,bedtime,total:asleepMin,deep:deepMin,rem:remMin,light:lightMin,awake:awakeMin};
+  const rhr=sleep.metricsSummary?.restingHeartRateBeatsPerMinute
+    ?Math.round(parseFloat(sleep.metricsSummary.restingHeartRateBeatsPerMinute))
+    :null;
+  return {date:wakeDate,bedtime,total:asleepMin,deep:deepMin,rem:remMin,light:lightMin,awake:awakeMin,...(rhr?{rhr}:{})};
 }
 
 // Parse exercise data point
@@ -770,6 +773,28 @@ async function ghFullSync(setSyncStatus,setFitbitData){
     }catch(e){
       if(e.message==="NOT_AUTHENTICATED") throw e;
       console.log("Workouts error:",e.message);
+    }
+
+    // ── RESTING HEART RATE ────────────────────────────────────────────────────
+    try{
+      const rhrData=await ghGet("/users/me/dataTypes/heart_rate.resting/dataPoints",{
+        filter:`heart_rate.resting.interval.civil_end_time >= "${twoWeeksAgo}" AND heart_rate.resting.interval.civil_end_time < "${tomorrow}"`,
+        pageSize:30
+      });
+      const rhrMap={};
+      (rhrData.dataPoints||[]).forEach(pt=>{
+        const hr=pt.heartRateResting;
+        if(!hr) return;
+        const date=new Date(hr.interval?.endTime||hr.interval?.startTime).toLocaleDateString("en-CA",{timeZone:getTz()});
+        const bpm=hr.beatsPerMinute||hr.averageBeatsPerMinute;
+        if(date&&bpm) rhrMap[date]=Math.round(parseFloat(bpm));
+      });
+      // Attach rhr to matching sleep records
+      sleepArr.forEach(s=>{ if(rhrMap[s.date]) s.rhr=rhrMap[s.date]; });
+      console.log("RHR parsed:",Object.keys(rhrMap).length,"days",rhrMap);
+    }catch(e){
+      if(e.message==="NOT_AUTHENTICATED") throw e;
+      console.log("RHR fetch error:",e.message);
     }
 
     // Only replace each field if we got actual data - never wipe with empty
