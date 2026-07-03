@@ -784,13 +784,13 @@ async function ghFullSync(setSyncStatus,setFitbitData){
         new Promise((_,reject)=>setTimeout(()=>reject(new Error("RHR timeout")),8000))
       ]);
       const rhrMap={};
-      console.log("RHR raw sample:", JSON.stringify((rhrData.dataPoints||[]).slice(0,2)));
       (rhrData.dataPoints||[]).forEach(pt=>{
         const hr=pt.dailyRestingHeartRate;
-        if(!hr) return;
-        const date=new Date(hr.interval?.endTime||hr.interval?.startTime).toLocaleDateString("en-CA",{timeZone:getTz()});
+        if(!hr||!hr.date) return;
+        const {year,month,day}=hr.date;
+        const date=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
         const bpm=hr.beatsPerMinute;
-        if(date&&bpm!=null) rhrMap[date]=Math.round(parseFloat(bpm));
+        if(bpm!=null) rhrMap[date]=Math.round(parseFloat(bpm));
       });
       sleepArr.forEach(s=>{ if(rhrMap[s.date]!=null) s.rhr=rhrMap[s.date]; });
       console.log("RHR parsed:",Object.keys(rhrMap).length,"days",rhrMap);
@@ -1743,7 +1743,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const rhrRecords = [...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(s=>s.rhr!=null);
         let rhrScore = 4;
         let rhrCalibrating = true;
-        if(rhrRecords.length>=3){
+        if(rhrRecords.length>=2){
           const sorted = [...rhrRecords].map(s=>s.rhr).sort((a,b)=>a-b);
           const mid = Math.floor(sorted.length/2);
           const baseline = sorted.length%2===0?(sorted[mid-1]+sorted[mid])/2:sorted[mid];
