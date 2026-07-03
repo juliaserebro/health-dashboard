@@ -749,7 +749,6 @@ async function ghFullSync(setSyncStatus,setFitbitData){
     try{
       const rhrData=await Promise.race([
         ghGet("/users/me/dataTypes/daily-resting-heart-rate/dataPoints",{
-          filter:`dailyRestingHeartRate.interval.civil_end_time >= "${twoWeeksAgo}" AND dailyRestingHeartRate.interval.civil_end_time < "${tomorrow}"`,
           pageSize:30
         }),
         new Promise((_,reject)=>setTimeout(()=>reject(new Error("RHR timeout")),8000))
