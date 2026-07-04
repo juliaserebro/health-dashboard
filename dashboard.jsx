@@ -1923,7 +1923,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       </div>
 
       {/* TODAY'S INSIGHTS */}
-      {apiKey&&(
+      {(apiKey||coachContent)&&(
         <div style={s.aiCard}>
           <div style={{...s.aiLbl,justifyContent:"space-between"}}>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
