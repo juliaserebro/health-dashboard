@@ -1033,7 +1033,13 @@ Activity targets: Strength ${at.strength||2}x/week, Mobility ${at.mobility||2}x/
 Protein target: ${profileData?.protein_target||100}g/day
 Step target: ${profileData?.step_target||8000} steps/day
 Supplements: ${supps}
+Food sensitivities & restrictions: ${(profileData?.food_sensitivities||[]).length>0 ? profileData.food_sensitivities.join(', ') : 'none specified'}
 Health notes: ${profileData?.health_notes||'none'}
+
+FOOD SENSITIVITY RULE: Never suggest a food item that conflicts with the user's stated
+food sensitivities or restrictions. If restrictions are "none specified," do not assume
+any restriction. If suggesting specific foods (e.g. in a nutrition insight or micro-suggestion),
+always check against this list first.
 Cycle tracking: ${profileData?.cycle_tracking?'active':'not tracking'}${todayData?.cycleResult?`
 Current cycle phase: ${todayData.cycleResult.confidence==='very_low'||todayData.cycleResult.confidence==='no_data'?'uncertain — limited cycle data available':todayData.cycleResult.phase}
 Cycle day: ${todayData.cycleResult.cycleDay||'unknown'} of ${todayData.cycleResult.avgCycleLength}-day cycle
@@ -1266,8 +1272,9 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   const goalsCtx = (profileData?.goals||[]).length>0 ? '\nUSER GOALS:\n'+(profileData.goals.map(g=>'- '+g.label+': '+g.definition+(g.target_value?' (target: '+g.target_value+' '+(g.target_unit||'')+')':'')).join('\n')) : '';
   const actTargCtx = profileData?.activity_targets ? `\nACTIVITY TARGETS: Strength ${profileData.activity_targets.strength}x/week, Mobility ${profileData.activity_targets.mobility||2}x/week, Cardio ${profileData.activity_targets.cardio}x/week` : '';
   const suppsCtx = (profileData?.supplements||[]).filter(s=>s.name).length>0 ? '\nSUPPLEMENTS: '+(profileData.supplements.filter(s=>s.name).map(s=>`${s.name} ${s.dose||''} ${s.timing?'('+s.timing+')':''}`).join(', ')) : '';
+  const sensCtx = (profileData?.food_sensitivities||[]).length>0 ? `\nFOOD SENSITIVITIES & RESTRICTIONS: ${profileData.food_sensitivities.join(', ')}. NEVER suggest foods that conflict with these.` : '';
   // STRENGTH SESSION RULE applied here: goals described without body-part framing
-  return goalsCtx + actTargCtx + suppsCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+  return goalsCtx + actTargCtx + suppsCtx + sensCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
 }
 
 function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
@@ -1527,6 +1534,7 @@ EVENT-RESPONSE RULES:
         `Generate ONLY a food/nutrition insight for today. One sentence.
 ALREADY EATEN TODAY (forbidden from suggestion): ${foodSummary2}
 Protein so far: ${prot}g of ${protTgt2}g target.
+FOOD SENSITIVITIES & RESTRICTIONS: ${(profileData?.food_sensitivities||[]).length>0?profileData.food_sensitivities.join(", ")+" — NEVER suggest foods conflicting with these.":"none specified — do not assume any restriction."}
 Rules: do not suggest any food already eaten; notice qualitative patterns (variety, timing, streaks) not just grams; if protein is close to or at target acknowledge positively; if genuinely nothing new to say return exactly: null`,
         `You are a warm, precise nutrition coach. Return either one sentence of plain text, or the single word: null`
       );
@@ -2549,8 +2557,69 @@ function SupplementStack({suppState={}, setSupp, profileData, onSaveSupps}) {
   );
 }
 
+const COMMON_FOOD_SENSITIVITIES = [
+  "Vegetarian", "Vegan", "Pescatarian",
+  "Gluten-free", "Celiac", "Lactose intolerant", "Dairy-free",
+  "Nut allergy", "Peanut allergy", "Shellfish allergy", "Egg allergy", "Soy allergy",
+  "Low FODMAP", "Kosher", "Halal",
+  "Diabetic — carb-conscious"
+];
+
+function FoodSensitivities({profileData, onSave}) {
+  const [list, setList] = useState(()=>profileData?.food_sensitivities||[]);
+  const [input, setInput] = useState("");
+  const [savedMsg, setSavedMsg] = useState("");
+  React.useEffect(()=>{ setList(profileData?.food_sensitivities||[]); },[profileData?.food_sensitivities]);
+  const suggestions = input
+    ? COMMON_FOOD_SENSITIVITIES.filter(x=>x.toLowerCase().includes(input.toLowerCase())&&!list.includes(x)).slice(0,6)
+    : [];
+  async function save(next){
+    setList(next);
+    await onSave(next);
+    setSavedMsg("Saved");
+    setTimeout(()=>setSavedMsg(""),2000);
+  }
+  function add(val){
+    const v=(val||"").trim();
+    if(!v||list.includes(v)) { setInput(""); return; }
+    save([...list,v]);
+    setInput("");
+  }
+  return (
+    <Card style={{marginTop:8}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Food sensitivities & restrictions</div>
+        {savedMsg&&<span style={{fontSize:11,color:C.teal}}>{savedMsg}</span>}
+      </div>
+      <div style={{fontSize:10,color:C.t3,marginBottom:8}}>Your coach never suggests foods that conflict with these.</div>
+      {list.length>0&&(
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+          {list.map(x=>(
+            <span key={x} style={{...s.pill(C.al,C.am),display:"inline-flex",alignItems:"center",gap:6}}>
+              {x}
+              <span onClick={()=>save(list.filter(y=>y!==x))} style={{cursor:"pointer",fontWeight:600}}>×</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{position:"relative"}}>
+        <div style={{display:"flex",gap:8}}>
+          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")add(input);}}
+            placeholder="Type to add — e.g. Vegetarian, nut allergy..." style={{...s.input,flex:1}}/>
+          <button onClick={()=>add(input)} disabled={!input.trim()} style={{...s.btn("s"),...s.btnSm,opacity:input.trim()?1:.5}}>Add</button>
+        </div>
+        {suggestions.length>0&&(
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.sf,border:`.5px solid ${C.bd}`,borderRadius:8,zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,.08)"}}>
+            {suggestions.map(sg=><div key={sg} onClick={()=>add(sg)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer"}}>{sg}</div>)}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData, onSaveSupps}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData, onSaveSupps, onSaveSensitivities}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -2578,7 +2647,8 @@ Rules:
 - Be accurate — do not overestimate protein
 - For Israeli foods or brands, use accurate Israeli nutritional values
 - Translate non-English to English but keep all quantities
-- All macro values are integers representing the total for that item
+- All macro values are integers representing the total for that item${(profileData?.food_sensitivities||[]).length?`
+- User's dietary profile: ${profileData.food_sensitivities.join(", ")}. When an entry is ambiguous, resolve assumptions consistently with this profile (e.g. plant-based default for a vegan user's "yogurt")`:""}
 
 Return format:
 {
@@ -2639,7 +2709,8 @@ Rules:
 - Be accurate — do not overestimate protein
 - For Israeli foods or brands, use accurate Israeli nutritional values
 - Translate non-English to English but keep all quantities
-- All macro values are integers representing the total for that item
+- All macro values are integers representing the total for that item${(profileData?.food_sensitivities||[]).length?`
+- User's dietary profile: ${profileData.food_sensitivities.join(", ")}. When an entry is ambiguous, resolve assumptions consistently with this profile (e.g. plant-based default for a vegan user's "yogurt")`:""}
 
 Return format:
 {
@@ -2833,6 +2904,7 @@ Input: ${txtInput}`;
 
       {/* SUPPLEMENTS */}
       <SupplementStack suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={onSaveSupps}/>
+      <FoodSensitivities profileData={profileData} onSave={onSaveSensitivities}/>
 
       {/* EDIT MODAL */}
       {editIdx!==null&&(()=>{
@@ -3126,13 +3198,33 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
 }
 
 // ── LOG TAB ───────────────────────────────────────────────────────────────
-const TAGS=["pain","medical","feedback","postworkout","mood","life","sleep","correction","spine"];
-const TAG_LABELS={pain:"Pain",medical:"Medical update",feedback:"Exercise feedback",postworkout:"Post-workout",mood:"Energy / mood",life:"Life context",sleep:"Sleep note",correction:"Correct AI",spine:"Spine update"};
-const TAG_STYLE={pain:[C.rl,C.red],medical:[C.sll,C.sl],feedback:[C.tl,C.teal],postworkout:[C.orl,C.or],mood:[C.al,C.am],life:[C.pl,C.pu],sleep:[C.sll,C.sl],correction:[C.pil,C.pi],spine:[C.sll,C.slm]};
+const LOG_ENTRY_TYPES = [
+  { id: "post_workout", label: "Post-Workout", icon: "💪" },
+  { id: "pain_discomfort", label: "Pain / Discomfort", icon: "⚠️" },
+  { id: "sleep_note", label: "Sleep Note", icon: "😴" },
+  { id: "energy_mood", label: "Energy / Mood", icon: "⚡" },
+  { id: "life_context", label: "Life Context", icon: "🌍" },
+  { id: "general_note", label: "General Note", icon: "📝" },
+];
+const TAG_LABELS={post_workout:"💪 Post-Workout",pain_discomfort:"⚠️ Pain / Discomfort",sleep_note:"😴 Sleep Note",energy_mood:"⚡ Energy / Mood",life_context:"🌍 Life Context",general_note:"📝 General Note"};
+const TAG_STYLE={post_workout:[C.orl,C.or],pain_discomfort:[C.rl,C.red],sleep_note:[C.sll,C.sl],energy_mood:[C.al,C.am],life_context:[C.pl,C.pu],general_note:[C.s2,C.t2]};
+// MIGRATION NOTE: old entries keep their original tag value in the database
+// (data integrity); the UI remaps them to the nearest new category for display only.
+const LEGACY_TAG_MAP={pain:"pain_discomfort",spine:"pain_discomfort",medical:"life_context",life:"life_context",feedback:"post_workout",postworkout:"post_workout",training:"post_workout",mood:"energy_mood",energy:"energy_mood",sleep:"sleep_note",correction:"general_note",alcohol:"general_note"};
+const displayTag=(tag)=>TAG_LABELS[tag]?tag:(LEGACY_TAG_MAP[tag]||"general_note");
+const LOG_CONFIRMATION_MESSAGES = {
+  post_workout: "Got it — noted for your coach.",
+  pain_discomfort: "Noted. Your coach will keep this in mind.",
+  sleep_note: "Got it — this helps explain your sleep data.",
+  energy_mood: "Noted — thanks for sharing how you're feeling.",
+  life_context: "Got it — this gives your coach helpful context.",
+  general_note: "Saved — noted for your coach.",
+};
 
 function TabLog({logEntries, setLogEntries}) {
-  const [selTag, setSelTag] = useState("pain");
+  const [selTag, setSelTag] = useState("post_workout");
   const [txt, setTxt] = useState("");
+  const [confirmMsg, setConfirmMsg] = useState("");
 
   async function addEntry(){
     if(!txt.trim()) return;
@@ -3143,10 +3235,12 @@ function TabLog({logEntries, setLogEntries}) {
     }catch(e){}
     setLogEntries(prev=>{
       const updated=[newEntry,...prev];
-      localStorage.setItem("jlog_backup",JSON.stringify(updated));
+      if(!IS_DEMO) localStorage.setItem("jlog_backup",JSON.stringify(updated));
       return updated;
     });
     setTxt("");
+    setConfirmMsg(LOG_CONFIRMATION_MESSAGES[selTag]||"Saved.");
+    setTimeout(()=>setConfirmMsg(""),2000);
   }
 
   async function delEntry(id){
@@ -3158,55 +3252,36 @@ function TabLog({logEntries, setLogEntries}) {
     <div>
       <div style={s.aiCard}>
         <div style={s.aiLbl}><div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>How the AI coach uses this log</div>
-        <div style={{fontSize:12,color:C.tx,lineHeight:1.65}}>Every entry is read before generating recommendations. Log pain, medical updates, physio notes, post-workout feel, energy, mood, or corrections. The coach adjusts based on what you log here.</div>
+        <div style={{fontSize:12,color:C.tx,lineHeight:1.65}}>Every entry is read before generating recommendations. Log how workouts felt, pain or discomfort, sleep notes, energy and mood, or life context. The coach adjusts based on what you log here.</div>
       </div>
 
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Add entry</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-          {TAGS.map(tag=>{
-            const [bg,col]=TAG_STYLE[tag]||[C.s2,C.t2];
-            const active=selTag===tag;
-            return <button key={tag} onClick={()=>setSelTag(tag)} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",background:bg,color:col,border:`1.5px solid ${active?col:"transparent"}`,opacity:active?1:.55}}>{TAG_LABELS[tag]}</button>;
+          {LOG_ENTRY_TYPES.map(t=>{
+            const [bg,col]=TAG_STYLE[t.id]||[C.s2,C.t2];
+            const active=selTag===t.id;
+            return <button key={t.id} onClick={()=>setSelTag(t.id)} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",background:bg,color:col,border:`1.5px solid ${active?col:"transparent"}`,opacity:active?1:.55}}>{t.icon} {t.label}</button>;
           })}
         </div>
-        <textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Be specific — e.g. left glute sore after hip thrusts, 4/10, faded by evening." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:10}}/>
+        <textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Be specific — e.g. felt strong on push-ups today, energy dipped mid-afternoon." style={{...s.input,resize:"vertical",minHeight:72,marginBottom:10}}/>
         <button onClick={addEntry} style={s.btn("p")}>Save entry</button>
+        {confirmMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginTop:10}}>{confirmMsg}</div>}
       </Card>
-
-      <SecLabel>Spine history</SecLabel>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        <div style={{...s.card,borderLeft:`3px solid ${C.am}`,marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.am,marginBottom:8}}>L4-L5 disc herniation</div>
-          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
-            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Onset:</strong> Feb–Mar 2025. Radicular pain, nerve compression.</div>
-            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>May 2025:</strong> Significant leg pain reduction.</div>
-            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Current:</strong> Left glute pain to outer shin. MRI and physio pending.</div>
-            <span style={{...s.pill(C.al,C.am),fontSize:10}}>Monitoring — physio pending</span>
-          </div>
-        </div>
-        <div style={{...s.card,borderLeft:`3px solid #185FA5`,marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:"#185FA5",marginBottom:8}}>T9-T10 surgery</div>
-          <div style={{fontSize:12,color:C.t2,lineHeight:1.7}}>
-            <div style={{marginBottom:5}}><strong style={{color:C.tx}}>Surgery:</strong> T9-T10 decompression ~March 2026.</div>
-            <div style={{marginBottom:8}}><strong style={{color:C.tx}}>Status:</strong> Cleared for full activity. Follow-up MRI due Sep 2026.</div>
-            <span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Cleared — MRI due Sep 2026</span>
-          </div>
-        </div>
-      </div>
 
       <SecLabel>All entries</SecLabel>
       {logEntries.length===0
         ? <div style={{textAlign:"center",padding:"24px 16px",color:C.t3}}><strong style={{display:"block",color:C.t2,marginBottom:4}}>No entries yet</strong>Start logging to build your health history.</div>
         : logEntries.map(e=>{
-          const [bg,col]=TAG_STYLE[e.tag]||[C.s2,C.t2];
+          const dTag=displayTag(e.tag); // legacy tags remapped for display only
+          const [bg,col]=TAG_STYLE[dTag]||[C.s2,C.t2];
           const d=new Date(e.dt);
           const ds=d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
           return (
             <div key={e.id} style={{...s.card,marginBottom:8,padding:"12px 14px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{...s.pill(bg,col),fontSize:10}}>{TAG_LABELS[e.tag]}</span>
+                  <span style={{...s.pill(bg,col),fontSize:10}}>{TAG_LABELS[dTag]}</span>
                   <span style={{fontSize:10,color:C.t3}}>{ds}</span>
                 </div>
                 <button onClick={()=>delEntry(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14,padding:2}}>×</button>
@@ -4363,6 +4438,13 @@ function App() {
     }catch(e){ console.log("Supp save error:",e.message); }
   }
 
+  async function saveFoodSensitivities(list){
+    try{
+      await supa("POST","profiles",{uid:UID,food_sensitivities:list},"on_conflict=uid");
+      setProfileData(p=>({...p,food_sensitivities:list}));
+    }catch(e){ console.log("Sensitivities save error:",e.message); }
+  }
+
   async function setSupp(id,val){
     setSuppState(p=>({...p,[id]:val}));
     try{await supa("POST","supplement_log",{user_id:UID,log_date:tkey(),supplement:id,taken:val},"on_conflict=user_id,log_date,supplement");}catch(e){}
@@ -4455,7 +4537,7 @@ function App() {
       </div>
 
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey}/>}
