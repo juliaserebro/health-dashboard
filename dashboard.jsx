@@ -13,6 +13,11 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const OWNER_KEY = "jls-Vq83kTz5mPn2wXr9";
 const resolveUser = () => {
   const params = new URLSearchParams(window.location.search);
+  // ?demo=1 forces the demo view even on a device with owner mode persisted —
+  // lets the owner preview exactly what a visitor sees.
+  if (params.get("demo") === "1") {
+    return { uid: "demo_maya", isDemo: true };
+  }
   // Once the private link is opened on a device, owner mode persists there —
   // OAuth redirects (Google strips the ?u= param) and bookmarks keep working.
   if (params.get("u") === OWNER_KEY) {
@@ -1203,6 +1208,27 @@ async function checkMilestones(profileData, last30Days) {
   return [];
 }
 
+// Shared 14-day log digest with relevance triage. The model does the routine-vs-
+// serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
+// movement-limiting issues stay active until a newer entry says they resolved.
+function buildLogContext(logEntries){
+  const now=new Date();
+  const items=(logEntries||[]).filter(e=>e.dt&&(now-new Date(e.dt))/864e5<=14).slice(0,25).map(e=>{
+    const daysAgo=Math.floor((now-new Date(e.dt))/864e5);
+    const when=daysAgo===0?"TODAY":daysAgo===1?"YESTERDAY":`${daysAgo} days ago`;
+    return `[${e.tag}|${when}] ${e.txt}`;
+  });
+  if(!items.length) return "USER LOGS (last 14 days): none.";
+  return `USER LOGS (last 14 days, newest first):
+${items.join("\n")}
+
+LOG RELEVANCE RULES — apply judgment to each entry's age and content:
+- Routine/transient entries (muscle soreness, ordinary tiredness, one bad night, daily mood) EXPIRE after 2 days: never reference or act on them once older than 2 days.
+- Serious entries (injury, spinal or nerve symptoms, illness, anything that limits movement) STAY ACTIVE regardless of age until a newer entry indicates it resolved or improved. While active, never push training that conflicts with it.
+- If a newer entry contradicts an older one, the newer one wins.
+- When unsure whether an entry is routine or serious, treat it as routine (expires after 2 days).`;
+}
+
 function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData}) {
   const now = new Date();
   const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:getTz()});
@@ -1218,16 +1244,7 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   let cycleCtx = "Cycle not tracked";
   if(conf.length){const cd=calcCycleDay(conf[0].d);const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
-  // Only include TODAY and YESTERDAY log entries — older entries are for the weekly context
-  const jArr = logEntries.filter(e=>{
-    if(!e.dt) return false;
-    const daysAgo=Math.floor((now-new Date(e.dt))/864e5);
-    return daysAgo<=1;
-  }).slice(0,8).map(e=>{
-    const daysAgo=Math.floor((now-new Date(e.dt))/864e5);
-    const recency=daysAgo===0?"TODAY":"YESTERDAY";
-    return `[${e.tag}|${recency}] ${e.txt}`;
-  });
+  const logCtx = buildLogContext(logEntries);
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
   const lastSleep=getLastNightSleep(fitbitData, getTz());
   const stepsLine=todaySteps?`Steps today: ${todaySteps.steps}`:"Steps: no data";
@@ -1244,7 +1261,9 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   const suppsCtx = (profileData?.supplements||[]).filter(s=>s.name).length>0 ? '\nSUPPLEMENTS: '+(profileData.supplements.filter(s=>s.name).map(s=>`${s.name} ${s.dose||''} ${s.timing?'('+s.timing+')':''}`).join(', ')) : '';
   const sensCtx = (profileData?.food_sensitivities||[]).length>0 ? `\nFOOD SENSITIVITIES & RESTRICTIONS: ${profileData.food_sensitivities.join(', ')}. NEVER suggest foods that conflict with these.` : '';
   // STRENGTH SESSION RULE applied here: goals described without body-part framing
-  return goalsCtx + actTargCtx + suppsCtx + sensCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a specific [pain|TODAY] log entry or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}. Log: ${jArr.join(" | ")||"none"}`;
+  return goalsCtx + actTargCtx + suppsCtx + sensCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a recent pain/discomfort log entry (per the LOG RELEVANCE RULES below) or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}.
+
+${logCtx}`;
 }
 
 function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
@@ -1458,7 +1477,7 @@ EVENT-RESPONSE RULES:
 - Update today's session counts and weekly adherence math to include any new workout BEFORE reasoning about what to suggest.`;
         }
       }catch(e){}
-      const raw = await callCoachAI(userMsg + eventCtx, systemPrompt);
+      const raw = await callCoachAI(userMsg + "\n\n" + buildLogContext(logEntries) + eventCtx, systemPrompt);
       const clean = raw.replace(/```json|```/g,"").trim();
       const m = clean.match(/\{[\s\S]*\}/);
       if(m){
@@ -1578,6 +1597,8 @@ Write 4–6 sentences covering exactly these four things in order:
 4. One specific focus for the coming week tied to the user's goals — specific and actionable
 
 Warm first-person coach voice. Reference actual numbers. Do not mention any single day in isolation — week-level view only. End naturally, not formally.
+
+${buildLogContext(logEntries)}
 
 Return plain text only — no JSON, no headers, no bullet points. Just the paragraph.`;
       const text = await callCoachAI(userMsg, systemPrompt);
