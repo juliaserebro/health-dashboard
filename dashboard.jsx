@@ -13,9 +13,17 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const OWNER_KEY = "jls-Vq83kTz5mPn2wXr9";
 const resolveUser = () => {
   const params = new URLSearchParams(window.location.search);
+  // Once the private link is opened on a device, owner mode persists there —
+  // OAuth redirects (Google strips the ?u= param) and bookmarks keep working.
   if (params.get("u") === OWNER_KEY) {
+    try{ localStorage.setItem("owner_mode", OWNER_KEY); }catch(e){}
     return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
   }
+  try{
+    if (localStorage.getItem("owner_mode") === OWNER_KEY) {
+      return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
+    }
+  }catch(e){}
   return { uid: "demo_maya", isDemo: true };
 };
 const { uid: UID, isDemo: IS_DEMO } = resolveUser();
@@ -2451,6 +2459,53 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   const [aiMsg, setAiMsg] = useState("");
   const [editIdx, setEditIdx] = useState(null);
   const [editEntry, setEditEntry] = useState({});
+  const [reanalysing, setReanalysing] = useState(false);
+
+  // Re-run the AI nutrition analysis on the edited free-text description and
+  // replace name/items/macros with the fresh result (same prompt as analyseText)
+  async function reanalyseEdit(){
+    if(IS_DEMO){ showDemoToast(); return; }
+    const txt=(editEntry.det||"").trim();
+    if(!txt||!apiKey||reanalysing) return;
+    setReanalysing(true);
+    try{
+      const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
+
+Rules:
+- Break down into individual items (each ingredient or component separately)
+- Preserve exact quantities mentioned. If vague, assume a realistic serving and state it in the name
+- Be accurate — do not overestimate protein
+- For Israeli foods or brands, use accurate Israeli nutritional values
+- Translate non-English to English but keep all quantities
+- All macro values are integers representing the total for that item
+
+Return format:
+{
+  "n": "meal name in English (brief summary)",
+  "det": "description with quantities and assumptions",
+  "parsed_items": [
+    {"name": "Greek yogurt", "qty": 150, "unit": "g", "p": 13, "c": 6, "f": 0, "k": 79}
+  ],
+  "p": 13, "c": 6, "f": 0, "k": 79
+}
+Totals p/c/f/k must equal the sum of parsed_items. All values are integers.
+
+Input: ${txt}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:800,messages:[{role:"user",content:prompt}]})
+      });
+      const d = await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const fresh = JSON.parse(raw);
+      setEditEntry(p=>({...p, n:fresh.n||p.n, det:fresh.det||txt,
+        parsed_items:fresh.parsed_items||null,
+        p:fresh.p||0, c:fresh.c||0, f:fresh.f||0, k:fresh.k||0}));
+    }catch(e){ setAiMsg("Re-analyse error: "+e.message); }
+    setReanalysing(false);
+  }
 
   // Sort by eaten_time (when they ate it), falling back to logged time
   const food = [...(allFood[foodDate]||[])].sort((a,b)=>{
@@ -2690,6 +2745,11 @@ Input: ${txtInput}`;
             <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
               <h3 style={{marginBottom:4,fontSize:16,fontWeight:600}}>Edit meal</h3>
               <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
+              <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>What you ate (edit and re-analyse to recalculate macros)</label>
+              <textarea value={editEntry.det||""} onChange={e=>setEditEntry(p=>({...p,det:e.target.value}))} rows={3} style={{...s.input,marginBottom:6,resize:"vertical",fontFamily:"inherit"}}/>
+              <button onClick={reanalyseEdit} disabled={reanalysing||!(editEntry.det||"").trim()} style={{...s.btn("s"),...s.btnSm,marginBottom:12,opacity:reanalysing?.6:1}}>
+                {reanalysing?<><Spinner/>Re-analysing...</>:"🔄 Re-analyse macros from text"}
+              </button>
               {hasParsed ? (
                 <>
                   <div style={{fontSize:11,color:C.t3,marginBottom:6}}>Tap a quantity to edit. Macros recalculate proportionally.</div>
@@ -2736,9 +2796,13 @@ Input: ${txtInput}`;
                   const newF=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.f||0),0)):parseFloat(editEntry.f)||0;
                   const newK=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.k||0),0)):Math.round(newP*4+newC*4+newF*9);
                   const cleanItems=hasParsedSave?editEntry.parsed_items.map(({_orig,_origQty,...rest})=>rest):null;
-                  const updated={...food[editIdx],n:editEntry.n,p:newP,c:newC,f:newF,k:newK,parsed_items:cleanItems};
-                  if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,protein:newP,carbs:newC,fat:newF,kcal:newK,parsed_items:cleanItems?JSON.stringify(cleanItems):null},"id=eq."+updated.dbid);}catch(e){}}
-                  setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)}));
+                  const updated={...food[editIdx],n:editEntry.n,det:editEntry.det||food[editIdx].det,p:newP,c:newC,f:newF,k:newK,parsed_items:cleanItems};
+                  if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,detail:updated.det||null,protein:newP,carbs:newC,fat:newF,kcal:newK,parsed_items:cleanItems?JSON.stringify(cleanItems):null},"id=eq."+updated.dbid);}catch(e){}}
+                  setAllFood(prev=>{
+                    const next={...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)};
+                    if(!IS_DEMO) localStorage.setItem("jfood_backup",JSON.stringify(next));
+                    return next;
+                  });
                   setEditIdx(null);
                 }} style={s.btn("p")}>Save</button>
               </div>
