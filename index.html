@@ -279,7 +279,10 @@ async function supa(method, table, body, query) {
   return JSON.parse(txt);
 }
 
-function tkey(d) { return (d||new Date()).toISOString().slice(0,10); }
+// Date key in the active timezone (NOT UTC — otherwise anything logged between
+// midnight and ~3am Israel time lands on the previous day and disagrees with
+// every other date computation in the app).
+function tkey(d) { return (d||new Date()).toLocaleDateString("en-CA",{timeZone:getTz()}); }
 
 
 
@@ -1660,7 +1663,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
-  useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
+  // Hourly check so the 6h cache expiry actually triggers a regen while the app stays open
+  useEffect(()=>{
+    const iv=setInterval(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },60*60000);
+    return ()=>clearInterval(iv);
+  },[apiKey, fitbitReady, profileData?.uid]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) refreshNutritionOnly(); },[todayFoodCount, allFood]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview(); },[apiKey, latestSleepDate, profileData?.uid]);
 
@@ -2531,7 +2539,11 @@ Input: ${txtInput}`;
     const newK=Math.round(newP*4+newC*4+newF*9);
     const updated={...food[editIdx],n:editEntry.n,p:newP,c:newC,f:newF,k:newK};
     if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,protein:newP,carbs:newC,fat:newF,kcal:newK},"id=eq."+updated.dbid);}catch(e){}}
-    setAllFood(prev=>({...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)}));
+    setAllFood(prev=>{
+      const next={...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)};
+      localStorage.setItem("jfood_backup",JSON.stringify(next));
+      return next;
+    });
     setEditIdx(null);
   }
 
@@ -2585,7 +2597,7 @@ Input: ${txtInput}`;
 
       {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
 
-      <button onClick={()=>{setMealDate(tkey());setEatenTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
+      <button onClick={()=>{setMealDate(foodDate);setEatenTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
         📝 Log a meal
       </button>
 
