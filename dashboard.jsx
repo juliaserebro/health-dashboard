@@ -1974,13 +1974,61 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         );
       })()}
 
-      <SecLabel>Today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</SecLabel>
+      {/* ── YOUR BODY TODAY: last night / not changeable today ── */}
+      <SecLabel>Your body today</SecLabel>
 
-      <div style={s.mg}>
-        <StepsMetric fitbitData={fitbitData} profileData={profileData}/>
-        <SleepTileMetric fitbitData={fitbitData}/>
-        <Metric label="Protein today" value={<span style={{color:C.am}}>{Math.round(tp)}g</span>} sub={`${Math.max(0,Math.round(protTgt-tp))}g to target`} subColor={C.am}/>
-        <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {/* SLEEP LAST NIGHT (detailed breakdown) */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
+            Last night — {new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}
+          </div>
+          {(()=>{
+            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            const r=(fitbitData.sleep||[]).find(s=>s.date===todayStr);
+            if(!r) return <div style={{color:C.t3,fontSize:13}}>Not tracked last night</div>;
+            const h=Math.floor(r.total/60),m=r.total%60;
+            const tot=r.deep+r.rem+r.light+r.awake;
+            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
+            return (<>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
+                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
+                </div>
+                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#1a4a8a",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.sl,fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7aa8d8",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
+                </div>
+              </div>
+              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
+                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#1a4a8a"}}/>
+                <div style={{width:Math.round(r.rem/tot*100)+"%",background:C.sl}}/>
+                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#7aa8d8"}}/>
+                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
+              </div>
+              {todayNap&&(
+                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:C.sl,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
+                  <span style={{color:C.sl}}>{todayNap.total}min · {todayNap.deep}m deep</span>
+                </div>
+              )}
+            </>);
+          })()}
+        </Card>
+
+        {/* RESTING HR + CYCLE PHASE alongside the sleep breakdown */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {(()=>{
+            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(x=>x.rhr!=null);
+            const cur=(fitbitData.sleep||[]).find(x=>x.date===todayStr)?.rhr ?? recs[0]?.rhr ?? null;
+            return <Metric label="Resting HR" value={cur!=null?<span style={{color:C.sl}}>{cur}<span style={{fontSize:12,fontWeight:400}}> bpm</span></span>:<span style={{color:C.t3}}>—</span>} sub={cur!=null?"last night":"no data"} subColor={C.sl}/>;
+          })()}
+          <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
+        </div>
       </div>
 
       {/* TODAY'S INSIGHTS */}
@@ -2032,62 +2080,32 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         </div>
       )}
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        {/* SLEEP LAST NIGHT */}
-        <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
-            Last night — {new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}
-          </div>
-          {(()=>{
-            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-            const r=(fitbitData.sleep||[]).find(s=>s.date===todayStr);
-            if(!r) return <div style={{color:C.t3,fontSize:13}}>Not tracked last night</div>;
-            const h=Math.floor(r.total/60),m=r.total%60;
-            const tot=r.deep+r.rem+r.light+r.awake;
-            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
-            return (<>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                <div>
-                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
-                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
-                </div>
-                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#1a4a8a",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.sl,fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7aa8d8",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
-                </div>
-              </div>
-              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
-                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#1a4a8a"}}/>
-                <div style={{width:Math.round(r.rem/tot*100)+"%",background:C.sl}}/>
-                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#7aa8d8"}}/>
-                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
-              </div>
-              {todayNap&&(
-                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{color:C.sl,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
-                  <span style={{color:C.sl}}>{todayNap.total}min · {todayNap.deep}m deep</span>
-                </div>
-              )}
-            </>);
-          })()}
-        </Card>
+      {/* ── WHAT YOU CAN STILL DO TODAY: changeable today ── */}
+      <SecLabel>What you can still do today</SecLabel>
 
-        {/* PROTEIN */}
-        <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Protein goal today</div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
-            <span style={{fontWeight:500}}>{Math.round(tp)}g logged</span>
-            <span style={{color:C.t2}}>{protTgt}g target</span>
-          </div>
-          <div style={s.pb}><div style={s.pf(Math.min(100,Math.round(tp/protTgt*100)),C.am)}/></div>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
-            <span>{Math.min(100,Math.round(tp/protTgt*100))}%</span>
-            <span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
-          </div>
-        </Card>
+      <div style={s.mg2}>
+        <StepsMetric fitbitData={fitbitData} profileData={profileData}/>
+        {(()=>{
+          const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+          const tws=(fitbitData.workouts||[]).filter(w=>w.date===todayStr);
+          const types=[...new Set(tws.map(w=>w.type))];
+          return <Metric label="Workouts today" value={<span style={{color:tws.length>0?C.pu:C.t3}}>{tws.length>0?tws.length:"—"}</span>} sub={types.length?types.join(" · "):"none yet"} subColor={C.pu}/>;
+        })()}
       </div>
+
+      {/* PROTEIN GOAL (extended) */}
+      <Card>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Protein goal today</div>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+          <span style={{fontWeight:500}}>{Math.round(tp)}g logged</span>
+          <span style={{color:C.t2}}>{protTgt}g target</span>
+        </div>
+        <div style={s.pb}><div style={s.pf(Math.min(100,Math.round(tp/protTgt*100)),C.am)}/></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
+          <span>{Math.min(100,Math.round(tp/protTgt*100))}%</span>
+          <span>{Math.max(0,Math.round(protTgt-tp))}g remaining</span>
+        </div>
+      </Card>
 
       <hr style={s.hr}/>
       <SecLabel>{(()=>{
