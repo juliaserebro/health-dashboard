@@ -33,7 +33,36 @@ const { useState, useEffect, useRef, useCallback } = React;
 // ── LIVE DATA (Fri 12 Jun 2026, 14:20 Israel) ─────────────────────────────
 const SUPA_URL = "https://itdrrugsztpqkafxfljt.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0ZHJydWdzenRwcWthZnhmbGp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTkwMzUsImV4cCI6MjA5NjU3NTAzNX0.n2iIiMxb7Lf-8nbNk79Pzhnp0E6qRzfsW51CvipQjs8";
-const UID = "00000000-0000-0000-0000-000000000001"; // stable UUID — works with both text and uuid column types
+// ── USER RESOLUTION: demo mode vs owner ───────────────────────────────────
+// Default visitors (CV/LinkedIn) land on a read-only demo profile (Maya).
+// Julia accesses her real data via ?u=<OWNER_KEY>.
+// Private owner key — do not publish this URL anywhere public.
+// NOTE: this is obscurity, not real auth — the anon key in this file can still
+// read the DB. Acceptable for a single-user portfolio app; real Supabase Auth
+// is required before any multi-user launch.
+const OWNER_KEY = "jls-Vq83kTz5mPn2wXr9";
+const resolveUser = () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("u") === OWNER_KEY) {
+    return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
+  }
+  return { uid: "demo_maya", isDemo: true };
+};
+const { uid: UID, isDemo: IS_DEMO } = resolveUser();
+
+// Small non-blocking toast for demo-mode write attempts (vanilla DOM — usable
+// from anywhere including the supa() helper outside React)
+let _demoToastAt = 0;
+function showDemoToast(){
+  if(Date.now()-_demoToastAt<2500) return;
+  _demoToastAt = Date.now();
+  const el = document.createElement("div");
+  el.textContent = "You're viewing a demo — data can't be changed here.";
+  el.style.cssText = "position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1a1917;color:#fff;font-family:Inter,sans-serif;font-size:13px;padding:10px 18px;border-radius:10px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;transition:opacity .25s";
+  document.body.appendChild(el);
+  requestAnimationFrame(()=>{el.style.opacity="1";});
+  setTimeout(()=>{el.style.opacity="0";setTimeout(()=>el.remove(),300);},2200);
+}
 
 // SUPABASE SETUP SQL — run once in Supabase SQL editor
 /*
@@ -245,6 +274,9 @@ async function saveCycleDates(newDate, avgPeriodLen=5) {
 }
 
 async function supa(method, table, body, query) {
+  // Demo mode is strictly read-only — one guard covers every write path,
+  // including any we forget to guard individually.
+  if (IS_DEMO && method !== "GET") { showDemoToast(); return null; }
   let url, hdrs, fetchOpts;
   if (method === "GET") {
     const q = [query, "apikey="+SUPA_KEY].filter(Boolean).join("&");
@@ -1261,7 +1293,16 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   }
 
   async function generateAllCoachContent(forceRefresh=false) {
-    if(!apiKey) return;
+    // Demo: pre-generated content from the profile row, never any API call
+    if(IS_DEMO){
+      if(profileData?.coach_content) setCoachContent(profileData.coach_content);
+      return;
+    }
+    // Stored content (Supabase) always renders first — works for any visitor,
+    // regardless of whether this session can regenerate. localStorage below is
+    // only a speed cache, never the source of truth.
+    if(profileData?.coach_content && !coachContent) setCoachContent(profileData.coach_content);
+    if(!apiKey) return; // session can't generate: stored content stays, no error states
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
     if(!forceRefresh){
@@ -1419,6 +1460,8 @@ Rules: no section repeats another; all language warm and non-guilt; never mentio
         content._foodHash = (allFood[todayKey]||[]).map(f=>f.dbid||f.eaten_time||f.n).join("|");
         setCoachContent(content);
         localStorage.setItem("coach_content_"+todayKey, JSON.stringify(content));
+        // Persist to profile so any visitor/device sees the latest coach content
+        supa("POST","profiles",{uid:UID,coach_content:content},"on_conflict=uid").catch(()=>{});
         // Update freshness history
         try{
           const existing = JSON.parse(localStorage.getItem("coach_insight_history")||"{}");
@@ -1431,6 +1474,7 @@ Rules: no section repeats another; all language warm and non-guilt; never mentio
   }
 
   async function refreshNutritionOnly() {
+    if(IS_DEMO) return;
     if(!apiKey||!coachContent||coachContent.isLearning||coachContent.isWeekly) return;
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -1464,6 +1508,7 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
       const updated = {...coachContent, domain_insights:updatedInsights, _foodHash:currentFoodHash, _generatedAt:new Date().toISOString()};
       setCoachContent(updated);
       localStorage.setItem("coach_content_"+todayKey, JSON.stringify(updated));
+      supa("POST","profiles",{uid:UID,coach_content:updated},"on_conflict=uid").catch(()=>{});
       if(newInsight){
         try{const h=JSON.parse(localStorage.getItem("coach_insight_history")||"{}");h.food_pattern={last_surfaced:todayKey,last_claim:newInsight.claim,last_surfaced_ms:new Date().toISOString()};localStorage.setItem("coach_insight_history",JSON.stringify(h));}catch(e){}
       }
@@ -1471,6 +1516,7 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
   }
 
   function shouldShowWeeklyReview() {
+    if(IS_DEMO) return !!weeklyReview?.text; // showcase piece — always visible in demo
     const now = new Date();
     const todayIL = now.toLocaleDateString("en-CA",{timeZone:getTz()});
     const [y,m,d] = todayIL.split("-").map(Number);
@@ -1489,7 +1535,7 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
   }
 
   async function generateWeeklyReview(forceRefresh=false) {
-    if(!apiKey) return;
+    if(IS_DEMO||!apiKey) return;
     const weekStart = getWeekStartDate();
     const weekEnd = getWeekEndDate();
     if(!forceRefresh && weeklyReview?.generatedAt && new Date(weeklyReview.generatedAt) >= weekStart) return;
@@ -1663,7 +1709,14 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
-  useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
+  useEffect(()=>{ if((apiKey||IS_DEMO||profileData?.coach_content) && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
+  // Hydrate weekly review from the profile row when there's no local copy
+  // (demo mode, or a visitor/new device on the owner link)
+  useEffect(()=>{
+    if(profileData?.weekly_review && (IS_DEMO || !weeklyReview?.text)){
+      setWeeklyReview({text:profileData.weekly_review, dateRange:"", generatedAt:profileData.weekly_review_generated_at||new Date().toISOString(), dismissed:IS_DEMO?false:!!profileData.weekly_review_dismissed});
+    }
+  },[profileData?.uid]);
   // Hourly check so the 6h cache expiry actually triggers a regen while the app stays open
   useEffect(()=>{
     const iv=setInterval(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },60*60000);
@@ -1677,7 +1730,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     <div>
       {/* ── COACH CARD ─────────────────────────────────────── */}
       {!coachDismissed&&(()=>{
-        if(!apiKey) return null;
+        if(!apiKey&&!coachContent) return null; // stored content renders even without a key
         if(coachLoading&&!coachContent) return (
           <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
             <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,marginBottom:6,textTransform:"uppercase"}}>🧠 Your coach</div>
@@ -1917,7 +1970,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               bedtime_pattern:"🕐 Bedtime", recovery_general:"🔄 Recovery",
               weekly_trend:"📈 This week", milestone:"🏆 Milestone", tonight:"🌙 Tonight"
             };
-            if(!coachContent&&!coachLoading&&!apiKey) return <div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to enable AI coaching.</div>;
+            if(!coachContent&&!coachLoading&&!apiKey) return <div style={{fontSize:12,color:C.t3}}>{IS_DEMO?"Demo coach content not seeded yet.":"Add your API key in Settings to enable AI coaching."}</div>;
             const domainInsights = coachContent?.domain_insights||[];
             return (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -2448,6 +2501,7 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   function nextDay(){const d=new Date(foodDate);d.setDate(d.getDate()+1);if(d.toISOString().slice(0,10)<=tkey())setFoodDate(d.toISOString().slice(0,10));}
 
   async function analyseText() {
+    if(IS_DEMO){ showDemoToast(); return; }
     if(!txtInput.trim()||!apiKey) return;
     setAnalysing(true); setAiMsg("Analysing meal...");
     try {
@@ -3736,11 +3790,15 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
 
 function CoachMemoryCard({profileData, fitbitData, apiKey}) {
   const CACHE_KEY="coach_memory_"+new Date().toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7); // per-month
-  const [memory, setMemory] = React.useState(()=>{try{return localStorage.getItem(CACHE_KEY)||null;}catch{return null;}});
+  // Stored summary from the profile row renders for any visitor; localStorage is a speed cache only
+  const [memory, setMemory] = React.useState(()=>{
+    if(IS_DEMO) return profileData?.coach_memory||null;
+    try{return localStorage.getItem(CACHE_KEY)||profileData?.coach_memory||null;}catch{return profileData?.coach_memory||null;}
+  });
   const [loading, setLoading] = React.useState(false);
 
   async function generate() {
-    if(!apiKey||loading) return;
+    if(IS_DEMO||!apiKey||loading) return;
     setLoading(true);
     const bl=profileData?.behavioral_baseline||{};
     const patterns=(profileData?.detected_patterns||[]).map(p=>`- ${p.description}`).join('\n')||'still learning';
@@ -3750,7 +3808,7 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:prompt}]})});
       const d=await res.json();
       const txt=d.content?.[0]?.text?.trim()||"";
-      if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{}}
+      if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{} supa("POST","profiles",{uid:UID,coach_memory:txt},"on_conflict=uid").catch(()=>{});}
     }catch(e){console.log("Memory card error:",e.message);}
     setLoading(false);
   }
@@ -3763,7 +3821,7 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
       <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
         {loading&&<div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Generating your coach summary...</div>}
         {memory&&<div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>{memory}</div>}
-        {!loading&&memory&&<button onClick={()=>{setMemory(null);try{localStorage.removeItem(CACHE_KEY);}catch{}}} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
+        {!loading&&memory&&!IS_DEMO&&<button onClick={()=>{setMemory(null);try{localStorage.removeItem(CACHE_KEY);}catch{}}} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
         {!loading&&!memory&&!apiKey&&<div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to generate your coach summary.</div>}
       </Card>
     </div>
@@ -3786,7 +3844,7 @@ function CycleHeaderPill({cycleDates, cycleLog, onPress}) {
 // ── MAIN APP ──────────────────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState("dash");
-  const [apiKey, setApiKey] = useState(()=>localStorage.getItem("jkey")||"");
+  const [apiKey, setApiKey] = useState(()=>IS_DEMO?"":(localStorage.getItem("jkey")||""));
   const [profileData, setProfileData] = useState(null);
   // protTgt now derives from profileData (falls back to 100 during load)
   const protTgt = profileData?.protein_target || 100;
@@ -3848,8 +3906,8 @@ function App() {
   },[fitbitData?.sleep?.length,Object.keys(allFood).length]);
 
   useEffect(()=>{
-    // Handle Google OAuth callback (token or error in URL hash)
-    if(window.location.hash.includes("access_token")||window.location.hash.includes("error=")) {
+    // Handle Google OAuth callback (token or error in URL hash) — owner only
+    if(!IS_DEMO && (window.location.hash.includes("access_token")||window.location.hash.includes("error="))) {
       const handled = handleGoogleCallback();
       if(handled) {
         setGhConnected(true);
@@ -3861,13 +3919,15 @@ function App() {
       setSyncStatus("syncing...");
       // Load settings first (legacy protein target captured for profile default)
       let legacyProt = parseInt(localStorage.getItem("jprot")||"100")||100;
-      try{
-        const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
-        if(rows&&rows.length){
-          if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
-          if(rows[0].protein_target){legacyProt=rows[0].protein_target;localStorage.setItem("jprot",String(rows[0].protein_target));}
-        }
-      }catch(e){}
+      if(!IS_DEMO){ // demo never loads an API key — zero AI calls in demo
+        try{
+          const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
+          if(rows&&rows.length){
+            if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
+            if(rows[0].protein_target){legacyProt=rows[0].protein_target;localStorage.setItem("jprot",String(rows[0].protein_target));}
+          }
+        }catch(e){}
+      }
 
       // ── Load profile (and migrate / create default if missing) ───────────
       try{
@@ -3880,7 +3940,7 @@ function App() {
             try{ await supa("POST","profiles",{...prof},"on_conflict=uid"); }catch(e){}
           }
           // Restore Google token from Supabase if localStorage is empty or expired
-          if(prof.google_access_token && prof.google_token_expiry) {
+          if(!IS_DEMO && prof.google_access_token && prof.google_token_expiry) {
             const expiresAt = new Date(prof.google_token_expiry).getTime();
             if(expiresAt > Date.now()+60000 && !isGTokenValid(getGToken())) {
               setGToken({access_token:prof.google_access_token, expires_at:expiresAt});
@@ -3888,6 +3948,12 @@ function App() {
             }
           }
           setProfileData(prof);
+        } else if (IS_DEMO) {
+          // Demo profile row missing (seed not run) — minimal Maya placeholder,
+          // NEVER Julia's hardcoded personal data
+          setProfileData({uid:UID,name:"Maya",gender:"female",protein_target:110,step_target:8000,
+            active_days_target:20,activity_targets:{strength:3,mobility:1,cardio:1},
+            activity_mapping:{},timezone:"Asia/Jerusalem",supplements:[],cycle_tracking:true,onboarding_complete:true});
         } else {
           // No profile — run one-time migration of known hardcoded data
           const migrated = {
@@ -3928,8 +3994,8 @@ function App() {
         // Fallback default so the app still renders
         setProfileData({
           uid: UID,
-          name: "Julia",
-          birth_date: "1985-11-29",
+          name: IS_DEMO ? "Maya" : "Julia",
+          birth_date: IS_DEMO ? null : "1985-11-29",
           gender: "female",
           protein_target: legacyProt,
           step_target: 8000,
@@ -3952,9 +4018,10 @@ function App() {
           supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
           supa("GET","cycle_logs",null,"uid=eq."+UID+"&limit=1").catch(()=>null),
         ]);
-        // Also load legacy "julia" food entries (pre-UID-migration)
+        // Also load legacy "julia" food entries (pre-UID-migration) — owner only,
+        // demo must never touch Julia's rows
         let legacyFood=[];
-        try{legacyFood=await supa("GET","food_log",null,"user_id=eq.julia&order=created_at.asc&select=*");}catch(e){}
+        if(!IS_DEMO){try{legacyFood=await supa("GET","food_log",null,"user_id=eq.julia&order=created_at.asc&select=*");}catch(e){}}
         const allFoodRows=[...(legacyFood||[]),...(food||[])];
         const foodMap={};
         allFoodRows.forEach(r=>{
@@ -3964,19 +4031,22 @@ function App() {
           foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
         });
         // Merge backup: only recover local-only entries for dates Supabase has NO data for
-        try {
-          const backup = JSON.parse(localStorage.getItem("jfood_backup")||"{}");
-          Object.entries(backup).forEach(([date, entries]) => {
-            if(foodMap[date]?.length>0) return; // Supabase has data for this date — trust it
-            const localOnly = (entries||[]).filter(e=>!e.dbid);
-            if(localOnly.length>0) foodMap[date] = localOnly;
-          });
-        } catch(e){}
+        // (owner only — demo never reads or writes local backups)
+        if(!IS_DEMO){
+          try {
+            const backup = JSON.parse(localStorage.getItem("jfood_backup")||"{}");
+            Object.entries(backup).forEach(([date, entries]) => {
+              if(foodMap[date]?.length>0) return; // Supabase has data for this date — trust it
+              const localOnly = (entries||[]).filter(e=>!e.dbid);
+              if(localOnly.length>0) foodMap[date] = localOnly;
+            });
+          } catch(e){}
+        }
         setAllFood(foodMap);
-        localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
+        if(!IS_DEMO) localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
         const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
         setLogEntries(logData);
-        localStorage.setItem("jlog_backup",JSON.stringify(logData));
+        if(!IS_DEMO) localStorage.setItem("jlog_backup",JSON.stringify(logData));
 
         // Load cycle data — prefer cycle_logs (merge-based) over cycle_dates (row-based)
         const cycLogRecord = cycLog?.[0] || null;
@@ -3986,14 +4056,16 @@ function App() {
           const parsed = dates.map((d,i)=>({id:i,d,ok:true}));
           setCycleDates(parsed);
           setCycleLog(cycLogRecord);
-          localStorage.setItem("jcycle_backup",JSON.stringify(parsed));
-          localStorage.setItem("jcycle_log",JSON.stringify(cycLogRecord));
+          if(!IS_DEMO){
+            localStorage.setItem("jcycle_backup",JSON.stringify(parsed));
+            localStorage.setItem("jcycle_log",JSON.stringify(cycLogRecord));
+          }
         } else {
           // Fall back to cycle_dates rows — and migrate them into cycle_logs
           const cycleParsed=(cyc||[]).map(r=>({id:r.id,d:r.date,ok:r.confirmed}));
           if(cycleParsed.length>0){
             setCycleDates(cycleParsed);
-            localStorage.setItem("jcycle_backup",JSON.stringify(cycleParsed));
+            if(!IS_DEMO) localStorage.setItem("jcycle_backup",JSON.stringify(cycleParsed));
             // Migrate to cycle_logs silently
             const dates=cycleParsed.filter(x=>x.ok).map(x=>x.d).sort((a,b)=>new Date(b)-new Date(a)).slice(0,6);
             if(dates.length>0){
@@ -4014,15 +4086,28 @@ function App() {
         const ss={};
         (supp||[]).forEach(r=>{if(r.taken&&r.log_date===todayKey2)ss[r.supplement]=true;});
         setSuppState(ss);
-        // Load fitbit data from Supabase — always merge UUID + legacy "julia" rows
+        // Load fitbit data from Supabase.
+        // Owner: merge FITBIT_SEED + legacy "julia" + UUID rows.
+        // Demo: fitness_cache row for demo_maya ONLY — never Julia's seed or legacy data.
         let legacyData=null;
-        try{
-          const legacyFit=await supa("GET","fitness_cache",null,"user_id=eq.julia&limit=1");
-          if(legacyFit&&legacyFit[0]&&legacyFit[0].data) legacyData=legacyFit[0].data;
-        }catch(ex){}
+        if(!IS_DEMO){
+          try{
+            const legacyFit=await supa("GET","fitness_cache",null,"user_id=eq.julia&limit=1");
+            if(legacyFit&&legacyFit[0]&&legacyFit[0].data) legacyData=legacyFit[0].data;
+          }catch(ex){}
+        }
         if(fitbit&&fitbit[0]&&fitbit[0].data){
           console.log("✓ Fitness data loaded from Supabase, synced_at:",fitbit[0].synced_at);
           const supaData=fitbit[0].data;
+          if(IS_DEMO){
+            setFitbitData({
+              sleep:(supaData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date)),
+              naps:supaData.naps||[],
+              steps:(supaData.steps||[]).sort((a,b)=>a.date.localeCompare(b.date)),
+              workouts:(supaData.workouts||[]).sort((a,b)=>b.date.localeCompare(a.date)),
+              synced_at:supaData.synced_at
+            });
+          } else {
           // Merge: seed → legacy "julia" → UUID (newest wins per date)
           const mergeByDate=(...arrs)=>{
             const m={};
@@ -4041,13 +4126,17 @@ function App() {
             workouts: mergeWorkouts(FITBIT_SEED.workouts,legacyData?.workouts,supaData.workouts).sort((a,b)=>b.date.localeCompare(a.date)),
             synced_at: supaData.synced_at
           });
+          }
+        } else if(IS_DEMO){
+          console.log("⚠ No demo fitness_cache — run seed_demo.py");
+          setFitbitData({sleep:[],naps:[],steps:[],workouts:[]});
         } else {
           console.log("⚠ No fitness_cache in Supabase, using FITBIT_SEED");
           setFitbitData(FITBIT_SEED);
         }
         setSyncStatus("Synced "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
-      // Auto-sync Google Health if token is valid
-      if(isGTokenValid(getGToken())) {
+      // Auto-sync Google Health if token is valid (never in demo)
+      if(!IS_DEMO && isGTokenValid(getGToken())) {
         // On first connection (no historical pull yet), show a specific loading message
         const profSnap = await supa("GET","profiles",null,"uid=eq."+UID+"&limit=1").catch(()=>[]);
         const needsHistorical = profSnap?.[0]?.fitbit_connected && !profSnap?.[0]?.historical_pull_complete;
@@ -4062,6 +4151,11 @@ function App() {
         const msg = e.message||String(e);
         setSyncStatus("sync error: "+msg.slice(0,40));
         console.error("Supabase load error:", e);
+        if(IS_DEMO){
+          // Demo has no local backups and must never fall back to Julia's seed
+          setFitbitData({sleep:[],naps:[],steps:[],workouts:[]});
+          return;
+        }
         // Fall back to localStorage backup
         const backup=localStorage.getItem("jlog_backup");
         if(backup) try{setLogEntries(JSON.parse(backup));}catch(ex){}
@@ -4079,6 +4173,7 @@ function App() {
   // Proactive token refresh: renew silently ~10 min before expiry so the user
   // never sees a login screen. Skipped when running inside the refresh iframe.
   useEffect(()=>{
+    if(IS_DEMO) return; // no Google calls in demo
     if(window.self!==window.top) return;
     const tick=()=>{
       const t=getGToken();
@@ -4093,6 +4188,7 @@ function App() {
   },[]);
 
   async function syncGoogleHealth() {
+    if(IS_DEMO) return;
     if(!isGTokenValid(getGToken())) {
       setSyncStatus("Reconnecting to Google Health...");
       try{
@@ -4113,6 +4209,7 @@ function App() {
   }
 
   async function saveSett(){
+    if(IS_DEMO){ showDemoToast(); setShowSett(false); return; }
     localStorage.setItem("jkey",settKey);
     setApiKey(settKey);
     try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey},"on_conflict=user_id");}catch(e){}
@@ -4155,7 +4252,13 @@ function App() {
   }
 
   async function sendChat(){
-    if(!chatInput.trim()||!apiKey) return;
+    if(!chatInput.trim()) return;
+    if(IS_DEMO){
+      const msg=chatInput.trim();setChatInput("");
+      setChatMsgs(p=>[...p,{role:"user",txt:msg},{role:"ai",txt:"This is a demo — the live AI coach isn't active here. In the full app I'd answer using Maya's sleep, training, nutrition and cycle data, and I'd remember this conversation."}]);
+      return;
+    }
+    if(!apiKey) return;
     const msg=chatInput.trim();setChatInput("");setChatLoading(true);
     const history=[...chatMsgs,{role:"user",txt:msg}];
     setChatMsgs(history);
@@ -4191,6 +4294,9 @@ function App() {
   return (
     <div style={s.shell}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`}</style>
+      {IS_DEMO&&<div style={{background:"linear-gradient(90deg,#eeedf8,#e0f4ed)",color:"#4a42b0",fontSize:12,textAlign:"center",padding:"8px 14px",fontWeight:500,borderRadius:10,marginBottom:14,border:"1px solid rgba(74,66,176,.15)"}}>
+        👋 You're exploring a live demo of Health Coach — all data belongs to Maya, a sample user.
+      </div>}
       {isViewOnly&&<div style={{background:"#e8f4fd",color:"#1a6896",fontSize:11,textAlign:"center",padding:"6px 12px",fontWeight:500,borderBottom:"1px solid #b8d9ee"}}>
         View-only mode — showing last synced data &nbsp;|&nbsp; <a href={window.location.pathname} style={{color:"#1a6896"}}>Open full app</a>
       </div>}
@@ -4202,7 +4308,9 @@ function App() {
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
-          <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>
+          {IS_DEMO
+            ? <span style={{fontSize:11,padding:"5px 12px",borderRadius:20,background:C.s2,color:C.t3}}>Demo data</span>
+            : <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>}
           <button onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
       </div>
