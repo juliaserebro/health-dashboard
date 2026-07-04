@@ -581,32 +581,30 @@ function silentGoogleRefresh(){
     });
     const iframe=document.createElement("iframe");
     iframe.style.cssText="display:none;width:1px;height:1px;";
-    const timer=setTimeout(()=>{
-      try{document.body.removeChild(iframe);}catch(e){}
-      reject(new Error("silent_timeout"));
-    },10000);
-    iframe.onload=()=>{
-      try{
-        const h=iframe.contentWindow.location.hash.substring(1);
-        const p=new URLSearchParams(h);
+    const startedAt=Date.now();
+    const cleanup=()=>{clearInterval(poller);try{document.body.removeChild(iframe);}catch(e){}};
+    // Poll — first the iframe shows Google's page (cross-origin, unreadable),
+    // then it redirects back to our origin with the token in the hash
+    const poller=setInterval(()=>{
+      let hash=null;
+      try{ hash=iframe.contentWindow.location.hash; }catch(e){ /* still on Google's domain */ }
+      if(hash&&hash.includes("access_token")){
+        const p=new URLSearchParams(hash.substring(1));
         const at=p.get("access_token");
         const ei=p.get("expires_in");
-        clearTimeout(timer);
-        try{document.body.removeChild(iframe);}catch(e){}
-        if(at){
-          const tok={access_token:at,expires_at:Date.now()+parseInt(ei||3600)*1000};
-          setGToken(tok);
-          supa("PATCH","profiles",{google_access_token:at,google_token_expiry:new Date(tok.expires_at).toISOString()},"uid=eq."+UID).catch(()=>{});
-          resolve(tok);
-        } else {
-          reject(new Error("no_token_in_iframe"));
-        }
-      }catch(e){
-        clearTimeout(timer);
-        try{document.body.removeChild(iframe);}catch(e2){}
-        reject(e);
+        cleanup();
+        const tok={access_token:at,expires_at:Date.now()+parseInt(ei||3600)*1000};
+        setGToken(tok);
+        supa("PATCH","profiles",{google_access_token:at,google_token_expiry:new Date(tok.expires_at).toISOString()},"uid=eq."+UID).catch(()=>{});
+        resolve(tok);
+        return;
       }
-    };
+      if(hash&&hash.includes("error=")){ cleanup(); reject(new Error("silent_denied")); return; }
+      // Fallback: the iframe may have loaded the full app which stored the token itself
+      const stored=getGToken();
+      if(isGTokenValid(stored)&&stored.expires_at>startedAt+3600000-120000){ cleanup(); resolve(stored); return; }
+      if(Date.now()-startedAt>12000){ cleanup(); reject(new Error("silent_timeout")); }
+    },250);
     iframe.src="https://accounts.google.com/o/oauth2/v2/auth?"+params.toString();
     document.body.appendChild(iframe);
   });
@@ -1444,21 +1442,8 @@ Rules: no section repeats another; all language warm and non-guilt; never mentio
     const protTgt2 = profileData?.protein_target||120;
     const foodSummary2 = todayFoodEntries.map(e=>e.n||e.name).filter(Boolean).join(", ")||"nothing logged yet";
 
-    // Gate: only call AI for meaningful food events
-    const prevHash = (()=>{try{return JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"{}") ._foodHash||"";}catch{return "";}})();
-    const prevCount = prevHash.split("|").filter(Boolean).length;
-    const isFirstMeal = prevCount===0 && todayFoodEntries.length>0;
-    const prevProt = parseInt(localStorage.getItem("coach_last_protein_"+todayKey)||"0");
-    const proteinJustCrossed = prevProt < protTgt2 && prot >= protTgt2;
-    const insightHistory = (()=>{try{return JSON.parse(localStorage.getItem("coach_insight_history")||"{}");}catch{return {};}})();
-    const lastNutritionMs = insightHistory.food_pattern?.last_surfaced_ms ? new Date(insightHistory.food_pattern.last_surfaced_ms) : null;
-    const hoursSinceNutrition = lastNutritionMs ? (now-lastNutritionMs)/3600000 : 999;
-    if(!isFirstMeal && !proteinJustCrossed && hoursSinceNutrition<4){
-      // Update hash + protein counter without calling AI
-      try{const c=JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"{}");c._foodHash=currentFoodHash;localStorage.setItem("coach_content_"+todayKey,JSON.stringify(c));setCoachContent(prev=>prev?{...prev,_foodHash:currentFoodHash}:prev);}catch(e){}
-      localStorage.setItem("coach_last_protein_"+todayKey,String(prot));
-      return;
-    }
+    // Food changed (hash check above passed) — always refresh the nutrition insight
+    // so the coach never keeps nagging about food that was just logged.
     localStorage.setItem("coach_last_protein_"+todayKey,String(prot));
     try {
       const raw = await callCoachAI(
@@ -1676,7 +1661,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if(apiKey && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid]);
-  useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) refreshNutritionOnly(); },[todayFoodCount]);
+  useEffect(()=>{ if(apiKey && profileData && fitbitReady && todayFoodCount>0) refreshNutritionOnly(); },[todayFoodCount, allFood]);
   useEffect(()=>{ if(apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview(); },[apiKey, latestSleepDate, profileData?.uid]);
 
 
@@ -4079,6 +4064,22 @@ function App() {
     load();
   },[]);
 
+  // Proactive token refresh: renew silently ~10 min before expiry so the user
+  // never sees a login screen. Skipped when running inside the refresh iframe.
+  useEffect(()=>{
+    if(window.self!==window.top) return;
+    const tick=()=>{
+      const t=getGToken();
+      if(!t||!localStorage.getItem("gh_consent_granted")) return;
+      if(t.expires_at-Date.now()<10*60000){
+        silentGoogleRefresh().then(()=>setGhConnected(true)).catch(()=>{});
+      }
+    };
+    tick();
+    const iv=setInterval(tick,5*60000);
+    return ()=>clearInterval(iv);
+  },[]);
+
   async function syncGoogleHealth() {
     if(!isGTokenValid(getGToken())) {
       setSyncStatus("Reconnecting to Google Health...");
@@ -4124,18 +4125,36 @@ function App() {
   }
 
   function buildCtxForChat(){
-    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
+    let ctx = buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
+    // Include today's in-app coach insights so chat and coach card are consistent
+    try{
+      const todayKey = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+      const cc = JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"null");
+      if(cc && !cc.isLearning){
+        const parts = [];
+        if(cc.headline) parts.push("Headline: "+cc.headline);
+        if(cc.why) parts.push("Why: "+cc.why);
+        (cc.domain_insights||[]).forEach(i=>parts.push(`${i.type}: ${i.content}`));
+        if(cc.micro_workout) parts.push("Suggested 5-min move: "+cc.micro_workout);
+        if(parts.length) ctx += "\n\nWHAT YOU (THE COACH) ALREADY TOLD JULIA TODAY IN THE APP — you said this, own it, refer back to it if she asks:\n"+parts.join("\n");
+      }
+    }catch(e){}
+    return ctx;
   }
 
   async function sendChat(){
     if(!chatInput.trim()||!apiKey) return;
     const msg=chatInput.trim();setChatInput("");setChatLoading(true);
-    setChatMsgs(p=>[...p,{role:"user",txt:msg}]);
+    const history=[...chatMsgs,{role:"user",txt:msg}];
+    setChatMsgs(history);
     try{
+      // Send conversation history (last 12 turns) so follow-up questions have context
+      let apiMsgs = history.slice(-12).map(m=>({role:m.role==="ai"?"assistant":"user",content:m.txt}));
+      while(apiMsgs.length&&apiMsgs[0].role==="assistant") apiMsgs.shift(); // API requires first message to be user
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:buildCtxForChat()+"\n\nAs Julia's AI health coach, answer this: "+msg}]})
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,system:"You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n"+buildCtxForChat(),messages:apiMsgs})
       });
       const d=await res.json();
       const reply=d.content?.[0]?.text||"Error";
