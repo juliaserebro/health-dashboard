@@ -1270,7 +1270,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     return d.content[0].text.trim();
   }
 
-  async function generateAllCoachContent(forceRefresh=false) {
+  async function generateAllCoachContent(forceRefresh=false, triggeringEvent=null) {
     // Demo: pre-generated content from the profile row, never any API call
     if(IS_DEMO){
       if(profileData?.coach_content) setCoachContent(profileData.coach_content);
@@ -1429,7 +1429,29 @@ Return ONLY valid JSON:
 }
 
 Rules: no section repeats another; all language warm and non-guilt; never mention specific muscle groups or body parts.`;
-      const raw = await callCoachAI(userMsg, systemPrompt);
+      // Event-aware regeneration: give the model the prior content + what changed,
+      // so it responds to the event instead of blindly rewriting the morning.
+      let eventCtx = "";
+      try{
+        const prev = coachContent && !coachContent.isLearning ? coachContent
+          : JSON.parse(localStorage.getItem("coach_content_"+todayKey)||"null") || profileData?.coach_content || null;
+        if(prev && !prev.isLearning){
+          const prevSlim = {headline:prev.headline, why:prev.why, domain_insights:(prev.domain_insights||[]).map(i=>({type:i.type,content:i.content}))};
+          eventCtx = `
+
+PREVIOUS COACH CONTENT (what the user has been seeing until now):
+${JSON.stringify(prevSlim)}
+
+TRIGGERING EVENT: ${triggeringEvent || "scheduled refresh — no single event"}
+
+EVENT-RESPONSE RULES:
+- If the triggering event is a completed workout: acknowledge it naturally and update the day's guidance to reflect it. If the previous content suggested this session, close that loop ("Nice — you got that mobility session in").
+- Only change what the new facts change. Observations still true from the previous content (e.g. the sleep trend) may be kept in substance, reworded minimally.
+- Never suggest a session category the user has already completed today unless their weekly target for that category genuinely calls for another.
+- Update today's session counts and weekly adherence math to include any new workout BEFORE reasoning about what to suggest.`;
+        }
+      }catch(e){}
+      const raw = await callCoachAI(userMsg + eventCtx, systemPrompt);
       const clean = raw.replace(/```json|```/g,"").trim();
       const m = clean.match(/\{[\s\S]*\}/);
       if(m){
@@ -1688,6 +1710,37 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if((apiKey||IS_DEMO||profileData?.coach_content) && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
+  // NEW-WORKOUT TRIGGER: when today's workout list gains an entry (sync or any
+  // other path updating fitbitData), force one event-aware regeneration.
+  // Hash guard mirrors the food/sleep pattern — same list never fires twice.
+  const _todayKeyNow = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+  const todayWorkoutHash = (fitbitData.workouts||[]).filter(w=>w.date===_todayKeyNow)
+    .map(w=>w.type+"|"+(w.duration_min||"")).sort().join("||");
+  useEffect(()=>{
+    if(IS_DEMO||!apiKey||!profileData||!fitbitReady) return;
+    const current = _todayKeyNow+":"+todayWorkoutHash;
+    const stored = localStorage.getItem("coach_workout_hash") || profileData?.coach_content_workout_hash || "";
+    if(stored===current) return;
+    const persist = ()=>{
+      localStorage.setItem("coach_workout_hash", current);
+      supa("PATCH","profiles",{coach_content_workout_hash:current},"uid=eq."+UID).catch(()=>{});
+    };
+    const sepIdx = stored.indexOf(":");
+    const storedDay = sepIdx>-1 ? stored.slice(0,sepIdx) : "";
+    const storedHash = sepIdx>-1 ? stored.slice(sepIdx+1) : "";
+    // New day, first run, or no workouts today: set baseline without regenerating
+    // (the daily generation already covers those cases)
+    if(storedDay!==_todayKeyNow || !todayWorkoutHash){ persist(); return; }
+    const prevSet = new Set(storedHash.split("||").filter(Boolean));
+    const added = todayWorkoutHash.split("||").filter(x=>!prevSet.has(x));
+    persist();
+    if(added.length===0) return; // a workout was removed/edited — no regen
+    const [wType, wDur] = added[0].split("|");
+    const cat = getActivityCategory(wType, profileData?.activity_mapping);
+    const evt = `User just completed a ${cat!=="uncategorized"?cat:""} session (${wType}${wDur?`, ${wDur} min`:""}) today.`;
+    console.log("New workout detected — regenerating coach:", evt);
+    generateAllCoachContent(true, evt);
+  },[todayWorkoutHash, apiKey, fitbitReady, profileData?.uid]);
   // Hydrate weekly review from the profile row when there's no local copy
   // (demo mode, or a visitor/new device on the owner link)
   useEffect(()=>{
