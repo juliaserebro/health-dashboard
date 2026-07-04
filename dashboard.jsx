@@ -18,14 +18,17 @@ const resolveUser = () => {
   if (params.get("demo") === "1") {
     return { uid: "demo_maya", isDemo: true };
   }
-  // Once the private link is opened on a device, owner mode persists there —
-  // OAuth redirects (Google strips the ?u= param) and bookmarks keep working.
+  // Owner mode persists per TAB (sessionStorage), not per device: the Google
+  // OAuth redirect strips ?u= but returns to the same tab, so login survives —
+  // while a plain-URL visit in any new tab (including the owner's own devices)
+  // always shows the demo.
+  try{ localStorage.removeItem("owner_mode"); }catch(e){} // migrate away from old device-wide flag
   if (params.get("u") === OWNER_KEY) {
-    try{ localStorage.setItem("owner_mode", OWNER_KEY); }catch(e){}
+    try{ sessionStorage.setItem("owner_mode", OWNER_KEY); }catch(e){}
     return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
   }
   try{
-    if (localStorage.getItem("owner_mode") === OWNER_KEY) {
+    if (sessionStorage.getItem("owner_mode") === OWNER_KEY) {
       return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
     }
   }catch(e){}
