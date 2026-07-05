@@ -2330,45 +2330,39 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
       {/* WEEK BY WEEK */}
       <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week — June 2026</div>
-        {[
-          {label:"Week 1",range:"Mon 1 – Sat 6 Jun",detail:"1 active day · yoga Fri 5 Jun (96min ★)",current:false},
-          ...(()=>{
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week</div>
+        {(()=>{
             const now2=new Date();
             const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:getTz()});
             const [y2,m2,d2]=todayStr2.split("-").map(Number);
             const dow2=new Date(y2,m2-1,d2).getDay();
-            const tp2=todayStr2.split("-").map(Number);
             // Current week Sunday (Israeli week starts Sunday)
-            const currSun=new Date(tp2[0],tp2[1]-1,tp2[2]-dow2);
+            const currSun=new Date(y2,m2-1,d2-dow2);
+            // First tracked week: Sunday 7 Jun 2026 (June 1–6 was a partial pre-start week)
+            const firstSun=new Date(2026,5,7);
             const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
             const fmtRange=(sun)=>{const sat=new Date(sun);sat.setDate(sun.getDate()+6);return `${fmt(sun)} – ${fmt(sat)}`;};
             const weeks=[];
-            for(let w=-2;w<=2;w++){
-              const sun=new Date(currSun);sun.setDate(currSun.getDate()+w*7);
+            const sun=new Date(firstSun);
+            while(sun<=currSun){
               const sat=new Date(sun);sat.setDate(sun.getDate()+6);
               const sunStr=sun.toLocaleDateString("en-CA",{timeZone:getTz()});
               const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
-              const isCurr=w===0;
-              const isPast=w<0;
-              // Count workouts and steps for this week
+              const isCurr=sun.getTime()===currSun.getTime();
               const wWorkouts=(fitbitData.workouts||[]).filter(wo=>wo.date>=sunStr&&wo.date<=satStr);
               const wSteps=(fitbitData.steps||[]).filter(s=>s.date>=sunStr&&s.date<=satStr);
               const totalSteps=wSteps.reduce((s,d)=>s+d.steps,0);
               const woTypes=[...new Set(wWorkouts.map(wo=>wo.type))];
               let detail="";
-              if(isCurr){
-                const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayStr2);
-                detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
-              } else if(isPast&&totalSteps>0){
+              if(totalSteps>0||wWorkouts.length>0){
                 detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
               }
-              weeks.push({label:`Week${isCurr?" ← current":""}`,range:fmtRange(sun),detail,current:isCurr});
+              weeks.push({label:`Week${isCurr?" ← current":""}`,range:fmtRange(new Date(sun)),detail,current:isCurr});
+              sun.setDate(sun.getDate()+7);
             }
             return weeks;
-          })(),
-        ].map((w,i)=>(
-          <div key={i} style={{...s.wi,borderBottom:i<3?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
+        })().map((w,i,arr)=>(
+          <div key={i} style={{...s.wi,borderBottom:i<arr.length-1?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
             <div><strong style={{fontSize:12,color:w.current?C.teal:C.tx}}>{w.label}</strong><span style={{fontSize:12,color:w.current?C.teal:C.t2,marginLeft:8}}>{w.range}</span></div>
             <div style={{fontSize:12,color:w.current?C.teal:C.t2}}>{w.detail}</div>
           </div>
