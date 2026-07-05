@@ -3543,6 +3543,61 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [processingPlan, setProcessingPlan] = useState(false);
   const [savedPlan, setSavedPlan] = useState("");
   const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
+  const [equip, setEquip] = useState(profileData?.activity_targets?.equipment||"gym");
+  const [assessing, setAssessing] = useState(false);
+  const [assessment, setAssessment] = useState(()=>{try{return localStorage.getItem("plan_assessment")||"";}catch{return "";}});
+
+  // Shared trainer context block for both Suggest and Assess — the chain:
+  // goals -> weekly activity targets -> health notes -> equipment -> actual recent training level
+  function trainerContext(){
+    const goals=(profileData?.goals||[]).map(g=>`${g.label}${g.definition?` (${g.definition})`:''}${g.target_value?` — target: ${g.target_value} ${g.target_unit||''}`:''}`).join("\n- ")||"general fitness";
+    const at=profileData?.activity_targets||{};
+    const pa=profileData||{};
+    const age=pa.birth_date?Math.floor((new Date()-new Date(pa.birth_date))/31557600000):40;
+    const w=pa.weight_kg||60, h=pa.height_cm||165;
+    const bmr=pa.gender==="male"?(10*w+6.25*h-5*age+5):(10*w+6.25*h-5*age-161);
+    const recent=[...(fitbitData?.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,14)
+      .map(x=>`${x.date} ${x.type}${x.duration_min?` ${x.duration_min}min`:''}${x.avg_hr?` avg ${x.avg_hr}bpm`:''}`).join("\n")||"no recent data";
+    const equipLabel={gym:"full gym (machines, barbells, dumbbells, cables)",home:"home setup (dumbbells, bands, bodyweight)",bodyweight:"bodyweight only, no equipment"}[equip]||equip;
+    return `CLIENT PROFILE:
+- ${pa.gender||"female"}, ${age} years old, ${w}kg, ${h}cm (BMR ~${Math.round(bmr)} kcal/day)
+- Goals:
+- ${goals}
+- Weekly schedule (fixed — the plan MUST fit exactly this): Strength ${at.strength||2}x, Mobility ${at.mobility||2}x, Cardio ${at.cardio||2}x per week
+- Training setting: ${equipLabel}
+- Health restrictions (hard constraints, never violate): ${healthNotes||"none"}
+- Actual training last 14 days (calibrate difficulty to this real level, not an imagined one):
+${recent}`;
+  }
+
+  async function assessPlan(){
+    if(!apiKey||!workoutPlan.trim()||assessing) return;
+    setAssessing(true);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1200,messages:[{role:"user",content:
+`You are an experienced, evidence-based personal trainer reviewing a client's current workout plan. Be honest and specific — this is a professional assessment, not encouragement.
+
+${trainerContext()}
+
+THE PLAN AS WRITTEN:
+${workoutPlan}
+
+Assess it and answer in EXACTLY this structure (plain text, these ALL-CAPS labels):
+VERDICT: One or two sentences — done at the weekly schedule above, will this plan realistically achieve the stated goals? Yes / mostly / no, and why.
+SAFETY: Any exercise conflicting with the health restrictions, each on its own line as "⚠️ Exercise — reason". If none: "No safety conflicts found."
+WHAT'S WORKING: 2-3 short bullets on what to keep.
+GAPS & FIXES: 3-5 short bullets — missing movement patterns, volume or intensity gaps vs the goals, and CONCRETE progression targets (specific weights, reps or timelines, e.g. "leg press: work from 35kg to 50kg over ~8 weeks, add 2.5kg when 3x12 feels easy").
+ALIGNMENT: One sentence — do the weekly activity targets themselves match the goals, or should they change?
+Max 250 words total. No intro, no outro.`}]})});
+      const d=await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const txt=d.content?.[0]?.text?.trim()||"";
+      setAssessment(txt);
+      try{localStorage.setItem("plan_assessment",txt);}catch{}
+    }catch(e){ setAssessment("Assessment error: "+e.message); }
+    setAssessing(false);
+  }
 
   // Persist a partial update to Supabase + local state
   async function persist(patch, setFlag){
@@ -3913,21 +3968,44 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       <Card style={{marginBottom:14}}>
         {editPlan ? (
           <>
-            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it and flag anything that conflicts with your health notes.</div>
-            {apiKey&&!workoutPlan.trim()&&<button disabled={processingPlan} onClick={async()=>{
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it and flag anything that conflicts with your health notes. Or let the AI trainer design the whole plan from your goals, targets and health notes.</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{fontSize:11,color:C.t2,whiteSpace:"nowrap"}}>Training setting:</span>
+              <select value={equip} onChange={e=>{const v=e.target.value;setEquip(v);persist({activity_targets:{...(profileData?.activity_targets||{}),equipment:v}});}} style={{...s.input,flex:1}}>
+                <option value="gym">Full gym</option>
+                <option value="home">Home — dumbbells & bands</option>
+                <option value="bodyweight">Bodyweight only</option>
+              </select>
+            </div>
+            {apiKey&&<button disabled={processingPlan} onClick={async()=>{
               setProcessingPlan(true);
-              const goals=(profileData?.goals||[]).map(g=>g.label||g.id).join(", ")||"general fitness";
-              const at=profileData?.activity_targets||{};
-              const prompt=`Build a complete, structured weekly workout plan for this person:\n\nGoals: ${goals}\nStrength sessions/week: ${at.strength||2}, Mobility: ${at.mobility||1}, Cardio: ${at.cardio||2}\nHealth restrictions: ${healthNotes||"none"}\nProfile: ${profileData?.gender||"female"}, ${profileData?.age||40} years old, weight ${profileData?.weight_kg||"unknown"}kg\n\nCreate a realistic plan with specific exercises, weights (estimate if unknown), sets×reps, and rest times. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY). Each exercise: Exercise name — weight · sets×reps · rest. If any exercise conflicts with health restrictions add: ⚠️ FLAGGED: Exercise — reason. Return only the formatted plan, nothing else.`;
+              const prompt=`You are an experienced, evidence-based personal trainer. Design a complete weekly workout plan for this client.
+
+${trainerContext()}
+
+REQUIREMENTS:
+- The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
+- Calibrate starting weights and difficulty to the client's actual recent training, not an idealised athlete.
+- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead.
+- Only use equipment available in the client's training setting.
+- Serve the stated goals directly (e.g. push-up progression work if that is a goal).
+
+FORMAT (exactly):
+- ALL CAPS section headers, one per session (e.g. STRENGTH DAY 1 — FULL BODY, MOBILITY, CARDIO).
+- Each exercise on its own line: Exercise name — weight · sets×reps · rest.
+- End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
+- If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
+Return ONLY the plan, nothing else.`;
               try{
-                const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2000,messages:[{role:"user",content:prompt}]})});
+                const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,messages:[{role:"user",content:prompt}]})});
                 const d=await res.json();
+                if(d.error) throw new Error(d.error.message);
                 const plan=d.content?.[0]?.text?.trim()||"";
                 if(plan){setWorkoutPlan(plan);await persist({workout_plan:plan});setEditPlan(false);}
               }catch(e){console.log("Build plan error:",e.message);}
               setProcessingPlan(false);
             }} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
-              {processingPlan?"Building your plan...":"Build a plan for me with AI"}
+              {processingPlan?"Designing your plan...":(workoutPlan.trim()?"🏋️ Suggest a new plan (replaces current)":"🏋️ Suggest a plan for me")}
             </button>}
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
@@ -3946,7 +4024,19 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
         ) : (
           <>
             <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}}/>
-            <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm,marginTop:12}}>Edit</button>
+            <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+              <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+              {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:"🎯 Assess my plan"}</button>}
+            </div>
+            {assessment&&(
+              <div style={{marginTop:12,padding:"12px 14px",background:C.pl,borderRadius:10,borderLeft:`3px solid ${C.pu}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.pu}}>Trainer assessment</div>
+                  <button onClick={()=>{setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14}}>×</button>
+                </div>
+                <div style={{fontSize:12,color:C.tx,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{assessment}</div>
+              </div>
+            )}
           </>
         )}
       </Card>
