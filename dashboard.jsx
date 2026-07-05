@@ -27,6 +27,19 @@ const resolveUser = () => {
     try{ sessionStorage.setItem("owner_mode", OWNER_KEY); }catch(e){}
     return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
   }
+  // A Google OAuth callback (token or oauth error in the URL hash) can ONLY come
+  // from an owner sync — demo hides Sync entirely. Google returns to the bare
+  // redirect URI (no ?u=), and on a PWA / new-tab return sessionStorage may be
+  // empty, so trust the callback itself as proof of owner mode and re-assert it.
+  // Without this the returned token gets discarded and Google must be reconnected
+  // on every sync.
+  try{
+    const h = window.location.hash || "";
+    if (/[#&](access_token|error)=/.test(h)) {
+      sessionStorage.setItem("owner_mode", OWNER_KEY);
+      return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
+    }
+  }catch(e){}
   try{
     if (sessionStorage.getItem("owner_mode") === OWNER_KEY) {
       return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
