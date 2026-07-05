@@ -3637,7 +3637,9 @@ ALIGNMENT: One sentence — do the weekly activity targets themselves match the 
 Max 250 words total. No intro, no outro.`}]})});
       const d=await res.json();
       if(d.error) throw new Error(d.error.message);
-      const txt=d.content?.[0]?.text?.trim()||"";
+      const raw=d.content?.[0]?.text?.trim()||"";
+      const stamp=new Date().toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:getTz()});
+      const txt=`Assessed ${stamp} — based on your current health notes, goals and targets.\n\n${raw}`;
       setAssessment(txt);
       try{localStorage.setItem("plan_assessment",txt);}catch{}
     }catch(e){ setAssessment("Assessment error: "+e.message); }
@@ -3994,8 +3996,10 @@ Max 250 words total. No intro, no outro.`}]})});
                 setHealthNotes(structured);
                 await persist({health_notes:structured},setSavedNotes);
                 setEditNotes(false);
+                // Health notes changed — any existing plan assessment is stale
+                setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
               }} style={{...s.btn("p"),opacity:processingNotes?0.6:1}}>{processingNotes?"Analysing...":"Analyse & Save"}</button>
-              {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
+              {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {healthNotes&&<button onClick={()=>setEditNotes(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
             </div>
