@@ -3417,7 +3417,7 @@ function StructuredView({text}) {
   );
 }
 
-function WorkoutView({text, healthNotes, apiKey, onUpdatePlan}) {
+function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
   const [suggesting, setSuggesting] = React.useState({});
   if(!text) return null;
 
@@ -3486,7 +3486,10 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan}) {
                 {reason&&(
                   <div style={{background:"rgba(245,158,11,0.08)",borderRadius:6,padding:"7px 10px",marginTop:3,marginLeft:0}}>
                     <div style={{fontSize:11,color:C.am,marginBottom:6,lineHeight:1.5}}>⚠️ {reason}</div>
-                    {!sug&&<button onClick={()=>suggest(ex,reason)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Suggest replacement</button>}
+                    {!sug&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={()=>suggest(ex,reason)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Suggest replacement</button>
+                      {onClearFlag&&<button onClick={()=>onClearFlag(ex.name)} style={{...s.btn("s"),...s.btnSm,fontSize:11,color:C.teal}}>✓ Cleared with my doctor</button>}
+                    </div>}
                     {sug?.loading&&<span style={{fontSize:11,color:C.t2}}>Finding safe alternative...</span>}
                     {sug?.suggestion&&(
                       <div>
@@ -3589,15 +3592,57 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     const recent=[...(fitbitData?.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,14)
       .map(x=>`${x.date} ${x.type}${x.duration_min?` ${x.duration_min}min`:''}${x.avg_hr?` avg ${x.avg_hr}bpm`:''}`).join("\n")||"no recent data";
     const equipLabel={gym:"full gym (machines, barbells, dumbbells, cables)",home:"home setup (dumbbells, bands, bodyweight)",bodyweight:"bodyweight only, no equipment"}[equip]||equip;
+    const cleared=(profileData?.activity_targets?.cleared_exercises||[]);
+    const clearedLine=cleared.length?`\n- DOCTOR-CLEARED EXCEPTIONS: the client's physician explicitly approved these exercises despite the restrictions — do NOT flag, remove, or replace them: ${cleared.join(", ")}`:"";
     return `CLIENT PROFILE:
 - ${pa.gender||"female"}, ${age} years old, ${w}kg, ${h}cm (BMR ~${Math.round(bmr)} kcal/day)
 - Goals:
 - ${goals}
 - Weekly schedule (fixed — the plan MUST fit exactly this): Strength ${at.strength||2}x, Mobility ${at.mobility||2}x, Cardio ${at.cardio||2}x per week
 - Training setting: ${equipLabel}
-- Health restrictions (hard constraints, never violate): ${healthNotes||"none"}
+- Health restrictions (hard constraints, never violate): ${healthNotes||"none"}${clearedLine}
 - Actual training last 14 days (calibrate difficulty to this real level, not an imagined one):
 ${recent}`;
+  }
+
+  // "Cleared with my doctor": remove the ⚠️ flag line for this exercise from the
+  // plan and remember the exception so no AI pass (organise/suggest/assess) re-flags it.
+  async function clearFlaggedExercise(name){
+    const newPlan=workoutPlan.split("\n").filter(l=>!(/^⚠/.test(l.trim())&&l.toLowerCase().includes(name.toLowerCase()))).join("\n");
+    setWorkoutPlan(newPlan);
+    const at=profileData?.activity_targets||{};
+    const cleared=[...new Set([...(at.cleared_exercises||[]),name])];
+    await persist({workout_plan:newPlan, activity_targets:{...at, cleared_exercises:cleared}});
+  }
+
+  async function suggestPlan(){
+    if(!apiKey||processingPlan) return;
+    setProcessingPlan(true);
+    const prompt=`You are an experienced, evidence-based personal trainer. Design a complete weekly workout plan for this client.
+
+${trainerContext()}
+
+REQUIREMENTS:
+- The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
+- Calibrate starting weights and difficulty to the client's actual recent training, not an idealised athlete.
+- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead.
+- Only use equipment available in the client's training setting.
+- Serve the stated goals directly (e.g. push-up progression work if that is a goal).
+
+FORMAT (exactly):
+- ALL CAPS section headers, one per session (e.g. STRENGTH DAY 1 — FULL BODY, MOBILITY, CARDIO).
+- Each exercise on its own line: Exercise name — weight · sets×reps · rest.
+- End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
+- If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
+Return ONLY the plan, nothing else.`;
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,messages:[{role:"user",content:prompt}]})});
+      const d=await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const plan=d.content?.[0]?.text?.trim()||"";
+      if(plan){setWorkoutPlan(plan);await persist({workout_plan:plan});setEditPlan(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}
+    }catch(e){console.log("Build plan error:",e.message);}
+    setProcessingPlan(false);
   }
 
   async function assessPlan(){
@@ -3671,7 +3716,7 @@ Max 250 words total. No intro, no outro.`}]})});
     setProcessingPlan(true);
     try{
       const result = await aiCall(
-        `Read the following workout plan and reformat it as a clean, scannable workout plan. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY, etc.). Each exercise on its own line: Exercise name — weight · sets×reps · rest time. Fix exercise names and capitalisation. Group exercises into the correct sections.\n\nIf the health notes below mention restrictions or injuries that conflict with any exercise in the plan, add a line: ⚠️ FLAGGED: [exercise] — [reason from health notes]\n\nReturn ONLY the formatted workout plan, nothing else.\n\nHealth notes: ${notes||"none"}\n\nWorkout plan:\n${raw}`
+        `Read the following workout plan and reformat it as a clean, scannable workout plan. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY, etc.). Each exercise on its own line: Exercise name — weight · sets×reps · rest time. Fix exercise names and capitalisation. Group exercises into the correct sections.\n\nIf the health notes below mention restrictions or injuries that conflict with any exercise in the plan, add a line: ⚠️ FLAGGED: [exercise] — [reason from health notes]\n${(profileData?.activity_targets?.cleared_exercises||[]).length?`\nEXCEPTIONS — the client's physician explicitly cleared these exercises; NEVER flag them: ${profileData.activity_targets.cleared_exercises.join(", ")}\n`:""}\nReturn ONLY the formatted workout plan, nothing else.\n\nHealth notes: ${notes||"none"}\n\nWorkout plan:\n${raw}`
       );
       return result.trim();
     }catch(e){return raw;}
@@ -4007,34 +4052,7 @@ Max 250 words total. No intro, no outro.`}]})});
                 <option value="bodyweight">Bodyweight only</option>
               </select>
             </div>
-            {apiKey&&<button disabled={processingPlan} onClick={async()=>{
-              setProcessingPlan(true);
-              const prompt=`You are an experienced, evidence-based personal trainer. Design a complete weekly workout plan for this client.
-
-${trainerContext()}
-
-REQUIREMENTS:
-- The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
-- Calibrate starting weights and difficulty to the client's actual recent training, not an idealised athlete.
-- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead.
-- Only use equipment available in the client's training setting.
-- Serve the stated goals directly (e.g. push-up progression work if that is a goal).
-
-FORMAT (exactly):
-- ALL CAPS section headers, one per session (e.g. STRENGTH DAY 1 — FULL BODY, MOBILITY, CARDIO).
-- Each exercise on its own line: Exercise name — weight · sets×reps · rest.
-- End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
-- If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
-Return ONLY the plan, nothing else.`;
-              try{
-                const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,messages:[{role:"user",content:prompt}]})});
-                const d=await res.json();
-                if(d.error) throw new Error(d.error.message);
-                const plan=d.content?.[0]?.text?.trim()||"";
-                if(plan){setWorkoutPlan(plan);await persist({workout_plan:plan});setEditPlan(false);}
-              }catch(e){console.log("Build plan error:",e.message);}
-              setProcessingPlan(false);
-            }} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
+            {apiKey&&<button disabled={processingPlan} onClick={suggestPlan} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
               {processingPlan?"Designing your plan...":(workoutPlan.trim()?"🏋️ Suggest a new plan (replaces current)":"🏋️ Suggest a plan for me")}
             </button>}
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
@@ -4053,10 +4071,11 @@ Return ONLY the plan, nothing else.`;
           </>
         ) : (
           <>
-            <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}}/>
+            <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}} onClearFlag={clearFlaggedExercise}/>
             <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
               <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
               {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:"🎯 Assess my plan"}</button>}
+              {apiKey&&<button disabled={processingPlan} onClick={()=>{if(window.confirm("This will replace your current plan with a new AI-designed one. Continue?"))suggestPlan();}} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:"🏋️ Suggest a new plan"}</button>}
             </div>
             {assessment&&(
               <div style={{marginTop:12,padding:"12px 14px",background:C.pl,borderRadius:10,borderLeft:`3px solid ${C.pu}`}}>
