@@ -4338,6 +4338,26 @@ export default function App() {
           supa("GET","fitness_cache",null,"user_id=eq."+UID+"&limit=1"),
           supa("GET","cycle_logs",null,"uid=eq."+UID+"&limit=1").catch(()=>null),
         ]);
+        // DEMO: the seeded data has fixed dates that go stale. Shift every date
+        // forward so the newest seeded sleep is always "last night" — the demo
+        // stays permanently fresh without re-running the seed script.
+        let demoShift=0;
+        if(IS_DEMO){
+          try{
+            const sl=fitbit?.[0]?.data?.sleep||[];
+            const newest=sl.reduce((m,x)=>x.date>m?x.date:m,"");
+            if(newest){
+              const todayIL=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+              demoShift=Math.round((new Date(todayIL+"T12:00:00")-new Date(newest+"T12:00:00"))/864e5);
+            }
+          }catch(e){}
+        }
+        const dShift=(ds)=>{
+          if(!demoShift||!ds) return ds;
+          const d=new Date(ds+"T12:00:00"); d.setDate(d.getDate()+demoShift);
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        };
+
         // Also load legacy "julia" food entries (pre-UID-migration) — owner only,
         // demo must never touch Julia's rows
         let legacyFood=[];
@@ -4345,10 +4365,11 @@ export default function App() {
         const allFoodRows=[...(legacyFood||[]),...(food||[])];
         const foodMap={};
         allFoodRows.forEach(r=>{
-          if(!foodMap[r.log_date])foodMap[r.log_date]=[];
+          const dateKey=dShift(r.log_date);
+          if(!foodMap[dateKey])foodMap[dateKey]=[];
           let parsedItems=null;
           try{if(r.parsed_items)parsedItems=typeof r.parsed_items==="string"?JSON.parse(r.parsed_items):r.parsed_items;}catch(e){}
-          foodMap[r.log_date].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
+          foodMap[dateKey].push({dbid:r.id,n:r.name,det:r.detail,p:r.protein,c:r.carbs,f:r.fat,k:r.kcal,time:r.meal_time||r.eaten_time,eaten_time:r.eaten_time||r.meal_time,parsed_items:parsedItems});
         });
         // Merge backup: only recover local-only entries for dates Supabase has NO data for
         // (owner only — demo never reads or writes local backups)
@@ -4364,15 +4385,16 @@ export default function App() {
         }
         setAllFood(foodMap);
         if(!IS_DEMO) localStorage.setItem("jfood_backup",JSON.stringify(foodMap));
-        const logData=(log||[]).map(r=>({id:r.id,dt:r.created_at,tag:r.tag,txt:r.txt}));
+        const logData=(log||[]).map(r=>({id:r.id,dt:demoShift?new Date(new Date(r.created_at).getTime()+demoShift*864e5).toISOString():r.created_at,tag:r.tag,txt:r.txt}));
         setLogEntries(logData);
         if(!IS_DEMO) localStorage.setItem("jlog_backup",JSON.stringify(logData));
 
         // Load cycle data — prefer cycle_logs (merge-based) over cycle_dates (row-based)
         const cycLogRecord = cycLog?.[0] || null;
         if(cycLogRecord?.period_start_dates?.length) {
-          // cycle_logs is authoritative
-          const dates = cycLogRecord.period_start_dates;
+          // cycle_logs is authoritative (demo: dates shifted with everything else)
+          const dates = cycLogRecord.period_start_dates.map(dShift);
+          if(demoShift){ cycLogRecord.period_start_dates=dates; cycLogRecord.last_period_start=dShift(cycLogRecord.last_period_start); }
           const parsed = dates.map((d,i)=>({id:i,d,ok:true}));
           setCycleDates(parsed);
           setCycleLog(cycLogRecord);
@@ -4421,11 +4443,11 @@ export default function App() {
           const supaData=fitbit[0].data;
           if(IS_DEMO){
             setFitbitData({
-              sleep:(supaData.sleep||[]).sort((a,b)=>b.date.localeCompare(a.date)),
-              naps:supaData.naps||[],
-              steps:(supaData.steps||[]).sort((a,b)=>a.date.localeCompare(b.date)),
-              workouts:(supaData.workouts||[]).sort((a,b)=>b.date.localeCompare(a.date)),
-              synced_at:supaData.synced_at
+              sleep:(supaData.sleep||[]).map(x=>({...x,date:dShift(x.date)})).sort((a,b)=>b.date.localeCompare(a.date)),
+              naps:(supaData.naps||[]).map(x=>({...x,date:dShift(x.date)})),
+              steps:(supaData.steps||[]).map(x=>({...x,date:dShift(x.date)})).sort((a,b)=>a.date.localeCompare(b.date)),
+              workouts:(supaData.workouts||[]).map(x=>({...x,date:dShift(x.date)})).sort((a,b)=>b.date.localeCompare(a.date)),
+              synced_at:new Date().toISOString()
             });
           } else {
           // Merge: seed → legacy "julia" → UUID (newest wins per date)
