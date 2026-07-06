@@ -138,6 +138,12 @@ let ACTIVE_TZ = "Asia/Jerusalem"; // overwritten on profile load via setActiveTz
 function setActiveTz(tz){ if(tz) ACTIVE_TZ = tz; }
 function getTz(){ return ACTIVE_TZ || "Asia/Jerusalem"; }
 
+// Week start preference — "sunday" (default, Israeli convention) or "monday".
+let ACTIVE_WEEK_START = "sunday"; // overwritten on profile load via setActiveWeekStart()
+function setActiveWeekStart(ws){ if(ws==="sunday"||ws==="monday") ACTIVE_WEEK_START = ws; }
+// Days back from `dow` (0=Sun..6=Sat) to the configured week start
+function daysSinceWeekStart(dow){ return ACTIVE_WEEK_START==="monday" ? (dow+6)%7 : dow; }
+
 // Returns the sleep record that counts as "last night" for a given fitbitData object.
 // Sleep records use the wake-up date. We only accept today's date as current;
 // anything older means last night's data hasn't synced yet.
@@ -325,6 +331,71 @@ const FITBIT_SEED = {"sleep":[{"date":"2026-06-16","bedtime":"01:20","total":503
 
 
 
+// ── SHARE CARD ────────────────────────────────────────────────────────────
+// Draws a branded 1080×1080 stats card on a canvas and opens the native share
+// sheet (mobile) or downloads the PNG (desktop). No screenshot libraries.
+async function shareStatsCard({heading, subheading, rows, footer}){
+  const W=1080,H=1080;
+  const cv=document.createElement("canvas");cv.width=W;cv.height=H;
+  const ctx=cv.getContext("2d");
+  // Background
+  ctx.fillStyle="#f5f4f0";ctx.fillRect(0,0,W,H);
+  // Top accent band
+  const grad=ctx.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0,"#4a42b0");grad.addColorStop(1,"#0f7b5f");
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,14);
+  // Heading
+  ctx.fillStyle="#1a1917";
+  ctx.font="italic 600 76px Georgia, 'Playfair Display', serif";
+  ctx.fillText(heading, 80, 170);
+  // Subheading
+  ctx.fillStyle="#6b6860";
+  ctx.font="500 34px Inter, -apple-system, sans-serif";
+  ctx.fillText(subheading, 82, 232);
+  // Stat rows
+  const top=320, rowH=Math.min(118, Math.floor(620/rows.length));
+  const rr=(x,y2,w2,h2,r2)=>{ctx.beginPath();if(ctx.roundRect){ctx.roundRect(x,y2,w2,h2,r2);}else{ctx.rect(x,y2,w2,h2);}};
+  rows.forEach((r,i)=>{
+    const y=top+i*rowH;
+    // subtle row card
+    ctx.fillStyle="#ffffff";
+    rr(80,y-64,W-160,rowH-16,18);ctx.fill();
+    ctx.strokeStyle="rgba(0,0,0,.07)";ctx.lineWidth=2;
+    rr(80,y-64,W-160,rowH-16,18);ctx.stroke();
+    ctx.fillStyle="#6b6860";
+    ctx.font="600 30px Inter, -apple-system, sans-serif";
+    ctx.fillText(r.label.toUpperCase(), 116, y);
+    ctx.fillStyle=r.color||"#1a1917";
+    ctx.font="700 44px Inter, -apple-system, sans-serif";
+    const vw=ctx.measureText(r.value).width;
+    ctx.fillText(r.value, W-116-vw, y+4);
+  });
+  // Footer
+  ctx.fillStyle="#a09d98";
+  ctx.font="500 28px Inter, -apple-system, sans-serif";
+  ctx.fillText(footer||"Health Coach", 82, H-64);
+  ctx.fillStyle="#4a42b0";
+  ctx.font="italic 600 34px Georgia, serif";
+  const brand="Health Coach";
+  ctx.fillText(brand, W-82-ctx.measureText(brand).width, H-64);
+
+  return new Promise(resolve=>{
+    cv.toBlob(async blob=>{
+      const file=new File([blob],"health-coach-stats.png",{type:"image/png"});
+      try{
+        if(navigator.canShare&&navigator.canShare({files:[file]})){
+          await navigator.share({files:[file],title:heading});
+          resolve(true);return;
+        }
+      }catch(e){ if(e.name==="AbortError"){resolve(false);return;} }
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);a.download="health-coach-stats.png";a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+      resolve(true);
+    },"image/png");
+  });
+}
+
 // ── COLORS ────────────────────────────────────────────────────────────────
 const C = {
   bg:"#f5f4f0", sf:"#fff", s2:"#f0ede8",
@@ -479,7 +550,7 @@ function WeeklySleepMetric({fitbitData}) {
   const [ilY,ilM,ilD]=todayIL.split("-").map(Number);
   const dowIL=new Date(ilY,ilM-1,ilD).getDay(); // 0=Sun, 1=Mon...
   const weekDates=[];
-  for(let i=0;i<=dowIL;i++){
+  for(let i=0;i<=daysSinceWeekStart(dowIL);i++){
     const d=new Date(now.getTime()-i*864e5);
     weekDates.push(d.toLocaleDateString("en-CA",{timeZone:getTz()}));
   }
@@ -518,7 +589,7 @@ function WeeklyStepsMetric({fitbitData}) {
   }
   const [ty,tm,td]=todayStr.split("-").map(Number);
   const todayDow=new Date(ty,tm-1,td).getDay();
-  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>Sun–{dayNames[todayDow]} this week</div></div>;
+  return <div style={s.mc}><div style={s.ml}>Total steps</div><div style={{...s.mv,color:C.teal}}>{total.toLocaleString()}</div><div style={{...s.ms,color:C.teal}}>{ACTIVE_WEEK_START==="monday"?"Mon":"Sun"}–{dayNames[todayDow]} this week</div></div>;
 }
 
 function SleepTileMetric({fitbitData}) {
@@ -980,7 +1051,7 @@ function getWeekStartDate() {
   const todayIL = now.toLocaleDateString("en-CA",{timeZone:getTz()});
   const [y,m,d] = todayIL.split("-").map(Number);
   const dow = new Date(y,m-1,d).getDay(); // 0=Sunday
-  return new Date(y,m-1,d-dow); // go back to Sunday
+  return new Date(y,m-1,d-daysSinceWeekStart(dow)); // back to configured week start
 }
 function getWeekEndDate() {
   const sun = getWeekStartDate();
@@ -2208,6 +2279,28 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 <span style={{fontWeight:600,color:totalDone>=totalTarget?C.teal:C.tx}}>{totalDone}<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span></span>
               </div>
             </div>
+            <button onClick={()=>{
+              const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+              const stepsTotal=weekKeys.reduce((s,dk)=>{const r=(fitbitData.steps||[]).find(x=>x.date===dk);return s+(r?r.steps:0);},0);
+              const weekSleepRecs=(fitbitData.sleep||[]).filter(x=>weekKeys.includes(x.date));
+              const avgSleepMin=weekSleepRecs.length?Math.round(weekSleepRecs.reduce((s,r)=>s+r.total,0)/weekSleepRecs.length):0;
+              const protDays=weekKeys.filter(dk=>dk<=todayStr&&(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
+              const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+              const sat=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+6);
+              const name=(profileData?.name||"My").split(" ")[0];
+              shareStatsCard({
+                heading:`${name==="My"?"My":name+"'s"} week`,
+                subheading:`${fmt(weekStart)} – ${fmt(sat)} · consistency check`,
+                rows:[
+                  {label:"Total steps",value:stepsTotal.toLocaleString(),color:"#0f7b5f"},
+                  {label:"Training sessions",value:`${totalDone} of ${totalTarget}`,color:"#4a42b0"},
+                  {label:"Strength · Mobility · Cardio",value:`${strengthDone} · ${mobilityDone} · ${cardioDone}`,color:"#b35a1f"},
+                  ...(avgSleepMin?[{label:"Avg sleep",value:`${Math.floor(avgSleepMin/60)}h ${avgSleepMin%60}m`,color:"#2d65a8"}]:[]),
+                  ...(protDays?[{label:"Protein goal hit",value:`${protDays} day${protDays!==1?"s":""}`,color:"#a05f0a"}]:[]),
+                ],
+                footer:"my week in numbers"
+              });
+            }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}>📤 Share my week</button>
           </div>
         );
       })()}
@@ -2325,7 +2418,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       </Card>
 
       <hr style={s.hr}/>
-      <SecLabel>Month — June 2026</SecLabel>
+      <SecLabel>Month — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</SecLabel>
 
       <div style={s.mg}>
         <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
@@ -2333,7 +2426,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
       {/* HEATMAP */}
       <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — June 2026</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</div>
         <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
           <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Strength</span>
@@ -2343,6 +2436,30 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
           <span><span style={{fontWeight:700,color:C.am,fontSize:9}}>P✓</span> protein goal hit</span>
         </div>
+        <button onClick={()=>{
+          const now3=new Date();
+          const monthKey=now3.toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7);
+          const stepTarget=profileData?.step_target||8000;
+          const mSteps=(fitbitData.steps||[]).filter(x=>x.date.startsWith(monthKey));
+          const mWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(monthKey));
+          const activeDates=new Set([...mSteps.filter(x=>x.steps>=stepTarget).map(x=>x.date),...mWorkouts.map(w=>w.date)]);
+          const cat=(c)=>mWorkouts.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)===c).length;
+          const totalSteps=mSteps.reduce((s,x)=>s+x.steps,0);
+          const protDays=Object.entries(allFood).filter(([d,meals])=>d.startsWith(monthKey)&&meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
+          const name=(profileData?.name||"My").split(" ")[0];
+          shareStatsCard({
+            heading:`${name==="My"?"My":name+"'s"} month`,
+            subheading:`${now3.toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})} · consistency`,
+            rows:[
+              {label:"Active days",value:String(activeDates.size),color:"#0f7b5f"},
+              {label:"Total steps",value:totalSteps.toLocaleString(),color:"#0f7b5f"},
+              {label:"Strength sessions",value:String(cat("strength")),color:"#4a42b0"},
+              {label:"Mobility · Cardio",value:`${cat("mobility")} · ${cat("cardio")}`,color:"#b35a1f"},
+              ...(protDays?[{label:"Protein goal hit",value:`${protDays} days`,color:"#a05f0a"}]:[]),
+            ],
+            footer:"my month in numbers"
+          });
+        }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}>📤 Share my month</button>
       </Card>
 
       {/* WEEK BY WEEK */}
@@ -2354,7 +2471,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             const [y2,m2,d2]=todayStr2.split("-").map(Number);
             const dow2=new Date(y2,m2-1,d2).getDay();
             // Current week Sunday (Israeli week starts Sunday)
-            const currSun=new Date(y2,m2-1,d2-dow2);
+            const currSun=new Date(y2,m2-1,d2-daysSinceWeekStart(dow2));
             // First tracked week: Sunday 7 Jun 2026 (June 1–6 was a partial pre-start week)
             const firstSun=new Date(2026,5,7);
             const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
@@ -4205,12 +4322,14 @@ export default function App() {
   const [settProt, setSettProt] = useState(100);
   const [settTimezone, setSettTimezone] = useState(getTz());
   const [settCycle, setSettCycle] = useState(true);
+  const [settWeekStart, setSettWeekStart] = useState("sunday");
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   // Keep Settings modal protein field in sync once profile loads
   useEffect(()=>{ if(profileData?.protein_target) setSettProt(profileData.protein_target); },[profileData?.protein_target]);
   // Publish the profile timezone to the module-level helper used by metric components
   useEffect(()=>{ if(profileData?.timezone) setActiveTz(profileData.timezone); },[profileData?.timezone]);
+  useEffect(()=>{ if(profileData?.week_start){setActiveWeekStart(profileData.week_start);setSettWeekStart(profileData.week_start);} },[profileData?.week_start]);
 
   // Intelligence layer — runs once after data loads, then after each sync
   const _intelligenceTs = React.useRef(0);
@@ -4564,9 +4683,10 @@ export default function App() {
     setApiKey(settKey);
     try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey},"on_conflict=user_id");}catch(e){}
     try{
-      await supa("POST","profiles",{uid:UID,timezone:settTimezone,cycle_tracking:settCycle},"on_conflict=uid");
-      setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle}));
+      await supa("POST","profiles",{uid:UID,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart},"on_conflict=uid");
+      setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart}));
       setActiveTz(settTimezone);
+      setActiveWeekStart(settWeekStart);
     }catch(e){}
     setShowSett(false);
   }
@@ -4668,7 +4788,7 @@ export default function App() {
           {IS_DEMO
             ? <span style={{fontSize:11,padding:"5px 12px",borderRadius:20,background:C.s2,color:C.t3}}>Demo data</span>
             : <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>}
-          <button onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+          <button onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
         </div>
       </div>
 
@@ -4752,6 +4872,12 @@ export default function App() {
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Timezone</label>
             <input value={settTimezone} onChange={e=>setSettTimezone(e.target.value)} placeholder="e.g. Asia/Jerusalem" style={{...s.input,marginBottom:4}}/>
             <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Controls all date/time calculations in the app.</p>
+            <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Week starts on</label>
+            <select value={settWeekStart} onChange={e=>setSettWeekStart(e.target.value)} style={{...s.input,marginBottom:4}}>
+              <option value="sunday">Sunday</option>
+              <option value="monday">Monday</option>
+            </select>
+            <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Controls weekly stats, targets and the weekly review window.</p>
             {profileData?.gender==="female"&&(
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
                 <div>
