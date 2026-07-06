@@ -610,9 +610,13 @@ function handleGoogleCallback(){
   if(!hash) return false;
   const params=new URLSearchParams(hash);
   const error=params.get("error");
+  // An OAuth callback only ever happens for the owner — restore the private
+  // ?u= key to the URL that Google stripped, so the address bar (and any
+  // bookmark/refresh from it) keeps pointing at the owner link.
+  const ownerUrl = window.location.pathname + "?u=" + OWNER_KEY;
   if(error){
     if(error==="login_required"||error==="consent_required"||error==="interaction_required"){
-      window.history.replaceState(null,"",window.location.pathname);
+      window.history.replaceState(null,"",ownerUrl);
       startGoogleAuth(true);
     }
     return false;
@@ -623,7 +627,7 @@ function handleGoogleCallback(){
   const tok={access_token,expires_at:Date.now()+parseInt(expires_in||3600)*1000};
   setGToken(tok);
   localStorage.setItem("gh_consent_granted","true");
-  window.history.replaceState(null,"",window.location.pathname);
+  window.history.replaceState(null,"",ownerUrl);
   // Fetch email for login_hint so future silent re-auths skip the account chooser
   if(!localStorage.getItem("gh_login_hint")){
     fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{"Authorization":"Bearer "+access_token}})
