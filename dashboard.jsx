@@ -4498,6 +4498,8 @@ export default function App() {
   const [settTimezone, setSettTimezone] = useState(getTz());
   const [settCycle, setSettCycle] = useState(true);
   const [settWeekStart, setSettWeekStart] = useState("sunday");
+  const [unlockKey, setUnlockKey] = useState("");
+  const [unlockMsg, setUnlockMsg] = useState("");
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   // Keep Settings modal protein field in sync once profile loads
@@ -5054,6 +5056,21 @@ export default function App() {
         <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSett(false);}}>
           <div style={{...s.modal,width:420}}>
             <h3 style={{fontSize:16,fontWeight:600,marginBottom:16}}>Settings</h3>
+            {IS_DEMO&&(
+              <div style={{marginBottom:16,paddingBottom:14,borderBottom:`1px solid ${C.bd}`}}>
+                <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Owner access key</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input type="password" value={unlockKey} onChange={e=>setUnlockKey(e.target.value)} placeholder="Enter your access key" style={{...s.input,flex:1,fontFamily:"monospace",fontSize:12}}/>
+                  <button onClick={()=>{
+                    if(unlockKey.trim()===OWNER_KEY){
+                      try{localStorage.setItem("owner_device",OWNER_KEY);sessionStorage.setItem("owner_mode",OWNER_KEY);}catch(e){}
+                      window.location.reload();
+                    } else { setUnlockMsg("That key doesn't match."); }
+                  }} style={{...s.btn("p"),...s.btnSm}}>Unlock</button>
+                </div>
+                <p style={{fontSize:11,color:unlockMsg?C.red:C.t3,marginTop:4}}>{unlockMsg||"Unlocks your personal dashboard on this device — needed once in the installed app."}</p>
+              </div>
+            )}
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
             <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
             <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Stored locally in your browser only.</p>
