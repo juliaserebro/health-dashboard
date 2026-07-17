@@ -123,8 +123,11 @@ for i in range(30, -1, -1):
     if random.random() < 0.6:
         meals.insert(2, ("16:30", random.choice(SNACKS)))
     for t, (n, det, p, c, f, k) in meals:
+        parsed = json.dumps([{"name": n, "qty": 1, "unit": "serving",
+                              "p": p, "c": c, "f": f, "k": k, "src": "ai_estimate"}])
         food_rows.append({"user_id": UID, "log_date": d, "meal_time": t, "eaten_time": t,
-                          "name": n, "detail": det, "protein": p, "carbs": c, "fat": f, "kcal": k})
+                          "name": n, "detail": det, "protein": p, "carbs": c, "fat": f, "kcal": k,
+                          "parsed_items": parsed})
 
 # ── COMPUTED STATS (so coach content quotes real numbers) ────────────────────
 late_deep = [s["deep"] for s in sleep if any(dk(n) == s["date"] for n in [x - 1 for x in LATE_MEAL_NIGHTS])]

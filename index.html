@@ -2783,6 +2783,113 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   const [editEntry, setEditEntry] = useState({});
   const [reanalysing, setReanalysing] = useState(false);
 
+  const [rowBusy, setRowBusy] = useState(null);   // index of row being re-estimated, or "add"
+  const [rowError, setRowError] = useState("");
+  const [newIngText, setNewIngText] = useState("");
+  const [pinned, setPinned] = useState(()=>{try{return JSON.parse(localStorage.getItem("pinned_meals")||"[]");}catch{return [];}});
+
+  function togglePin(entry){
+    setPinned(prev=>{
+      const exists=prev.some(p=>p.n===entry.n);
+      const next=exists?prev.filter(p=>p.n!==entry.n):[...prev,{n:entry.n,det:entry.det||null,p:entry.p||0,c:entry.c||0,f:entry.f||0,k:entry.k||0,parsed_items:entry.parsed_items||null}];
+      try{localStorage.setItem("pinned_meals",JSON.stringify(next));}catch{}
+      return next;
+    });
+  }
+
+  // Pure copy — no AI call. Clones an already-estimated meal into targetDate.
+  async function cloneEntryTo(entry, targetDate, time){
+    const t=time||new Date().toTimeString().slice(0,5);
+    const items=(entry.parsed_items||[]).map(i=>({...i,src:"copied"}));
+    const newEntry={n:entry.n,det:entry.det,p:entry.p,c:entry.c,f:entry.f,k:entry.k,time:t,eaten_time:t,source:"copied",parsed_items:items.length?items:null};
+    try{
+      const rows=await supa("POST","food_log",{user_id:UID,log_date:targetDate,meal_time:t,eaten_time:t,name:newEntry.n,detail:newEntry.det||null,protein:newEntry.p,carbs:newEntry.c,fat:newEntry.f,kcal:newEntry.k,parsed_items:newEntry.parsed_items?JSON.stringify(newEntry.parsed_items):null});
+      if(rows&&rows[0]) newEntry.dbid=rows[0].id;
+    }catch(e){
+      try{
+        const rows2=await supa("POST","food_log",{user_id:UID,log_date:targetDate,name:newEntry.n,detail:newEntry.det||null,protein:newEntry.p,carbs:newEntry.c,fat:newEntry.f,kcal:newEntry.k});
+        if(rows2&&rows2[0]) newEntry.dbid=rows2[0].id;
+      }catch(e2){}
+    }
+    setAllFood(prev=>{
+      const updated={...prev,[targetDate]:[...(prev[targetDate]||[]),newEntry]};
+      if(!IS_DEMO) localStorage.setItem("jfood_backup",JSON.stringify(updated));
+      return updated;
+    });
+    if(onFoodLogged) onFoodLogged();
+  }
+
+  async function repeatYesterday(){
+    const yKey=tkey(new Date(Date.now()-864e5)); // previous biological day in the active tz
+    const meals=allFood[yKey]||[];
+    if(!meals.length){ setAiMsg("Nothing logged yesterday to repeat."); return; }
+    for(const m of meals){ await cloneEntryTo(m, foodDate, m.eaten_time||m.time); }
+    setAiMsg(`Copied ${meals.length} meal${meals.length>1?"s":""} from yesterday ✓`);
+  }
+
+  // Frequent/recent distinct meals (excluding pinned) for the quick-relog strip
+  const quickChips=(()=>{
+    const counts={}, latest={};
+    Object.entries(allFood).forEach(([dk,list])=>{
+      (list||[]).forEach(e=>{
+        if(!e.n) return;
+        counts[e.n]=(counts[e.n]||0)+1;
+        if(!latest[e.n]||dk>latest[e.n].dk) latest[e.n]={dk,e};
+      });
+    });
+    const pinnedNames=new Set(pinned.map(p=>p.n));
+    return Object.keys(counts).filter(n=>!pinnedNames.has(n))
+      .sort((a,b)=>counts[b]-counts[a]||latest[b].dk.localeCompare(latest[a].dk))
+      .slice(0,6).map(n=>latest[n].e);
+  })();
+
+  // SCOPED re-estimate: ONE ingredient only — never the whole meal.
+  // Used when a descriptor/unit changed or a new ingredient is added.
+  async function estimateSingleItem(descriptor, qty, unit){
+    const prompt=`Estimate macros for this single food item. For Israeli foods or brands use accurate Israeli nutritional values. Do not overestimate protein.${(profileData?.food_sensitivities||[]).length?` User's dietary profile: ${profileData.food_sensitivities.join(", ")} — resolve ambiguity consistently with it.`:""}
+Return ONLY strict JSON, no prose:
+{"name": "cleaned item name with any stated details", "qty": number, "unit": "g|ml|piece|tbsp|cup|slice", "p": number, "c": number, "f": number, "k": number}
+All macro values are integers for the stated quantity.
+Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:300,messages:[{role:"user",content:prompt}]})
+    });
+    const d=await res.json();
+    if(d.error) throw new Error(d.error.message);
+    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
+  }
+
+  async function reestimateRow(ii){
+    if(IS_DEMO){ showDemoToast(); return; }
+    if(!apiKey||rowBusy!==null) return;
+    const item=editEntry.parsed_items[ii];
+    setRowBusy(ii); setRowError("");
+    try{
+      const fresh=await estimateSingleItem(item.name, item.qty, item.unit);
+      const updated={name:fresh.name||item.name, qty:fresh.qty??item.qty, unit:fresh.unit||item.unit||"",
+        p:fresh.p||0, c:fresh.c||0, f:fresh.f||0, k:fresh.k||0, src:"ai_estimate"};
+      const newItems=[...editEntry.parsed_items]; newItems[ii]=updated;
+      setEditEntry(p=>({...p,parsed_items:newItems}));
+    }catch(e){ setRowError("Couldn't re-estimate — kept the previous values. "+e.message.slice(0,60)); }
+    setRowBusy(null);
+  }
+
+  async function addIngredient(){
+    if(IS_DEMO){ showDemoToast(); return; }
+    const txt=newIngText.trim();
+    if(!txt||!apiKey||rowBusy!==null) return;
+    setRowBusy("add"); setRowError("");
+    try{
+      const fresh=await estimateSingleItem(txt, null, null);
+      const item={name:fresh.name||txt, qty:fresh.qty||1, unit:fresh.unit||"", p:fresh.p||0, c:fresh.c||0, f:fresh.f||0, k:fresh.k||0, src:"ai_estimate"};
+      setEditEntry(p=>({...p,parsed_items:[...(p.parsed_items||[]),item]}));
+      setNewIngText("");
+    }catch(e){ setRowError("Couldn't estimate that item. "+e.message.slice(0,60)); }
+    setRowBusy(null);
+  }
+
   // Re-run the AI nutrition analysis on the edited free-text description and
   // replace name/items/macros with the fresh result (same prompt as analyseText)
   async function reanalyseEdit(){
@@ -2889,7 +2996,7 @@ Input: ${txtInput}`;
       entry.eaten_time = eatenTime;
       entry.time = eatenTime; // keep for display compat
       entry.source = "estimated";
-      entry.parsed_items = entry.parsed_items || null;
+      entry.parsed_items = entry.parsed_items ? entry.parsed_items.map(i=>({...i,src:"ai_estimate"})) : null;
       const targetDate = mealDate || foodDate;
       let saveErr = null;
       // Try full payload first, then fall back to core columns if schema mismatch
@@ -3000,6 +3107,21 @@ Input: ${txtInput}`;
 
       {aiMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginBottom:10}}>{aiMsg}</div>}
 
+      {/* QUICK RE-LOG — zero-API repeat of already-estimated meals */}
+      {(quickChips.length>0||pinned.length>0||(allFood[tkey(new Date(Date.now()-864e5))]||[]).length>0)&&(
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:6,marginBottom:8,WebkitOverflowScrolling:"touch"}}>
+          {(allFood[tkey(new Date(Date.now()-864e5))]||[]).length>0&&(
+            <button onClick={repeatYesterday} style={{...s.btn("p"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>↩ Repeat yesterday</button>
+          )}
+          {pinned.map(p=>(
+            <button key={"pin"+p.n} onClick={()=>cloneEntryTo(p,foodDate)} style={{...s.btn("s"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0,color:C.am}}>★ {p.n}</button>
+          ))}
+          {quickChips.map(e=>(
+            <button key={"chip"+e.n} onClick={()=>cloneEntryTo(e,foodDate)} style={{...s.btn("s"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{e.n}</button>
+          ))}
+        </div>
+      )}
+
       <button onClick={()=>{setMealDate(foodDate);setEatenTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
         📝 Log a meal
       </button>
@@ -3026,8 +3148,9 @@ Input: ${txtInput}`;
                   <span style={{...s.pill(C.s2,C.t2),fontSize:10}}>{Math.round(e.f||0)}g F</span>
                 </div>
               </div>
-              <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                <button onClick={()=>{setEditIdx(i);setEditEntry({n:e.n,p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0),parsed_items:e.parsed_items?JSON.parse(JSON.stringify(e.parsed_items)):null});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
+              <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"center"}}>
+                <button onClick={()=>togglePin(e)} title={pinned.some(p=>p.n===e.n)?"Unpin":"Pin for quick re-log"} style={{background:"none",border:"none",color:pinned.some(p=>p.n===e.n)?C.am:C.t3,cursor:"pointer",fontSize:13,lineHeight:1}}>{pinned.some(p=>p.n===e.n)?"★":"☆"}</button>
+                <button onClick={()=>{setEditIdx(i);setRowError("");setNewIngText("");setEditEntry({n:e.n,det:e.det||"",p:Math.round(e.p||0),c:Math.round(e.c||0),f:Math.round(e.f||0),k:Math.round(e.k||0),parsed_items:e.parsed_items?JSON.parse(JSON.stringify(e.parsed_items)):null});}} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:11}}>edit</button>
                 <button onClick={()=>delFood(i)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
               </div>
             </div>
@@ -3070,58 +3193,95 @@ Input: ${txtInput}`;
             <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
               <h3 style={{marginBottom:4,fontSize:16,fontWeight:600}}>Edit meal</h3>
               <input value={editEntry.n||""} onChange={e=>setEditEntry(p=>({...p,n:e.target.value}))} style={{...s.input,marginBottom:12}}/>
-              <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>What you ate (edit and re-analyse to recalculate macros)</label>
-              <textarea value={editEntry.det||""} onChange={e=>setEditEntry(p=>({...p,det:e.target.value}))} rows={3} style={{...s.input,marginBottom:6,resize:"vertical",fontFamily:"inherit"}}/>
-              <button onClick={reanalyseEdit} disabled={reanalysing||!(editEntry.det||"").trim()} style={{...s.btn("s"),...s.btnSm,marginBottom:12,opacity:reanalysing?.6:1}}>
-                {reanalysing?<><Spinner/>Re-analysing...</>:"🔄 Re-analyse macros from text"}
-              </button>
               {hasParsed ? (
                 <>
-                  <div style={{fontSize:11,color:C.t3,marginBottom:6}}>Tap a quantity to edit. Macros recalculate proportionally.</div>
-                  {editEntry.parsed_items.map((item,ii)=>(
-                    <div key={ii} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0",borderBottom:`.5px solid ${C.bd}`,fontSize:12}}>
-                      <span style={{flex:"0 0 110px",color:C.tx,fontSize:11}}>{item.name}</span>
-                      <input type="number" value={item.qty} onChange={e=>{
-                        const newQty = parseFloat(e.target.value)||0;
-                        const ratio = item._origQty ? newQty/item._origQty : newQty/(item.qty||1);
-                        const orig = item._orig || item;
-                        const updated = {...item, qty:newQty, _orig:orig, _origQty:item._origQty||item.qty,
-                          p:Math.round(orig.p*newQty/(item._origQty||item.qty)*10)/10,
-                          c:Math.round(orig.c*newQty/(item._origQty||item.qty)*10)/10,
-                          f:Math.round(orig.f*newQty/(item._origQty||item.qty)*10)/10,
-                          k:Math.round(orig.k*newQty/(item._origQty||item.qty))};
-                        const newItems=[...editEntry.parsed_items];newItems[ii]=updated;
-                        setEditEntry(p=>({...p,parsed_items:newItems}));
-                      }} style={{...s.input,width:54,padding:"4px 6px",textAlign:"center"}}/>
-                      <span style={{flex:"0 0 28px",color:C.t3,fontSize:10}}>{item.unit}</span>
-                      <span style={{fontSize:10,color:C.am,whiteSpace:"nowrap"}}>P:{Math.round(item.p)} C:{Math.round(item.c)} F:{Math.round(item.f)}</span>
-                      <button onClick={()=>{const ni=editEntry.parsed_items.filter((_,j)=>j!==ii);setEditEntry(p=>({...p,parsed_items:ni}));}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>
+                  <div style={{fontSize:11,color:C.t3,marginBottom:6}}>Quantity changes recalculate instantly. Editing the text of an item shows ↻ — tap it to re-estimate that item.</div>
+                  {editEntry.parsed_items.map((item,ii)=>{
+                    // Dirty = descriptor or unit changed vs snapshot -> needs scoped re-estimate.
+                    // Quantity-only changes scale locally and never hit the API.
+                    const dirty=(item._oname!==undefined&&item.name!==item._oname)||(item._ounit!==undefined&&(item.unit||"")!==item._ounit);
+                    const busy=rowBusy===ii;
+                    const setQty=(newQty)=>{
+                      if(newQty<0) newQty=0;
+                      const orig=item._orig||item;
+                      const base=item._origQty||item.qty||1;
+                      const updated={...item,qty:newQty,_orig:orig,_origQty:base,src:"user_edited",
+                        p:Math.round((orig.p||0)*newQty/base*10)/10,
+                        c:Math.round((orig.c||0)*newQty/base*10)/10,
+                        f:Math.round((orig.f||0)*newQty/base*10)/10,
+                        k:Math.round((orig.k||0)*newQty/base)};
+                      const newItems=[...editEntry.parsed_items];newItems[ii]=updated;
+                      setEditEntry(p=>({...p,parsed_items:newItems}));
+                    };
+                    return (
+                    <div key={ii} style={{padding:"8px 0",borderBottom:`.5px solid ${C.bd}`}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                        <input value={item.name} onChange={e=>{
+                          const v=e.target.value;
+                          const newItems=[...editEntry.parsed_items];
+                          newItems[ii]={...item,name:v,_oname:item._oname!==undefined?item._oname:item.name,_ounit:item._ounit!==undefined?item._ounit:(item.unit||"")};
+                          setEditEntry(p=>({...p,parsed_items:newItems}));
+                        }} style={{...s.input,flex:1,padding:"5px 8px",fontSize:12}}/>
+                        {dirty&&<button disabled={busy} onClick={()=>reestimateRow(ii)} title="Re-estimate this item" style={{...s.btn("p"),...s.btnSm,fontSize:11,padding:"4px 10px",opacity:busy?.6:1}}>{busy?"...":"↻"}</button>}
+                        <button onClick={()=>{const ni=editEntry.parsed_items.filter((_,j)=>j!==ii);setEditEntry(p=>({...p,parsed_items:ni}));}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        {(()=>{const step=/^(g|gr|gram|grams|ml)$/.test((item.unit||"").trim().toLowerCase())?10:1;return (<>
+                        <button onClick={()=>setQty(Math.max(0,(parseFloat(item.qty)||0)-step))} style={{...s.btn("s"),padding:"3px 10px",fontSize:13}}>−</button>
+                        <input type="number" value={item.qty} onChange={e=>setQty(parseFloat(e.target.value)||0)} style={{...s.input,width:64,padding:"4px 6px",textAlign:"center"}}/>
+                        <button onClick={()=>setQty((parseFloat(item.qty)||0)+step)} style={{...s.btn("s"),padding:"3px 10px",fontSize:13}}>+</button>
+                        </>);})()}
+                        <span style={{flex:"0 0 30px",color:C.t3,fontSize:10}}>{item.unit}</span>
+                        <span style={{marginLeft:"auto",fontSize:10,color:dirty?C.t3:C.am,whiteSpace:"nowrap",fontStyle:dirty?"italic":"normal"}}>{dirty?"stale — tap ↻":`${Math.round(item.k||0)}kcal · P:${Math.round(item.p)} C:${Math.round(item.c)} F:${Math.round(item.f)}`}</span>
+                      </div>
                     </div>
-                  ))}
+                  );})}
+                  {/* + ADD INGREDIENT */}
+                  <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 0"}}>
+                    <input value={newIngText} onChange={e=>setNewIngText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addIngredient();}} placeholder="+ add ingredient — e.g. cucumber, 1 slice bread, 30g feta" style={{...s.input,flex:1,padding:"5px 8px",fontSize:12}}/>
+                    <button disabled={!newIngText.trim()||rowBusy==="add"} onClick={addIngredient} style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:newIngText.trim()?1:.5}}>{rowBusy==="add"?"...":"Add"}</button>
+                  </div>
+                  {rowError&&<div style={{fontSize:11,color:C.red,marginBottom:4}}>{rowError}</div>}
                   <div style={{display:"flex",justifyContent:"flex-end",gap:10,padding:"6px 0",fontSize:12,fontWeight:600,color:C.t2,borderTop:`.5px solid ${C.bd}`,marginTop:4}}>
                     <span>P:{Math.round(totP)}</span><span>C:{Math.round(totC)}</span><span>F:{Math.round(totF)}</span><span style={{color:C.tx}}>{Math.round(totK)} kcal</span>
                   </div>
                 </>
               ) : (
-                <div style={{display:"flex",gap:8,marginBottom:4}}>
-                  {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
-                    <div key={k} style={{flex:1}}>
-                      <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
-                      <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  {/* Fallback for old meals without structured items: free text + full re-analyse */}
+                  <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>What you ate (edit and re-analyse to recalculate macros)</label>
+                  <textarea value={editEntry.det||""} onChange={e=>setEditEntry(p=>({...p,det:e.target.value}))} rows={3} style={{...s.input,marginBottom:6,resize:"vertical",fontFamily:"inherit"}}/>
+                  <button onClick={reanalyseEdit} disabled={reanalysing||!(editEntry.det||"").trim()} style={{...s.btn("s"),...s.btnSm,marginBottom:12,opacity:reanalysing?.6:1}}>
+                    {reanalysing?<><Spinner/>Re-analysing...</>:"🔄 Re-analyse macros from text"}
+                  </button>
+                  <div style={{display:"flex",gap:8,marginBottom:4}}>
+                    {[["Protein (g)","p"],["Carbs (g)","c"],["Fat (g)","f"]].map(([l,k])=>(
+                      <div key={k} style={{flex:1}}>
+                        <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>{l}</label>
+                        <input type="number" value={editEntry[k]||0} onChange={e=>setEditEntry(p=>({...p,[k]:e.target.value}))} style={s.input}/>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
               <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
                 <button onClick={()=>setEditIdx(null)} style={s.btn("s")}>Cancel</button>
                 <button onClick={async()=>{
                   const hasParsedSave=(editEntry.parsed_items||[]).length>0;
+                  // Guardrail: a text-edited row must be re-estimated before saving —
+                  // its macros describe the OLD descriptor and must never be persisted.
+                  if(hasParsedSave&&editEntry.parsed_items.some(it=>(it._oname!==undefined&&it.name!==it._oname)||(it._ounit!==undefined&&(it.unit||"")!==it._ounit))){
+                    setRowError("An edited item needs re-estimating (tap ↻) before saving — its macros are stale.");
+                    return;
+                  }
+                  // Totals are always derived from the rows — never trusted independently
                   const newP=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.p||0),0)):parseFloat(editEntry.p)||0;
                   const newC=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.c||0),0)):parseFloat(editEntry.c)||0;
                   const newF=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.f||0),0)):parseFloat(editEntry.f)||0;
                   const newK=hasParsedSave?Math.round(editEntry.parsed_items.reduce((s,i)=>s+(i.k||0),0)):Math.round(newP*4+newC*4+newF*9);
-                  const cleanItems=hasParsedSave?editEntry.parsed_items.map(({_orig,_origQty,...rest})=>rest):null;
-                  const updated={...food[editIdx],n:editEntry.n,det:editEntry.det||food[editIdx].det,p:newP,c:newC,f:newF,k:newK,parsed_items:cleanItems};
+                  const cleanItems=hasParsedSave?editEntry.parsed_items.map(it=>Object.fromEntries(Object.entries(it).filter(([k2])=>!k2.startsWith("_")))):null;
+                  const newDet=hasParsedSave?cleanItems.map(i2=>`${i2.name}${i2.qty?` (${i2.qty}${i2.unit||""})`:""}`).join(", "):(editEntry.det||food[editIdx].det);
+                  const updated={...food[editIdx],n:editEntry.n,det:newDet,p:newP,c:newC,f:newF,k:newK,parsed_items:cleanItems};
                   if(updated.dbid){try{await supa("PATCH","food_log",{name:updated.n,detail:updated.det||null,protein:newP,carbs:newC,fat:newF,kcal:newK,parsed_items:cleanItems?JSON.stringify(cleanItems):null},"id=eq."+updated.dbid);}catch(e){}}
                   setAllFood(prev=>{
                     const next={...prev,[foodDate]:prev[foodDate].map((e,i)=>i===editIdx?updated:e)};
