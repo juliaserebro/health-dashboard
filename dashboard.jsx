@@ -2848,7 +2848,8 @@ Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
 
   async function reestimateRow(ii){
     if(IS_DEMO){ showDemoToast(); return; }
-    if(!apiKey||rowBusy!==null) return;
+    if(rowBusy!==null) return;
+    if(!apiKey){ setRowError("Add your API key in Settings to re-estimate this item."); return; }
     const item=editEntry.parsed_items[ii];
     setRowBusy(ii); setRowError("");
     try{
@@ -2864,7 +2865,8 @@ Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
   async function addIngredient(){
     if(IS_DEMO){ showDemoToast(); return; }
     const txt=newIngText.trim();
-    if(!txt||!apiKey||rowBusy!==null) return;
+    if(!txt||rowBusy!==null) return;
+    if(!apiKey){ setRowError("Add your API key in Settings to estimate ingredients."); return; }
     setRowBusy("add"); setRowError("");
     try{
       const fresh=await estimateSingleItem(txt, null, null);
@@ -2880,7 +2882,8 @@ Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
   async function reanalyseEdit(){
     if(IS_DEMO){ showDemoToast(); return; }
     const txt=(editEntry.det||"").trim();
-    if(!txt||!apiKey||reanalysing) return;
+    if(!txt||reanalysing) return;
+    if(!apiKey){ setAiMsg("⚠️ Add your API key in Settings to re-analyse."); return; }
     setReanalysing(true);
     try{
       const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
@@ -2942,7 +2945,8 @@ Input: ${txt}`;
 
   async function analyseText() {
     if(IS_DEMO){ showDemoToast(); return; }
-    if(!txtInput.trim()||!apiKey) return;
+    if(!txtInput.trim()) return;
+    if(!apiKey){ setAiMsg("⚠️ Add your Anthropic API key in ⚙ Settings to analyse meals — this device doesn't have it yet."); return; }
     setAnalysing(true); setAiMsg("Analysing meal...");
     try {
       const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
@@ -3154,6 +3158,8 @@ Input: ${txtInput}`;
               <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>When did you eat this?</label><input type="time" value={eatenTime} onChange={e=>setEatenTime(e.target.value)} style={s.input}/></div>
             </div>
             <textarea value={txtInput} onChange={e=>setTxtInput(e.target.value)} placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style={{...s.input,resize:"vertical",minHeight:72,marginBottom:16}}/>
+            {!apiKey&&<div style={{fontSize:12,color:C.am,marginBottom:12,lineHeight:1.5}}>⚠️ No API key on this device yet — open ⚙ Settings and paste your Anthropic key to enable meal analysis.</div>}
+            {aiMsg&&aiMsg.startsWith("⚠️")&&<div style={{fontSize:12,color:C.red,marginBottom:12,lineHeight:1.5}}>{aiMsg}</div>}
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowTxt(false)} style={s.btn("s")}>Cancel</button>
               <button onClick={analyseText} disabled={analysing||!txtInput.trim()} style={{...s.btn("p"),opacity:analysing||!txtInput.trim()?.6:1}}>{analysing?"Analysing...":"Analyse"}</button>

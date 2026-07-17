@@ -5649,7 +5649,11 @@ Item: ${descriptor}${qty ? ` — ${qty}${unit || ""}` : ""}`;
       showDemoToast();
       return;
     }
-    if (!apiKey || rowBusy !== null) return;
+    if (rowBusy !== null) return;
+    if (!apiKey) {
+      setRowError("Add your API key in Settings to re-estimate this item.");
+      return;
+    }
     const item = editEntry.parsed_items[ii];
     setRowBusy(ii);
     setRowError("");
@@ -5682,7 +5686,11 @@ Item: ${descriptor}${qty ? ` — ${qty}${unit || ""}` : ""}`;
       return;
     }
     const txt = newIngText.trim();
-    if (!txt || !apiKey || rowBusy !== null) return;
+    if (!txt || rowBusy !== null) return;
+    if (!apiKey) {
+      setRowError("Add your API key in Settings to estimate ingredients.");
+      return;
+    }
     setRowBusy("add");
     setRowError("");
     try {
@@ -5716,7 +5724,11 @@ Item: ${descriptor}${qty ? ` — ${qty}${unit || ""}` : ""}`;
       return;
     }
     const txt = (editEntry.det || "").trim();
-    if (!txt || !apiKey || reanalysing) return;
+    if (!txt || reanalysing) return;
+    if (!apiKey) {
+      setAiMsg("⚠️ Add your API key in Settings to re-analyse.");
+      return;
+    }
     setReanalysing(true);
     try {
       const prompt = `You are a precise nutrition analyst. Analyse this food log entry and return ONLY valid JSON.
@@ -5811,7 +5823,11 @@ Input: ${txt}`;
       showDemoToast();
       return;
     }
-    if (!txtInput.trim() || !apiKey) return;
+    if (!txtInput.trim()) return;
+    if (!apiKey) {
+      setAiMsg("⚠️ Add your Anthropic API key in ⚙ Settings to analyse meals — this device doesn't have it yet.");
+      return;
+    }
     setAnalysing(true);
     setAiMsg("Analysing meal...");
     try {
@@ -6370,7 +6386,21 @@ Input: ${txtInput}`;
       minHeight: 72,
       marginBottom: 16
     }
-  }), /*#__PURE__*/React.createElement("div", {
+  }), !apiKey && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.am,
+      marginBottom: 12,
+      lineHeight: 1.5
+    }
+  }, "\u26A0\uFE0F No API key on this device yet \u2014 open \u2699 Settings and paste your Anthropic key to enable meal analysis."), aiMsg && aiMsg.startsWith("⚠️") && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.red,
+      marginBottom: 12,
+      lineHeight: 1.5
+    }
+  }, aiMsg), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,

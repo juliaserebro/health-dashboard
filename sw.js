@@ -3,7 +3,7 @@
 // the app must never show stale data.
 // CACHE_VERSION is rewritten by build.py on every build so old caches purge
 // and new code takes effect without manual cache clears.
-const CACHE_VERSION = "hc-20260717-165057"; // <-- build.py stamps this
+const CACHE_VERSION = "hc-20260717-214549"; // <-- build.py stamps this
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 
 // Relative paths — the app lives under /health-dashboard/ on GitHub Pages
@@ -64,19 +64,18 @@ self.addEventListener("fetch", (e) => {
   // Live data & auth: bypass the cache entirely.
   if (NETWORK_ONLY_HOSTS.includes(url.host)) return;
 
-  // Navigations: serve the cached shell instantly, refresh it in the background.
+  // Navigations: NETWORK-FIRST so a fresh deploy loads immediately; fall back to
+  // the cached shell only when offline. (Cache-first left the installed app a
+  // version behind until the next relaunch.)
   if (req.mode === "navigate") {
     e.respondWith(
-      caches.match("./index.html").then((cached) => {
-        const fresh = fetch(req).then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(SHELL_CACHE).then((c) => c.put("./index.html", copy));
-          }
-          return res;
-        }).catch(() => cached);
-        return cached || fresh;
-      })
+      fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(SHELL_CACHE).then((c) => c.put("./index.html", copy));
+        }
+        return res;
+      }).catch(() => caches.match("./index.html"))
     );
     return;
   }
