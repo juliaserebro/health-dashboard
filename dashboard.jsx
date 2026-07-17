@@ -24,9 +24,24 @@ const resolveUser = () => {
   // always shows the demo.
   try{ localStorage.removeItem("owner_mode"); }catch(e){} // migrate away from old device-wide flag
   if (params.get("u") === OWNER_KEY) {
-    try{ sessionStorage.setItem("owner_mode", OWNER_KEY); }catch(e){}
+    try{
+      sessionStorage.setItem("owner_mode", OWNER_KEY);
+      // Also remember for the INSTALLED app: a home-screen PWA launches at the
+      // bare start_url in a fresh session, so standalone mode (below) falls back
+      // to this device flag. Browser tabs keep ignoring it — plain URL = demo.
+      localStorage.setItem("owner_device", OWNER_KEY);
+    }catch(e){}
     return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
   }
+  // Installed PWA (standalone display mode): trust the device flag set the
+  // last time the private link was opened, since start_url can't carry ?u=.
+  try{
+    const standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+    if (standalone && localStorage.getItem("owner_device") === OWNER_KEY) {
+      sessionStorage.setItem("owner_mode", OWNER_KEY);
+      return { uid: "00000000-0000-0000-0000-000000000001", isDemo: false };
+    }
+  }catch(e){}
   // A Google OAuth callback (token or oauth error in the URL hash) can ONLY come
   // from an owner sync — demo hides Sync entirely. Google returns to the bare
   // redirect URI (no ?u=), and on a PWA / new-tab return sessionStorage may be
@@ -4934,6 +4949,19 @@ export default function App() {
       {IS_DEMO&&<div style={{background:"linear-gradient(90deg,#eeedf8,#e0f4ed)",color:"#4a42b0",fontSize:12,textAlign:"center",padding:"8px 14px",fontWeight:500,borderRadius:10,marginBottom:14,border:"1px solid rgba(74,66,176,.15)"}}>
         👋 You're exploring a live demo of Health Coach — all data belongs to Maya, a sample user.
       </div>}
+      {(()=>{
+        // One-time iOS "Add to Home Screen" hint (iOS has no install prompt)
+        const isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent);
+        const standalone=(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches)||window.navigator.standalone===true;
+        let dismissed=false; try{dismissed=!!localStorage.getItem("a2hs_dismissed");}catch(e){}
+        if(!isIOS||standalone||dismissed) return null;
+        return (
+          <div style={{background:C.sf,border:`1px solid ${C.bd}`,borderRadius:10,padding:"9px 14px",marginBottom:14,fontSize:12,color:C.t2,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{flex:1}}>📲 Install this app: tap <strong>Share</strong> then <strong>Add to Home Screen</strong> — it launches full-screen like a native app.</span>
+            <button onClick={e=>{try{localStorage.setItem("a2hs_dismissed","1");}catch(ex){}e.target.closest("div").style.display="none";}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:15}}>×</button>
+          </div>
+        );
+      })()}
       {isViewOnly&&<div style={{background:"#e8f4fd",color:"#1a6896",fontSize:11,textAlign:"center",padding:"6px 12px",fontWeight:500,borderBottom:"1px solid #b8d9ee"}}>
         View-only mode — showing last synced data &nbsp;|&nbsp; <a href={window.location.pathname} style={{color:"#1a6896"}}>Open full app</a>
       </div>}
