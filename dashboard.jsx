@@ -4506,6 +4506,7 @@ export default function App() {
   const [settWeekStart, setSettWeekStart] = useState("sunday");
   const [unlockKey, setUnlockKey] = useState("");
   const [unlockMsg, setUnlockMsg] = useState("");
+  const [settErr, setSettErr] = useState("");
   const [aiRefreshTick, setAiRefreshTick] = useState(0);
 
   // Keep Settings modal protein field in sync once profile loads
@@ -4874,9 +4875,21 @@ export default function App() {
 
   async function saveSett(){
     if(IS_DEMO){ showDemoToast(); setShowSett(false); return; }
-    localStorage.setItem("jkey",settKey);
-    setApiKey(settKey);
-    try{await supa("POST","settings",{user_id:UID,anthropic_key:settKey},"on_conflict=user_id");}catch(e){}
+    // Sanitize + validate the API key: whitespace stripped; anything that
+    // doesn't look like an Anthropic key is rejected loudly, never saved
+    // silently (a pasted meal description once ended up here).
+    const cleanKey=(settKey||"").replace(/\s+/g,"");
+    if(cleanKey&&!cleanKey.startsWith("sk-ant-")){
+      setSettErr("That doesn't look like an Anthropic API key (should start with sk-ant-). Not saved — check your clipboard.");
+      return;
+    }
+    setSettErr("");
+    setSettKey(cleanKey);
+    if(cleanKey){
+      localStorage.setItem("jkey",cleanKey);
+      setApiKey(cleanKey);
+      try{await supa("POST","settings",{user_id:UID,anthropic_key:cleanKey},"on_conflict=user_id");}catch(e){}
+    }
     try{
       await supa("POST","profiles",{uid:UID,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart},"on_conflict=uid");
       setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart}));
@@ -5090,8 +5103,9 @@ export default function App() {
               </div>
             )}
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Anthropic API key</label>
-            <input type="password" value={settKey} onChange={e=>setSettKey(e.target.value)} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
-            <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Stored locally in your browser only.</p>
+            <input type="password" value={settKey} onChange={e=>{setSettKey(e.target.value);setSettErr("");}} placeholder="sk-ant-api03-..." style={{...s.input,marginBottom:4,fontFamily:"monospace",fontSize:12}}/>
+            {settErr&&<p style={{fontSize:11,color:C.red,marginBottom:6}}>{settErr}</p>}
+            <p style={{fontSize:11,color:C.t3,marginBottom:14}}>{settKey?`Current key: ${settKey.slice(0,10)}…${settKey.slice(-4)}`:"No key set on this device."} Synced to your account so all devices share it.</p>
             <label style={{fontSize:12,fontWeight:500,color:C.t2,display:"block",marginBottom:4}}>Timezone</label>
             <input value={settTimezone} onChange={e=>setSettTimezone(e.target.value)} placeholder="e.g. Asia/Jerusalem" style={{...s.input,marginBottom:4}}/>
             <p style={{fontSize:11,color:C.t3,marginBottom:14}}>Controls all date/time calculations in the app.</p>
