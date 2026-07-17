@@ -4551,7 +4551,19 @@ export default function App() {
       let legacyProt = parseInt(localStorage.getItem("jprot")||"100")||100;
       if(!IS_DEMO){ // demo never loads an API key — zero AI calls in demo
         try{
-          const rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
+          let rows=await supa("GET","settings",null,"user_id=eq."+UID+"&select=*");
+          // Legacy fallback: the key may be stored under the old "julia" user_id.
+          // Critical for the installed PWA, which has no localStorage jkey to fall back on.
+          if((!rows||!rows.length||!rows[0].anthropic_key)){
+            try{
+              const legacy=await supa("GET","settings",null,"user_id=eq.julia&select=*");
+              if(legacy&&legacy.length&&legacy[0].anthropic_key){
+                rows=legacy;
+                // Re-save under the current UID so future loads find it directly
+                supa("POST","settings",{user_id:UID,anthropic_key:legacy[0].anthropic_key},"on_conflict=user_id").catch(()=>{});
+              }
+            }catch(e){}
+          }
           if(rows&&rows.length){
             if(rows[0].anthropic_key){setApiKey(rows[0].anthropic_key);localStorage.setItem("jkey",rows[0].anthropic_key);}
             if(rows[0].protein_target){legacyProt=rows[0].protein_target;localStorage.setItem("jprot",String(rows[0].protein_target));}
