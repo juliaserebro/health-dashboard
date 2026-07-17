@@ -26,11 +26,11 @@ def draw_logo(size, maskable=False):
     if not maskable:
         d.rounded_rectangle([0, 0, W - 1, W - 1], radius=int(W * 0.22), fill=CREAM)
     # Content scale: maskable needs a ~20% safe zone
-    s = 0.66 if maskable else 0.80
+    s = 0.80 if maskable else 1.0
     cx = cy = W / 2
-    Rorbit = W * 0.335 * s          # node orbit radius
-    rnode = W * 0.105 * s           # node radius
-    Rcentre = W * 0.20 * s          # centre circle radius
+    Rorbit = W * 0.36 * s           # node orbit radius
+    rnode = W * 0.125 * s           # node radius
+    Rcentre = W * 0.215 * s         # centre circle radius
     lw = max(2, int(W * 0.004))
 
     # Web: orbit circle + node-to-node chords + spokes to centre
