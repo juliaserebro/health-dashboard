@@ -1,58 +1,59 @@
-# Generates the PWA icon set: icon-192.png, icon-512.png, icon-512-maskable.png,
-# apple-touch-icon.png (180). Brand: cream bg, italic serif "HC", purple->teal bar.
-from PIL import Image, ImageDraw, ImageFont
-import os
+# Generates the PWA icon set from the Health Coach logo design:
+# cream bg, thin connecting web, six colored nodes, white centre with green ring.
+# (Text-free version of the full logo — legible at small sizes.)
+# Outputs: icon-192.png, icon-512.png, icon-512-maskable.png, apple-touch-icon.png
+from PIL import Image, ImageDraw
+import math, os
 
 OUT = os.path.join(os.path.dirname(__file__), "..")
-CREAM, INK, PURPLE, TEAL = "#f5f4f0", "#1a1917", "#4a42b0", "#0f7b5f"
+CREAM = (245, 244, 240)
+LINE = (176, 174, 168)
+RING = (90, 125, 79)      # green ring
+NODES = [                  # clockwise from top, sampled from the logo
+    (224, 168, 63),        # amber (nutrition)
+    (123, 42, 98),         # plum (training)
+    (139, 163, 189),       # blue-grey (sleep)
+    (217, 125, 146),       # rose (cycle)
+    (191, 91, 50),         # terracotta (log)
+    (155, 139, 184),       # lavender (supplements)
+]
 
-def lerp(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
-
-def hx(c):
-    c = c.lstrip("#")
-    return tuple(int(c[i:i+2], 16) for i in (0, 2, 4))
-
-def make(size, maskable=False, radius_pct=0.22):
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+def draw_logo(size, maskable=False):
+    S = 4  # supersample for antialiasing
+    W = size * S
+    img = Image.new("RGBA", (W, W), CREAM if maskable else (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    # Maskable: full-bleed square (OS applies its own mask, needs 20% safe zone).
-    # Regular: rounded rect on transparent.
-    if maskable:
-        d.rectangle([0, 0, size, size], fill=CREAM)
-    else:
-        d.rounded_rectangle([0, 0, size - 1, size - 1], radius=int(size * radius_pct), fill=CREAM)
-    # Content scale: shrink into the safe zone for maskable
-    s = 0.72 if maskable else 0.92
-    cx = size / 2
-    # "HC" in italic Georgia
-    fsize = int(size * 0.42 * s)
-    font = None
-    for path in [r"C:\Windows\Fonts\georgiai.ttf", r"C:\Windows\Fonts\georgia.ttf",
-                 "/System/Library/Fonts/Supplemental/Georgia Italic.ttf"]:
-        if os.path.exists(path):
-            font = ImageFont.truetype(path, fsize)
-            break
-    if font is None:
-        font = ImageFont.load_default(fsize)
-    bbox = d.textbbox((0, 0), "HC", font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    ty = size * 0.44 - th / 2 - bbox[1]
-    d.text((cx - tw / 2 - bbox[0], ty), "HC", font=font, fill=INK)
-    # Gradient bar under the text
-    bar_w, bar_h = int(size * 0.46 * s), max(3, int(size * 0.045))
-    bx, by = int(cx - bar_w / 2), int(size * 0.66)
-    p, t2 = hx(PURPLE), hx(TEAL)
-    for i in range(bar_w):
-        col = lerp(p, t2, i / bar_w)
-        d.rectangle([bx + i, by, bx + i + 1, by + bar_h], fill=col + (255,))
-    return img
+    if not maskable:
+        d.rounded_rectangle([0, 0, W - 1, W - 1], radius=int(W * 0.22), fill=CREAM)
+    # Content scale: maskable needs a ~20% safe zone
+    s = 0.66 if maskable else 0.80
+    cx = cy = W / 2
+    Rorbit = W * 0.335 * s          # node orbit radius
+    rnode = W * 0.105 * s           # node radius
+    Rcentre = W * 0.20 * s          # centre circle radius
+    lw = max(2, int(W * 0.004))
 
-make(192).save(os.path.join(OUT, "icon-192.png"))
-make(512).save(os.path.join(OUT, "icon-512.png"))
-make(512, maskable=True).save(os.path.join(OUT, "icon-512-maskable.png"))
-# apple-touch-icon: no transparency, iOS rounds it itself
-apple = Image.new("RGB", (180, 180), CREAM)
-apple.paste(make(180, maskable=True).convert("RGB"), (0, 0))
-apple.save(os.path.join(OUT, "apple-touch-icon.png"))
+    # Web: orbit circle + node-to-node chords + spokes to centre
+    pts = []
+    for i in range(6):
+        a = -math.pi / 2 + i * math.pi / 3
+        pts.append((cx + Rorbit * math.cos(a), cy + Rorbit * math.sin(a)))
+    d.ellipse([cx - Rorbit, cy - Rorbit, cx + Rorbit, cy + Rorbit], outline=LINE, width=lw)
+    for i in range(6):
+        for j in range(i + 1, 6):
+            d.line([pts[i], pts[j]], fill=LINE, width=lw)
+    # Centre: white circle with green ring
+    ringw = max(3, int(W * 0.016))
+    d.ellipse([cx - Rcentre - ringw, cy - Rcentre - ringw, cx + Rcentre + ringw, cy + Rcentre + ringw], fill=RING)
+    d.ellipse([cx - Rcentre, cy - Rcentre, cx + Rcentre, cy + Rcentre], fill=(255, 255, 255))
+    # Nodes on top
+    for (x, y), col in zip(pts, NODES):
+        d.ellipse([x - rnode, y - rnode, x + rnode, y + rnode], fill=col)
+        d.ellipse([x - rnode, y - rnode, x + rnode, y + rnode], outline=(255, 255, 255), width=max(2, int(W * 0.006)))
+    return img.resize((size, size), Image.LANCZOS)
+
+draw_logo(192).save(os.path.join(OUT, "icon-192.png"))
+draw_logo(512).save(os.path.join(OUT, "icon-512.png"))
+draw_logo(512, maskable=True).save(os.path.join(OUT, "icon-512-maskable.png"))
+draw_logo(180, maskable=True).convert("RGB").save(os.path.join(OUT, "apple-touch-icon.png"))
 print("icons written")
