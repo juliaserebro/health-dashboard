@@ -3902,6 +3902,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
   const [editNotes, setEditNotes] = useState(!profileData?.health_notes);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [processingNotes, setProcessingNotes] = useState(false);
   const [savedNotes, setSavedNotes] = useState("");
   const [workoutPlan, setWorkoutPlan] = useState(profileData?.workout_plan||"");
@@ -4103,28 +4104,25 @@ Max 250 words total. No intro, no outro.`}]})});
             </div>
           </>
         ) : (
-          <>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:12}}>
-              {[
-                ["Name", pa.name||"—"],
-                ["Age", calcAge(pa.birth_date) ? calcAge(pa.birth_date)+" years" : "—"],
-                ["Gender", pa.gender ? pa.gender.charAt(0).toUpperCase()+pa.gender.slice(1) : "—"],
-                ["Height", pa.height_cm ? pa.height_cm+" cm" : "—"],
-                ["Weight", pa.weight_kg ? pa.weight_kg+" kg" : "—"],
-                ["Body fat", pa.body_fat_pct ? pa.body_fat_pct+"%" : "—"],
-              ].map(([label,val])=>(
-                <div key={label}>
-                  <div style={{fontSize:10,color:C.t3,marginBottom:1,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{label}</div>
-                  <div style={{fontSize:13,fontWeight:500,color:C.tx}}>{val}</div>
-                </div>
-              ))}
+          /* ── IDENTITY HERO: avatar, name, one stat line — not a form readout ── */
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{width:54,height:54,borderRadius:"50%",background:C.pl,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",fontSize:26,fontWeight:600,color:C.pu}}>
+              {(pa.name||"?").charAt(0).toUpperCase()}
             </div>
-            <button onClick={()=>setEditPersonal(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
-          </>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",fontSize:20,fontWeight:600,letterSpacing:"-.3px"}}>{pa.name||"—"}</div>
+              <div style={{fontSize:12,color:C.t2,marginTop:3}}>
+                {[calcAge(pa.birth_date)?calcAge(pa.birth_date)+" yrs":null, pa.height_cm?pa.height_cm+" cm":null, pa.weight_kg?pa.weight_kg+" kg":null, pa.body_fat_pct?pa.body_fat_pct+"% fat":null].filter(Boolean).join("  ·  ")||"Tap edit to fill in your details"}
+              </div>
+            </div>
+            <button title="Edit personal info" onClick={()=>setEditPersonal(true)} style={{width:34,height:34,borderRadius:"50%",background:C.s2,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2,flexShrink:0}}>
+              <Icon name="log" size={14}/>
+            </button>
+          </div>
         )}
       </Card>
 
-      {/* BMI / BMR calculated tiles */}
+      {/* BMI / BMR — value-first stat tiles; the science lives in the tooltip */}
       {(pa.weight_kg||profileData?.weight_kg)&&(pa.height_cm||profileData?.height_cm)?(()=>{
         const w=parseFloat(pa.weight_kg||profileData?.weight_kg||0);
         const h=parseFloat(pa.height_cm||profileData?.height_cm||1);
@@ -4132,13 +4130,17 @@ Max 250 words total. No intro, no outro.`}]})});
         const bmi=w/(h/100)**2;
         // Mifflin-St Jeor BMR
         const bmr=pa.gender==="female"?(10*w+6.25*h-5*age-161):(10*w+6.25*h-5*age+5);
+        const tiles=[
+          ["BMI",bmi.toFixed(1),"healthy range 18.5–25","Body Mass Index — weight relative to height. Doesn't distinguish muscle from fat."],
+          ["BMR",Math.round(bmr).toLocaleString(),"kcal/day at rest","Basal Metabolic Rate — calories your body burns at rest, before any activity. Your daily calorie floor."],
+        ];
         return (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-            {[["BMI",bmi.toFixed(1)],["BMR",Math.round(bmr)+" kcal/day"]].map(([l,v])=>(
-              <div key={l} style={{background:C.s2,borderRadius:8,padding:12}}>
-                <div style={{fontSize:10,color:C.t3,marginBottom:3}}>{l}</div>
-                <div style={{fontSize:16,fontWeight:600}}>{v}</div>
-                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l==="BMI"?"Body Mass Index — weight relative to height. Doesn't distinguish muscle from fat.":"Basal Metabolic Rate — calories your body burns at rest, before any activity. Your daily calorie floor."}</div>
+            {tiles.map(([l,v,sub,tip])=>(
+              <div key={l} title={tip} style={s.mc}>
+                <div style={s.ml}>{l}</div>
+                <div style={{...s.mv,color:C.sl}}>{v}</div>
+                <div style={{...s.ms,color:C.t3}}>{sub}</div>
               </div>
             ))}
           </div>
@@ -4234,17 +4236,20 @@ Max 250 words total. No intro, no outro.`}]})});
           <>
             {(profileData?.goals||[]).length===0
               ? <div style={{fontSize:13,color:C.t3,marginBottom:10}}>No goals set yet.</div>
-              : (profileData?.goals||[]).map((g,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,fontSize:13}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:C.pu,marginTop:5,flexShrink:0}}/>
-                  <div>
-                    <div style={{fontWeight:500}}>{g.label}</div>
-                    {g.definition&&(()=>{const opt=GOAL_SUBS[g.id]?.options.find(o=>o.id===g.definition);const defLabel=opt?.label||g.definition.replace(/_/g," ");return <div style={{fontSize:11,color:C.t2,marginTop:1}}>{defLabel}{g.target_value?" · target: "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>;})()}
-                  </div>
+              : <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:10}}>
+                  {(profileData?.goals||[]).map((g,i)=>{
+                    const opt=GOAL_SUBS[g.id]?.options.find(o=>o.id===g.definition);
+                    const defLabel=g.definition?(opt?.label||g.definition.replace(/_/g," ")):null;
+                    return (
+                      <div key={i} style={{background:C.pl,borderRadius:12,padding:"9px 13px",maxWidth:"100%"}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.pu}}>{g.label}</div>
+                        {defLabel&&<div style={{fontSize:10.5,color:C.t2,marginTop:2}}>{defLabel}{g.target_value?" · "+g.target_value+(g.target_unit?" "+g.target_unit:""):""}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))
             }
-            <button onClick={()=>setEditGoals(true)} style={{...s.btn("s"),...s.btnSm,marginTop:4}}>Edit goals</button>
+            <button onClick={()=>setEditGoals(true)} style={{...s.btn("s"),...s.btnSm}}>Edit goals</button>
           </>
         )}
       </Card>
@@ -4290,18 +4295,20 @@ Max 250 words total. No intro, no outro.`}]})});
           </>
         ) : (
           <>
-            {["strength","mobility","cardio"].map(k=>{
-              const colors={strength:[C.pu,C.pl],mobility:[C.or,C.orl],cardio:[C.teal,C.tl]};
-              const [col]=colors[k]||[C.t2,C.s2];
-              return (
-                <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:13}}>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:col,flexShrink:0}}/>
-                  <span style={{flex:1,textTransform:"capitalize"}}>{k}</span>
-                  <span style={{fontWeight:600,color:col}}>{targets[k]||0}x/week</span>
-                </div>
-              );
-            })}
-            {(()=>{const tot=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);return <div style={{fontSize:11,color:C.t3,marginTop:4,marginBottom:8}}>{tot} sessions/week = {tot*4} sessions/month</div>;})()}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
+              {["strength","mobility","cardio"].map(k=>{
+                const colors={strength:[C.pu,C.pl],mobility:[C.or,C.orl],cardio:[C.teal,C.tl]};
+                const [col,bg]=colors[k]||[C.t2,C.s2];
+                return (
+                  <div key={k} style={{background:bg,borderRadius:12,padding:"12px 6px",textAlign:"center"}}>
+                    <div style={{fontSize:24,fontWeight:700,color:col,lineHeight:1}}>{targets[k]||0}</div>
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:col,marginTop:4}}>{k}</div>
+                    <div style={{fontSize:9,color:C.t3,marginTop:1}}>per week</div>
+                  </div>
+                );
+              })}
+            </div>
+            {(()=>{const tot=(targets.strength||0)+(targets.mobility||0)+(targets.cardio||0);return <div style={{fontSize:11,color:C.t3,marginBottom:8}}>{tot} sessions/week · {tot*4}/month</div>;})()}
             <button onClick={()=>setEditTargets(true)} style={{...s.btn("s"),...s.btnSm}}>Edit targets</button>
           </>
         )}
@@ -4309,8 +4316,8 @@ Max 250 words total. No intro, no outro.`}]})});
 
       {/* Goal Foundations */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Goal Foundations</div>
-        <div style={{fontSize:11,color:C.t2,marginBottom:12,lineHeight:1.6}}>These numbers power your coach and your tracking. They're calculated from your goals and profile — adjust them if needed.</div>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Goal Foundations</div>
+        {editFoundations&&<div style={{fontSize:11,color:C.t2,marginBottom:12,lineHeight:1.6}}>These numbers power your coach and your tracking. They're calculated from your goals and profile — adjust them if needed.</div>}
         {editFoundations ? (
           <>
             <div style={{marginBottom:12}}>
@@ -4335,13 +4342,15 @@ Max 250 words total. No intro, no outro.`}]})});
           </>
         ) : (
           <>
-            {[["Daily steps target",foundTargets.step_target?.toLocaleString()],["Daily protein target",foundTargets.protein_target+"g"]].map(([label,val])=>(
-              <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:13}}>
-                <span style={{color:C.t2}}>{label}</span>
-                <span style={{fontWeight:600}}>{val}</span>
-              </div>
-            ))}
-            <button onClick={()=>setEditFoundations(true)} style={{...s.btn("s"),...s.btnSm,marginTop:4}}>Edit</button>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+              {[["Daily steps",foundTargets.step_target?.toLocaleString(),C.teal,C.tl],["Daily protein",foundTargets.protein_target+"g",C.am,C.al]].map(([label,val,col,bg])=>(
+                <div key={label} style={{background:bg,borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{val}</div>
+                  <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:col,marginTop:4}}>{label}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>setEditFoundations(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
           </>
         )}
       </Card>
@@ -4370,8 +4379,15 @@ Max 250 words total. No intro, no outro.`}]})});
           </>
         ) : (
           <>
-            <StructuredView text={healthNotes}/>
-            <button onClick={()=>setEditNotes(true)} style={{...s.btn("s"),...s.btnSm,marginTop:10}}>Edit</button>
+            {/* Collapsed by default — long medical prose shouldn't dominate the page */}
+            <div style={{maxHeight:notesOpen?"none":96,overflow:"hidden",position:"relative"}}>
+              <StructuredView text={healthNotes}/>
+              {!notesOpen&&<div style={{position:"absolute",left:0,right:0,bottom:0,height:44,background:`linear-gradient(to bottom, rgba(255,255,255,0), ${C.sf})`}}/>}
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:10}}>
+              <button onClick={()=>setNotesOpen(v=>!v)} style={{...s.btn("s"),...s.btnSm}}>{notesOpen?"Show less":"Show all"}</button>
+              <button onClick={()=>setEditNotes(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+            </div>
           </>
         )}
       </Card>

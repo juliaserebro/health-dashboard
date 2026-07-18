@@ -8278,6 +8278,7 @@ function TabProfile({
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes || "");
   const [editNotes, setEditNotes] = useState(!profileData?.health_notes);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [processingNotes, setProcessingNotes] = useState(false);
   const [savedNotes, setSavedNotes] = useState("");
   const [workoutPlan, setWorkoutPlan] = useState(profileData?.workout_plan || "");
@@ -8655,43 +8656,77 @@ Max 250 words total. No intro, no outro.`
       fontSize: 12,
       color: C.teal
     }
-  }, savedA))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, savedA))) :
+  /*#__PURE__*/
+  /* ── IDENTITY HERO: avatar, name, one stat line — not a form readout ── */
+  React.createElement("div", {
     style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(2,1fr)",
-      gap: 8,
-      marginBottom: 12
+      display: "flex",
+      alignItems: "center",
+      gap: 14
     }
-  }, [["Name", pa.name || "—"], ["Age", calcAge(pa.birth_date) ? calcAge(pa.birth_date) + " years" : "—"], ["Gender", pa.gender ? pa.gender.charAt(0).toUpperCase() + pa.gender.slice(1) : "—"], ["Height", pa.height_cm ? pa.height_cm + " cm" : "—"], ["Weight", pa.weight_kg ? pa.weight_kg + " kg" : "—"], ["Body fat", pa.body_fat_pct ? pa.body_fat_pct + "%" : "—"]].map(([label, val]) => /*#__PURE__*/React.createElement("div", {
-    key: label
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
-      color: C.t3,
-      marginBottom: 1,
+      width: 54,
+      height: 54,
+      borderRadius: "50%",
+      background: C.pl,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+      fontFamily: "'Playfair Display',Georgia,serif",
+      fontStyle: "italic",
+      fontSize: 26,
       fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase"
+      color: C.pu
     }
-  }, label), /*#__PURE__*/React.createElement("div", {
+  }, (pa.name || "?").charAt(0).toUpperCase()), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
-      fontWeight: 500,
-      color: C.tx
+      flex: 1,
+      minWidth: 0
     }
-  }, val)))), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Playfair Display',Georgia,serif",
+      fontStyle: "italic",
+      fontSize: 20,
+      fontWeight: 600,
+      letterSpacing: "-.3px"
+    }
+  }, pa.name || "—"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t2,
+      marginTop: 3
+    }
+  }, [calcAge(pa.birth_date) ? calcAge(pa.birth_date) + " yrs" : null, pa.height_cm ? pa.height_cm + " cm" : null, pa.weight_kg ? pa.weight_kg + " kg" : null, pa.body_fat_pct ? pa.body_fat_pct + "% fat" : null].filter(Boolean).join("  ·  ") || "Tap edit to fill in your details")), /*#__PURE__*/React.createElement("button", {
+    title: "Edit personal info",
     onClick: () => setEditPersonal(true),
     style: {
-      ...s.btn("s"),
-      ...s.btnSm
+      width: 34,
+      height: 34,
+      borderRadius: "50%",
+      background: C.s2,
+      border: "none",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: C.t2,
+      flexShrink: 0
     }
-  }, "Edit"))), (pa.weight_kg || profileData?.weight_kg) && (pa.height_cm || profileData?.height_cm) ? (() => {
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "log",
+    size: 14
+  })))), (pa.weight_kg || profileData?.weight_kg) && (pa.height_cm || profileData?.height_cm) ? (() => {
     const w = parseFloat(pa.weight_kg || profileData?.weight_kg || 0);
     const h = parseFloat(pa.height_cm || profileData?.height_cm || 1);
     const age = calcAge(pa.birth_date || profileData?.birth_date) || 30;
     const bmi = w / (h / 100) ** 2;
     // Mifflin-St Jeor BMR
     const bmr = pa.gender === "female" ? 10 * w + 6.25 * h - 5 * age - 161 : 10 * w + 6.25 * h - 5 * age + 5;
+    const tiles = [["BMI", bmi.toFixed(1), "healthy range 18.5–25", "Body Mass Index — weight relative to height. Doesn't distinguish muscle from fat."], ["BMR", Math.round(bmr).toLocaleString(), "kcal/day at rest", "Basal Metabolic Rate — calories your body burns at rest, before any activity. Your daily calorie floor."]];
     return /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
@@ -8699,31 +8734,23 @@ Max 250 words total. No intro, no outro.`
         gap: 10,
         marginBottom: 14
       }
-    }, [["BMI", bmi.toFixed(1)], ["BMR", Math.round(bmr) + " kcal/day"]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
+    }, tiles.map(([l, v, sub, tip]) => /*#__PURE__*/React.createElement("div", {
       key: l,
-      style: {
-        background: C.s2,
-        borderRadius: 8,
-        padding: 12
-      }
+      title: tip,
+      style: s.mc
     }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 10,
-        color: C.t3,
-        marginBottom: 3
-      }
+      style: s.ml
     }, l), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 16,
-        fontWeight: 600
+        ...s.mv,
+        color: C.sl
       }
     }, v), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 10,
-        color: C.t3,
-        marginTop: 2
+        ...s.ms,
+        color: C.t3
       }
-    }, l === "BMI" ? "Body Mass Index — weight relative to height. Doesn't distinguish muscle from fat." : "Basal Metabolic Rate — calories your body burns at rest, before any activity. Your daily calorie floor."))));
+    }, sub))));
   })() : null, /*#__PURE__*/React.createElement(SecLabel, null, "Goals & Targets"), /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 14
@@ -8914,44 +8941,42 @@ Max 250 words total. No intro, no outro.`
       color: C.t3,
       marginBottom: 10
     }
-  }, "No goals set yet.") : (profileData?.goals || []).map((g, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
+  }, "No goals set yet.") : /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      alignItems: "flex-start",
+      flexWrap: "wrap",
       gap: 8,
-      marginBottom: 8,
-      fontSize: 13
+      marginBottom: 10
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: 6,
-      height: 6,
-      borderRadius: "50%",
-      background: C.pu,
-      marginTop: 5,
-      flexShrink: 0
-    }
-  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 500
-    }
-  }, g.label), g.definition && (() => {
+  }, (profileData?.goals || []).map((g, i) => {
     const opt = GOAL_SUBS[g.id]?.options.find(o => o.id === g.definition);
-    const defLabel = opt?.label || g.definition.replace(/_/g, " ");
+    const defLabel = g.definition ? opt?.label || g.definition.replace(/_/g, " ") : null;
     return /*#__PURE__*/React.createElement("div", {
+      key: i,
       style: {
-        fontSize: 11,
-        color: C.t2,
-        marginTop: 1
+        background: C.pl,
+        borderRadius: 12,
+        padding: "9px 13px",
+        maxWidth: "100%"
       }
-    }, defLabel, g.target_value ? " · target: " + g.target_value + (g.target_unit ? " " + g.target_unit : "") : "");
-  })()))), /*#__PURE__*/React.createElement("button", {
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: C.pu
+      }
+    }, g.label), defLabel && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10.5,
+        color: C.t2,
+        marginTop: 2
+      }
+    }, defLabel, g.target_value ? " · " + g.target_value + (g.target_unit ? " " + g.target_unit : "") : ""));
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditGoals(true),
     style: {
       ...s.btn("s"),
-      ...s.btnSm,
-      marginTop: 4
+      ...s.btnSm
     }
   }, "Edit goals"))), /*#__PURE__*/React.createElement(Card, {
     style: {
@@ -9094,51 +9119,60 @@ Max 250 words total. No intro, no outro.`
         color: C.teal
       }
     }, savedTargets)));
-  })()) : /*#__PURE__*/React.createElement(React.Fragment, null, ["strength", "mobility", "cardio"].map(k => {
+  })()) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3,1fr)",
+      gap: 8,
+      marginBottom: 8
+    }
+  }, ["strength", "mobility", "cardio"].map(k => {
     const colors = {
       strength: [C.pu, C.pl],
       mobility: [C.or, C.orl],
       cardio: [C.teal, C.tl]
     };
-    const [col] = colors[k] || [C.t2, C.s2];
+    const [col, bg] = colors[k] || [C.t2, C.s2];
     return /*#__PURE__*/React.createElement("div", {
       key: k,
       style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginBottom: 6,
-        fontSize: 13
+        background: bg,
+        borderRadius: 12,
+        padding: "12px 6px",
+        textAlign: "center"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: col,
-        flexShrink: 0
+        fontSize: 24,
+        fontWeight: 700,
+        color: col,
+        lineHeight: 1
       }
-    }), /*#__PURE__*/React.createElement("span", {
+    }, targets[k] || 0), /*#__PURE__*/React.createElement("div", {
       style: {
-        flex: 1,
-        textTransform: "capitalize"
+        fontSize: 9.5,
+        fontWeight: 700,
+        letterSpacing: ".08em",
+        textTransform: "uppercase",
+        color: col,
+        marginTop: 4
       }
-    }, k), /*#__PURE__*/React.createElement("span", {
+    }, k), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontWeight: 600,
-        color: col
+        fontSize: 9,
+        color: C.t3,
+        marginTop: 1
       }
-    }, targets[k] || 0, "x/week"));
-  }), (() => {
+    }, "per week"));
+  })), (() => {
     const tot = (targets.strength || 0) + (targets.mobility || 0) + (targets.cardio || 0);
     return /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
         color: C.t3,
-        marginTop: 4,
         marginBottom: 8
       }
-    }, tot, " sessions/week = ", tot * 4, " sessions/month");
+    }, tot, " sessions/week \xB7 ", tot * 4, "/month");
   })(), /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditTargets(true),
     style: {
@@ -9156,9 +9190,9 @@ Max 250 words total. No intro, no outro.`
       letterSpacing: ".08em",
       textTransform: "uppercase",
       color: C.t3,
-      marginBottom: 6
+      marginBottom: 10
     }
-  }, "Goal Foundations"), /*#__PURE__*/React.createElement("div", {
+  }, "Goal Foundations"), editFoundations && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.t2,
@@ -9250,29 +9284,42 @@ Max 250 words total. No intro, no outro.`
       fontSize: 12,
       color: C.teal
     }
-  }, savedFoundations))) : /*#__PURE__*/React.createElement(React.Fragment, null, [["Daily steps target", foundTargets.step_target?.toLocaleString()], ["Daily protein target", foundTargets.protein_target + "g"]].map(([label, val]) => /*#__PURE__*/React.createElement("div", {
+  }, savedFoundations))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 8,
+      marginBottom: 10
+    }
+  }, [["Daily steps", foundTargets.step_target?.toLocaleString(), C.teal, C.tl], ["Daily protein", foundTargets.protein_target + "g", C.am, C.al]].map(([label, val, col, bg]) => /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 6,
-      fontSize: 13
+      background: bg,
+      borderRadius: 12,
+      padding: "12px 10px",
+      textAlign: "center"
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: C.t2
+      fontSize: 20,
+      fontWeight: 700,
+      color: col,
+      lineHeight: 1
     }
-  }, label), /*#__PURE__*/React.createElement("span", {
+  }, val), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontWeight: 600
+      fontSize: 9.5,
+      fontWeight: 700,
+      letterSpacing: ".08em",
+      textTransform: "uppercase",
+      color: col,
+      marginTop: 4
     }
-  }, val))), /*#__PURE__*/React.createElement("button", {
+  }, label)))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditFoundations(true),
     style: {
       ...s.btn("s"),
-      ...s.btnSm,
-      marginTop: 4
+      ...s.btnSm
     }
   }, "Edit"))), /*#__PURE__*/React.createElement(SecLabel, null, "Health Notes"), /*#__PURE__*/React.createElement(Card, {
     style: {
@@ -9355,16 +9402,42 @@ Max 250 words total. No intro, no outro.`
       color: C.am,
       marginTop: 6
     }
-  }, "Add your API key in Settings to enable AI analysis.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(StructuredView, {
+  }, "Add your API key in Settings to enable AI analysis.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: notesOpen ? "none" : 96,
+      overflow: "hidden",
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement(StructuredView, {
     text: healthNotes
-  }), /*#__PURE__*/React.createElement("button", {
+  }), !notesOpen && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 44,
+      background: `linear-gradient(to bottom, rgba(255,255,255,0), ${C.sf})`
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setNotesOpen(v => !v),
+    style: {
+      ...s.btn("s"),
+      ...s.btnSm
+    }
+  }, notesOpen ? "Show less" : "Show all"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditNotes(true),
     style: {
       ...s.btn("s"),
-      ...s.btnSm,
-      marginTop: 10
+      ...s.btnSm
     }
-  }, "Edit"))), /*#__PURE__*/React.createElement(SecLabel, null, "Workout plan"), /*#__PURE__*/React.createElement(Card, {
+  }, "Edit")))), /*#__PURE__*/React.createElement(SecLabel, null, "Workout plan"), /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 14
     }
