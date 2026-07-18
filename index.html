@@ -7149,112 +7149,179 @@ function TabCycle({
     month: "short",
     year: "numeric"
   }) : "—";
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Card, {
     style: {
-      background: phase ? phase.bg : C.pil,
-      borderRadius: 12,
-      padding: "16px 18px",
-      border: `.5px solid ${phase ? phase.c + "33" : C.pi + "33"}`,
       marginBottom: 14
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, info?.cycleDay ? (() => {
+    const day = info.cycleDay,
+      len = info.avgCycleLength || avgCycleLen;
+    const R = 44,
+      CIRC = 2 * Math.PI * R,
+      GAP = 0.012; // small gap between phase arcs
+    const segs = [["menstrual", 1, avgPeriodLen], ["follicular", avgPeriodLen + 1, Math.max(avgPeriodLen + 1, lutealS - 3)], ["ovulatory", Math.max(avgPeriodLen + 2, lutealS - 2), lutealS], ["luteal", lutealS + 1, len]];
+    const angleFor = d => 2 * Math.PI * ((d - 0.5) / len) - Math.PI / 2;
+    const mx = 55 + R * Math.cos(angleFor(day)),
+      my = 55 + R * Math.sin(angleFor(day));
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 18
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "relative",
+        width: 110,
+        height: 110,
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("svg", {
+      width: "110",
+      height: "110",
+      viewBox: "0 0 110 110"
+    }, segs.map(([key, from, to]) => {
+      const f0 = (from - 1) / len + GAP / 2,
+        f1 = to / len - GAP / 2;
+      if (f1 <= f0) return null;
+      return /*#__PURE__*/React.createElement("circle", {
+        key: key,
+        cx: "55",
+        cy: "55",
+        r: R,
+        fill: "none",
+        stroke: PHASES[key].c,
+        strokeOpacity: info.phase === key ? 1 : 0.28,
+        strokeWidth: "9",
+        strokeLinecap: "round",
+        strokeDasharray: `${(f1 - f0) * CIRC} ${CIRC}`,
+        strokeDashoffset: -f0 * CIRC,
+        transform: "rotate(-90 55 55)"
+      });
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: mx,
+      cy: my,
+      r: "6",
+      fill: phase ? phase.c : C.pi,
+      stroke: "#fff",
+      strokeWidth: "2.5"
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: ".08em",
+        textTransform: "uppercase",
+        color: C.t3
+      }
+    }, "Day"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 28,
+        fontWeight: 700,
+        letterSpacing: -1,
+        lineHeight: 1,
+        color: phase ? phase.c : C.tx
+      }
+    }, day), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        color: C.t3,
+        marginTop: 2
+      }
+    }, "of ", len))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 20,
+        fontWeight: 600,
+        color: phase ? phase.c : C.pi,
+        fontFamily: "'Playfair Display',Georgia,serif",
+        fontStyle: "italic"
+      }
+    }, getPhaseDisplayText(info)), info.nextPeriod && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: C.t2,
+        marginTop: 5
+      }
+    }, "Next period ~ ", fmtDate(info.nextPeriod)), info.confidence === "very_low" || info.confidence === "no_data" ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10.5,
+        color: C.am,
+        marginTop: 5,
+        lineHeight: 1.5
+      }
+    }, "Rough estimate \u2014 cycles vary or data is thin. More dates will sharpen this.") : info.cyclesUsedForCalculation > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10.5,
+        color: C.t3,
+        marginTop: 5
+      }
+    }, "based on ", info.cyclesUsedForCalculation, " logged cycle", info.cyclesUsedForCalculation !== 1 ? "s" : "")));
+  })() : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 16,
       fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 6
-    }
-  }, "Current phase"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 18,
-      fontWeight: 600,
-      color: phase ? phase.c : C.pi,
+      color: C.pi,
+      fontFamily: "'Playfair Display',Georgia,serif",
+      fontStyle: "italic",
       marginBottom: 4
     }
-  }, info ? getPhaseDisplayText(info) : "Add your cycle dates to get started"), /*#__PURE__*/React.createElement("div", {
+  }, "Add your cycle dates to get started"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t2
     }
-  }, info?.cycleDay ? `Day ${info.cycleDay} of an estimated ${info.avgCycleLength}-day cycle` : "Enter your last period start date below."), info && (info.confidence === "very_low" || info.confidence === "no_data") && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 8,
-      fontSize: 11,
-      color: C.am,
-      lineHeight: 1.5
-    }
-  }, "Your cycles vary quite a bit, or we don't have enough data yet \u2014 these predictions are rough estimates. Logging more dates will help.")), lastPeriodStart && /*#__PURE__*/React.createElement(Card, {
-    style: {
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 10
-    }
-  }, "Cycle stats"), /*#__PURE__*/React.createElement("div", {
+  }, "Enter your last period start date below."))), lastPeriodStart && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: "10px 16px"
-    }
-  }, [["Last period started", fmtDate(lastPeriodStart)], ["Current phase", info ? getPhaseDisplayText(info) : "—"], ["Cycle day", "Day " + (info?.cycleDay || "—") + " of " + (info?.avgCycleLength || avgCycleLen)], ["Avg cycle length", info?.cyclesUsedForCalculation > 0 ? info.avgCycleLength + " days (from " + info.cyclesUsedForCalculation + " cycle" + (info.cyclesUsedForCalculation !== 1 ? "s" : "") + ")" : "28 days (default — add more dates)"], ["Avg period length", avgPeriodLen + " days"], ["Next period est.", fmtDate(info?.nextPeriod)], ["Based on", info?.cyclesUsedForCalculation > 0 ? info.cyclesUsedForCalculation + " logged cycle" + (info.cyclesUsedForCalculation !== 1 ? "s" : "") : "1 date (no gaps yet)"]].map(([label, val]) => /*#__PURE__*/React.createElement("div", {
-    key: label
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: C.t3,
-      marginBottom: 2
-    }
-  }, label), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      fontWeight: 500,
-      color: C.tx
-    }
-  }, val)))), info && (info.confidence === "very_low" || info.confidence === "no_data") && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 10,
-      fontSize: 11,
-      color: C.am,
-      lineHeight: 1.5
-    }
-  }, "Your cycles vary quite a bit, or we don't have enough data yet \u2014 these predictions are rough estimates. Logging more dates will help."), info && info.confidence === "low" && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 10,
-      fontSize: 11,
-      color: C.t3
-    }
-  }, "Add more period dates to improve accuracy. We'll calculate averages automatically.")), /*#__PURE__*/React.createElement(Card, {
-    style: {
+      gridTemplateColumns: "repeat(3,1fr)",
+      gap: 8,
       marginBottom: 14
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: s.mc
+  }, /*#__PURE__*/React.createElement("div", {
+    style: s.ml
+  }, "Avg cycle"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 6
+      ...s.mv,
+      color: C.pi
     }
-  }, "Average period length"), editingPeriodLen ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, avgCycleLen, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11,
-      color: C.t3,
-      marginBottom: 10
+      fontSize: 12,
+      fontWeight: 400
     }
-  }, "Count the days you have any flow, even light."), /*#__PURE__*/React.createElement("div", {
+  }, " d")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...s.ms,
+      color: C.t3
+    }
+  }, info?.cyclesUsedForCalculation > 0 ? `from ${info.cyclesUsedForCalculation} cycle${info.cyclesUsedForCalculation !== 1 ? "s" : ""}` : "default")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...s.mc,
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: s.ml
+  }, "Avg period"), editingPeriodLen ? /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 8,
-      alignItems: "center"
+      alignItems: "center",
+      gap: 4,
+      marginTop: 2
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
@@ -7262,59 +7329,88 @@ function TabCycle({
     max: "10",
     value: periodLenInput,
     onChange: e => setPeriodLenInput(e.target.value),
-    placeholder: String(avgPeriodLen),
     style: {
       ...s.input,
-      width: 80
+      width: 46,
+      padding: "3px 6px",
+      textAlign: "center"
     },
     autoFocus: true
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: C.t2
-    }
-  }, "days"), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("button", {
     onClick: savePeriodLen,
     disabled: savingPeriodLen || !periodLenInput,
     style: {
       ...s.btn("p"),
-      ...s.btnSm
+      padding: "3px 8px",
+      fontSize: 11
     }
-  }, savingPeriodLen ? "Saving..." : "Save"), /*#__PURE__*/React.createElement("button", {
+  }, "\u2713"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setEditingPeriodLen(false);
       setPeriodLenInput("");
     },
     style: {
-      ...s.btn("s"),
-      ...s.btnSm
+      background: "none",
+      border: "none",
+      color: C.t3,
+      cursor: "pointer",
+      fontSize: 13
     }
-  }, "Cancel"))) : /*#__PURE__*/React.createElement("div", {
+  }, "\xD7")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between"
+      ...s.mv,
+      color: C.pi
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      color: C.t1
-    }
-  }, /*#__PURE__*/React.createElement("strong", null, avgPeriodLen), " ", /*#__PURE__*/React.createElement("span", {
+  }, avgPeriodLen, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: C.t2
+      fontWeight: 400
     }
-  }, "days")), /*#__PURE__*/React.createElement("button", {
+  }, " d")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...s.ms,
+      color: C.t3
+    }
+  }, "days of flow"), /*#__PURE__*/React.createElement("button", {
+    title: "Edit period length",
     onClick: () => {
       setEditingPeriodLen(true);
       setPeriodLenInput(String(avgPeriodLen));
     },
     style: {
-      ...s.btn("s"),
-      ...s.btnSm
+      position: "absolute",
+      top: 8,
+      right: 8,
+      background: "none",
+      border: "none",
+      color: C.t3,
+      cursor: "pointer",
+      padding: 2
     }
-  }, "Edit"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "log",
+    size: 11
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: s.mc
+  }, /*#__PURE__*/React.createElement("div", {
+    style: s.ml
+  }, "Next period"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...s.mv,
+      color: C.pi,
+      fontSize: 16
+    }
+  }, info?.nextPeriod ? new Date(info.nextPeriod + "T12:00:00").toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short"
+  }) : "—"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...s.ms,
+      color: C.t3
+    }
+  }, info?.nextPeriod ? new Date(info.nextPeriod + "T12:00:00").toLocaleDateString("en-GB", {
+    weekday: "long"
+  }) : "estimate"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 600,
@@ -7325,17 +7421,11 @@ function TabCycle({
     }
   }, "Cycle history"), /*#__PURE__*/React.createElement("p", {
     style: {
-      fontSize: 12,
+      fontSize: 11.5,
       color: C.t2,
-      marginBottom: 4
-    }
-  }, "Add each period start date. Day 1 is the first day of full flow \u2014 not spotting."), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 11,
-      color: C.t3,
       marginBottom: 12
     }
-  }, "The more dates you add, the better we can predict your cycle phases \u2014 which helps your coach give you recommendations that match where you are in your cycle."), /*#__PURE__*/React.createElement("div", {
+  }, "Add each period start date (day 1 = first day of full flow). More dates \u2192 sharper predictions for your coach."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
@@ -7420,7 +7510,8 @@ function TabCycle({
     style: {
       padding: 10,
       background: p.bg,
-      borderRadius: 8
+      borderRadius: 10,
+      border: info?.phase === key ? `1.5px solid ${p.c}` : "1.5px solid transparent"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7429,7 +7520,13 @@ function TabCycle({
       color: p.c,
       marginBottom: 4
     }
-  }, p.n.toUpperCase(), " \xB7 ", p.days), /*#__PURE__*/React.createElement("div", {
+  }, p.n.toUpperCase(), " \xB7 ", p.days, info?.phase === key && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 6,
+      fontSize: 9,
+      fontWeight: 700
+    }
+  }, "\u2190 NOW")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.t2,

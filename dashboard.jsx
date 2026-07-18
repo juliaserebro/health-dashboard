@@ -3451,78 +3451,91 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
 
   return (
     <div>
-      {/* Current phase hero */}
-      <div style={{background:phase?phase.bg:C.pil,borderRadius:12,padding:"16px 18px",border:`.5px solid ${phase?phase.c+"33":C.pi+"33"}`,marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Current phase</div>
-        <div style={{fontSize:18,fontWeight:600,color:phase?phase.c:C.pi,marginBottom:4}}>
-          {info ? getPhaseDisplayText(info) : "Add your cycle dates to get started"}
-        </div>
-        <div style={{fontSize:12,color:C.t2}}>
-          {info?.cycleDay
-            ? `Day ${info.cycleDay} of an estimated ${info.avgCycleLength}-day cycle`
-            : "Enter your last period start date below."}
-        </div>
-        {info&&(info.confidence==="very_low"||info.confidence==="no_data")&&(
-          <div style={{marginTop:8,fontSize:11,color:C.am,lineHeight:1.5}}>Your cycles vary quite a bit, or we don't have enough data yet — these predictions are rough estimates. Logging more dates will help.</div>
-        )}
-      </div>
-
-      {/* Calculated stats */}
-      {lastPeriodStart&&(
-        <Card style={{marginBottom:14}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:10}}>Cycle stats</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px 16px"}}>
-            {[
-              ["Last period started",fmtDate(lastPeriodStart)],
-              ["Current phase",info?getPhaseDisplayText(info):"—"],
-              ["Cycle day","Day "+(info?.cycleDay||"—")+" of "+((info?.avgCycleLength||avgCycleLen))],
-              ["Avg cycle length",info?.cyclesUsedForCalculation>0
-                ? (info.avgCycleLength)+" days (from "+info.cyclesUsedForCalculation+" cycle"+(info.cyclesUsedForCalculation!==1?"s":"")+")"
-                : "28 days (default — add more dates)"],
-              ["Avg period length",avgPeriodLen+" days"],
-              ["Next period est.",fmtDate(info?.nextPeriod)],
-              ["Based on",info?.cyclesUsedForCalculation>0?(info.cyclesUsedForCalculation+" logged cycle"+(info.cyclesUsedForCalculation!==1?"s":"")):"1 date (no gaps yet)"],
-            ].map(([label,val])=>(
-              <div key={label}>
-                <div style={{fontSize:10,color:C.t3,marginBottom:2}}>{label}</div>
-                <div style={{fontSize:12,fontWeight:500,color:C.tx}}>{val}</div>
-              </div>
-            ))}
-          </div>
-          {info&&(info.confidence==="very_low"||info.confidence==="no_data")&&(
-            <div style={{marginTop:10,fontSize:11,color:C.am,lineHeight:1.5}}>Your cycles vary quite a bit, or we don't have enough data yet — these predictions are rough estimates. Logging more dates will help.</div>
-          )}
-          {info&&info.confidence==="low"&&(
-            <div style={{marginTop:10,fontSize:11,color:C.t3}}>Add more period dates to improve accuracy. We'll calculate averages automatically.</div>
-          )}
-        </Card>
-      )}
-
-      {/* Period length input */}
+      {/* ── PHASE HERO: segmented cycle ring, day marker, serif phase name ── */}
       <Card style={{marginBottom:14}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Average period length</div>
-        {editingPeriodLen ? (
-          <>
-            <div style={{fontSize:11,color:C.t3,marginBottom:10}}>Count the days you have any flow, even light.</div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <input type="number" min="2" max="10" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} placeholder={String(avgPeriodLen)} style={{...s.input,width:80}} autoFocus/>
-              <span style={{fontSize:12,color:C.t2}}>days</span>
-              <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),...s.btnSm}}>{savingPeriodLen?"Saving...":"Save"}</button>
-              <button onClick={()=>{setEditingPeriodLen(false);setPeriodLenInput("");}} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>
+        {info?.cycleDay?(()=>{
+          const day=info.cycleDay, len=info.avgCycleLength||avgCycleLen;
+          const R=44, CIRC=2*Math.PI*R, GAP=0.012; // small gap between phase arcs
+          const segs=[
+            ["menstrual",1,avgPeriodLen],
+            ["follicular",avgPeriodLen+1,Math.max(avgPeriodLen+1,lutealS-3)],
+            ["ovulatory",Math.max(avgPeriodLen+2,lutealS-2),lutealS],
+            ["luteal",lutealS+1,len],
+          ];
+          const angleFor=(d)=>2*Math.PI*((d-0.5)/len)-Math.PI/2;
+          const mx=55+R*Math.cos(angleFor(day)), my=55+R*Math.sin(angleFor(day));
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:18}}>
+              <div style={{position:"relative",width:110,height:110,flexShrink:0}}>
+                <svg width="110" height="110" viewBox="0 0 110 110">
+                  {segs.map(([key,from,to])=>{
+                    const f0=(from-1)/len+GAP/2, f1=to/len-GAP/2;
+                    if(f1<=f0) return null;
+                    return <circle key={key} cx="55" cy="55" r={R} fill="none"
+                      stroke={PHASES[key].c} strokeOpacity={info.phase===key?1:0.28} strokeWidth="9"
+                      strokeLinecap="round" strokeDasharray={`${(f1-f0)*CIRC} ${CIRC}`}
+                      strokeDashoffset={-f0*CIRC} transform="rotate(-90 55 55)"/>;
+                  })}
+                  <circle cx={mx} cy={my} r="6" fill={phase?phase.c:C.pi} stroke="#fff" strokeWidth="2.5"/>
+                </svg>
+                <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Day</div>
+                  <div style={{fontSize:28,fontWeight:700,letterSpacing:-1,lineHeight:1,color:phase?phase.c:C.tx}}>{day}</div>
+                  <div style={{fontSize:9,color:C.t3,marginTop:2}}>of {len}</div>
+                </div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:20,fontWeight:600,color:phase?phase.c:C.pi,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>{getPhaseDisplayText(info)}</div>
+                {info.nextPeriod&&<div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Next period ~ {fmtDate(info.nextPeriod)}</div>}
+                {(info.confidence==="very_low"||info.confidence==="no_data")
+                  ? <div style={{fontSize:10.5,color:C.am,marginTop:5,lineHeight:1.5}}>Rough estimate — cycles vary or data is thin. More dates will sharpen this.</div>
+                  : info.cyclesUsedForCalculation>0&&<div style={{fontSize:10.5,color:C.t3,marginTop:5}}>based on {info.cyclesUsedForCalculation} logged cycle{info.cyclesUsedForCalculation!==1?"s":""}</div>}
+              </div>
             </div>
-          </>
-        ) : (
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{fontSize:14,color:C.t1}}><strong>{avgPeriodLen}</strong> <span style={{fontSize:12,color:C.t2}}>days</span></div>
-            <button onClick={()=>{setEditingPeriodLen(true);setPeriodLenInput(String(avgPeriodLen));}} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
+          );
+        })():(
+          <div>
+            <div style={{fontSize:16,fontWeight:600,color:C.pi,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",marginBottom:4}}>Add your cycle dates to get started</div>
+            <div style={{fontSize:12,color:C.t2}}>Enter your last period start date below.</div>
           </div>
         )}
       </Card>
 
+      {/* ── CYCLE NUMBERS: three stat tiles (period length editable in place) ── */}
+      {lastPeriodStart&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+          <div style={s.mc}>
+            <div style={s.ml}>Avg cycle</div>
+            <div style={{...s.mv,color:C.pi}}>{avgCycleLen}<span style={{fontSize:12,fontWeight:400}}> d</span></div>
+            <div style={{...s.ms,color:C.t3}}>{info?.cyclesUsedForCalculation>0?`from ${info.cyclesUsedForCalculation} cycle${info.cyclesUsedForCalculation!==1?"s":""}`:"default"}</div>
+          </div>
+          <div style={{...s.mc,position:"relative"}}>
+            <div style={s.ml}>Avg period</div>
+            {editingPeriodLen?(
+              <div style={{display:"flex",alignItems:"center",gap:4,marginTop:2}}>
+                <input type="number" min="2" max="10" value={periodLenInput} onChange={e=>setPeriodLenInput(e.target.value)} style={{...s.input,width:46,padding:"3px 6px",textAlign:"center"}} autoFocus/>
+                <button onClick={savePeriodLen} disabled={savingPeriodLen||!periodLenInput} style={{...s.btn("p"),padding:"3px 8px",fontSize:11}}>✓</button>
+                <button onClick={()=>{setEditingPeriodLen(false);setPeriodLenInput("");}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:13}}>×</button>
+              </div>
+            ):(
+              <>
+                <div style={{...s.mv,color:C.pi}}>{avgPeriodLen}<span style={{fontSize:12,fontWeight:400}}> d</span></div>
+                <div style={{...s.ms,color:C.t3}}>days of flow</div>
+                <button title="Edit period length" onClick={()=>{setEditingPeriodLen(true);setPeriodLenInput(String(avgPeriodLen));}} style={{position:"absolute",top:8,right:8,background:"none",border:"none",color:C.t3,cursor:"pointer",padding:2}}><Icon name="log" size={11}/></button>
+              </>
+            )}
+          </div>
+          <div style={s.mc}>
+            <div style={s.ml}>Next period</div>
+            <div style={{...s.mv,color:C.pi,fontSize:16}}>{info?.nextPeriod?new Date(info.nextPeriod+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</div>
+            <div style={{...s.ms,color:C.t3}}>{info?.nextPeriod?new Date(info.nextPeriod+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long"}):"estimate"}</div>
+          </div>
+        </div>
+      )}
+
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
-        <p style={{fontSize:12,color:C.t2,marginBottom:4}}>Add each period start date. Day 1 is the first day of full flow — not spotting.</p>
-        <p style={{fontSize:11,color:C.t3,marginBottom:12}}>The more dates you add, the better we can predict your cycle phases — which helps your coach give you recommendations that match where you are in your cycle.</p>
+        <p style={{fontSize:11.5,color:C.t2,marginBottom:12}}>Add each period start date (day 1 = first day of full flow). More dates → sharper predictions for your coach.</p>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
           <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
           <button onClick={addDate} disabled={saving} style={{...s.btn("p"),...s.btnSm}}>{saving?"Saving...":"Add"}</button>
@@ -3545,8 +3558,8 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Phase guide</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {Object.entries(PHASES).map(([key,p])=>(
-            <div key={key} style={{padding:10,background:p.bg,borderRadius:8}}>
-              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()} · {p.days}</div>
+            <div key={key} style={{padding:10,background:p.bg,borderRadius:10,border:info?.phase===key?`1.5px solid ${p.c}`:"1.5px solid transparent"}}>
+              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()} · {p.days}{info?.phase===key&&<span style={{marginLeft:6,fontSize:9,fontWeight:700}}>← NOW</span>}</div>
               <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>
                 {key==="menstrual"?"Lower intensity. Gentle yoga, walking. Iron-rich foods. Rest is productive.":
                  key==="follicular"?"Rising energy. Best window for new challenges and heavier strength work.":

@@ -3,7 +3,7 @@
 // the app must never show stale data.
 // CACHE_VERSION is rewritten by build.py on every build so old caches purge
 // and new code takes effect without manual cache clears.
-const CACHE_VERSION = "hc-20260718-163328"; // <-- build.py stamps this
+const CACHE_VERSION = "hc-20260718-163931"; // <-- build.py stamps this
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 
 // Relative paths — the app lives under /health-dashboard/ on GitHub Pages
