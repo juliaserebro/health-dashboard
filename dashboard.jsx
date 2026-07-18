@@ -3924,6 +3924,8 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [savedPlan, setSavedPlan] = useState("");
   const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
   const [equip, setEquip] = useState(profileData?.activity_targets?.equipment||"gym");
+  const [showIntake, setShowIntake] = useState(false);
+  const [intake, setIntake] = useState(()=>({experience:"returning",session_min:60,style:"mix",...(profileData?.activity_targets?.training_prefs||{})}));
   const [assessing, setAssessing] = useState(false);
   const [assessment, setAssessment] = useState(()=>{try{return localStorage.getItem("plan_assessment")||"";}catch{return "";}});
 
@@ -3940,14 +3942,19 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
       .map(x=>`${x.date} ${x.type}${x.duration_min?` ${x.duration_min}min`:''}${x.avg_hr?` avg ${x.avg_hr}bpm`:''}`).join("\n")||"no recent data";
     const equipLabel={gym:"full gym (machines, barbells, dumbbells, cables)",home:"home setup (dumbbells, bands, bodyweight)",bodyweight:"bodyweight only, no equipment"}[equip]||equip;
     const cleared=(profileData?.activity_targets?.cleared_exercises||[]);
-    const clearedLine=cleared.length?`\n- DOCTOR-CLEARED EXCEPTIONS: the client's physician explicitly approved these exercises despite the restrictions — do NOT flag, remove, or replace them: ${cleared.join(", ")}`:"";
+    const clearedLine=(cleared.length?`\n- DOCTOR-CLEARED EXCEPTIONS: the client's physician explicitly approved these exercises despite the restrictions — do NOT flag, remove, or replace them: ${cleared.join(", ")}`:"")
+      +`\n- CLEARANCE RULE: clearances stated in the health notes (e.g. a CLEARANCES section, "doctor cleared me for...") OVERRIDE the restrictions they refer to. Never flag or avoid anything covered by a clearance; if cleared for all activity, treat no movement as restricted.`;
+    const prefs=profileData?.activity_targets?.training_prefs||{};
+    const expLabel={new:"new to structured training — start conservative, prioritise form and confidence",returning:"returning after a break — rebuild volume gradually from a former base",regular:"trains regularly (6+ months) — normal progressive programming"}[prefs.experience]||"experience level unknown — assume returning after a break";
+    const styleLabel={machines:"prefers machines (guided movements)",free:"prefers free weights",mix:"comfortable mixing machines and free weights"}[prefs.style]||"no equipment-style preference stated";
+    const prefsLine=`\n- Session length: ~${prefs.session_min||60} minutes per strength session INCLUDING warm-up and rest between sets — the plan must genuinely fit this\n- Experience: ${expLabel}\n- Equipment style: ${styleLabel}`;
     return `CLIENT PROFILE:
 - ${pa.gender||"female"}, ${age} years old, ${w}kg, ${h}cm (BMR ~${Math.round(bmr)} kcal/day)
 - Goals:
 - ${goals}
 - Weekly schedule (fixed — the plan MUST fit exactly this): Strength ${at.strength||2}x, Mobility ${at.mobility||2}x, Cardio ${at.cardio||2}x per week
 - Training setting: ${equipLabel}
-- Health restrictions (hard constraints, never violate): ${healthNotes||"none"}${clearedLine}
+- Health restrictions (hard constraints, never violate): ${healthNotes||"none"}${clearedLine}${prefsLine}
 - Actual training last 14 days (calibrate difficulty to this real level, not an imagined one):
 ${recent}`;
   }
@@ -3962,6 +3969,14 @@ ${recent}`;
     await persist({workout_plan:newPlan, activity_targets:{...at, cleared_exercises:cleared}});
   }
 
+  // Persist intake answers, then generate — the wizard is the entry point
+  async function runIntakeAndSuggest(){
+    setShowIntake(false);
+    const at=profileData?.activity_targets||{};
+    await persist({activity_targets:{...at, equipment:equip, training_prefs:{experience:intake.experience,session_min:intake.session_min,style:intake.style}}});
+    await suggestPlan();
+  }
+
   async function suggestPlan(){
     if(!apiKey||processingPlan) return;
     setProcessingPlan(true);
@@ -3971,13 +3986,15 @@ ${trainerContext()}
 
 REQUIREMENTS:
 - The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
+- Each strength session must genuinely FIT the stated session length including a 5-min warm-up and realistic rest between sets — count the minutes; a 30-min session is 4-5 exercises max, a 60-min session 6-8.
+- Match the stated experience level: volume, exercise complexity, and coaching cues appropriate to it.
+- Respect the equipment-style preference (machines vs free weights vs mix) and only use equipment available in the training setting. Name SPECIFIC machines/equipment (e.g. "leg press machine", "seated cable row") so the client can find them in the gym.
 - Calibrate starting weights and difficulty to the client's actual recent training, not an idealised athlete.
-- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead.
-- Only use equipment available in the client's training setting.
+- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead. Honour clearances per the CLEARANCE RULE.
 - Serve the stated goals directly (e.g. push-up progression work if that is a goal).
 
 FORMAT (exactly):
-- ALL CAPS section headers, one per session (e.g. STRENGTH DAY 1 — FULL BODY, MOBILITY, CARDIO).
+- ALL CAPS section headers, one per session, including the time budget (e.g. STRENGTH DAY 1 — FULL BODY (~60 MIN), MOBILITY (~30 MIN)).
 - Each exercise on its own line: Exercise name — weight · sets×reps · rest.
 - End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
 - If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
@@ -4053,7 +4070,7 @@ Max 250 words total. No intro, no outro.`}]})});
     setProcessingNotes(true);
     try{
       const result = await aiCall(
-        `Read the following health notes and extract ONLY the medically relevant information. Rewrite it as a clean, very concise structured summary using ALL CAPS section headers and bullet points starting with •. Fix spelling and grammar. Be very brief — max 3 bullets per section. Use only sections that apply: CONDITIONS, RESTRICTIONS, SYMPTOMS, FOLLOW-UP. If something looks like an exercise restriction or contraindication, include it under RESTRICTIONS.\n\nReturn ONLY the formatted text, nothing else.\n\nHealth notes:\n${raw}`
+        `Read the following health notes and extract ONLY the medically relevant information. Rewrite it as a clean, very concise structured summary using ALL CAPS section headers and bullet points starting with •. Fix spelling and grammar. Be very brief — max 3 bullets per section. Use only sections that apply: CONDITIONS, RESTRICTIONS, CLEARANCES, SYMPTOMS, FOLLOW-UP. If something looks like an exercise restriction or contraindication, include it under RESTRICTIONS.\n\nCRITICAL: if the notes say a doctor/physician CLEARED the person for any activity (fully or specific exercises), you MUST preserve that verbatim under a CLEARANCES section — clearances are as medically relevant as restrictions and must never be dropped or softened. A clearance overrides earlier restrictions it refers to.\n\nReturn ONLY the formatted text, nothing else.\n\nHealth notes:\n${raw}`
       );
       return result.trim();
     }catch(e){return raw;}
@@ -4065,7 +4082,7 @@ Max 250 words total. No intro, no outro.`}]})});
     setProcessingPlan(true);
     try{
       const result = await aiCall(
-        `Read the following workout plan and reformat it as a clean, scannable workout plan. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY, etc.). Each exercise on its own line: Exercise name — weight · sets×reps · rest time. Fix exercise names and capitalisation. Group exercises into the correct sections.\n\nIf the health notes below mention restrictions or injuries that conflict with any exercise in the plan, add a line: ⚠️ FLAGGED: [exercise] — [reason from health notes]\n${(profileData?.activity_targets?.cleared_exercises||[]).length?`\nEXCEPTIONS — the client's physician explicitly cleared these exercises; NEVER flag them: ${profileData.activity_targets.cleared_exercises.join(", ")}\n`:""}\nReturn ONLY the formatted workout plan, nothing else.\n\nHealth notes: ${notes||"none"}\n\nWorkout plan:\n${raw}`
+        `Read the following workout plan and reformat it as a clean, scannable workout plan. Use ALL CAPS section headers (LOWER BODY, UPPER BODY, CORE, CARDIO, MOBILITY, etc.). Each exercise on its own line: Exercise name — weight · sets×reps · rest time. Fix exercise names and capitalisation. Group exercises into the correct sections.\n\nIf the health notes below mention restrictions or injuries that conflict with any exercise in the plan, add a line: ⚠️ FLAGGED: [exercise] — [reason from health notes]\nCLEARANCE RULE: if the health notes contain a CLEARANCES section or state a physician cleared the person (fully or for specific movements), those clearances OVERRIDE the restrictions they refer to — do NOT flag anything covered by a clearance. If cleared for all activity, flag nothing.\n${(profileData?.activity_targets?.cleared_exercises||[]).length?`\nEXCEPTIONS — the client's physician explicitly cleared these exercises; NEVER flag them: ${profileData.activity_targets.cleared_exercises.join(", ")}\n`:""}\nReturn ONLY the formatted workout plan, nothing else.\n\nHealth notes: ${notes||"none"}\n\nWorkout plan:\n${raw}`
       );
       return result.trim();
     }catch(e){return raw;}
@@ -4272,6 +4289,28 @@ Max 250 words total. No intro, no outro.`}]})});
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:6}}>Activity targets — sessions per week</div>
         {editTargets ? (
           <>
+            {(()=>{
+              // Recommend a 5-session split from the PRIMARY goal — the missing
+              // link in the goals -> targets chain
+              const gids=(profileData?.goals||[]).map(g=>g.id||"");
+              let rec=null, why="";
+              if(gids.some(g=>/strength|muscle/.test(g))){rec={strength:3,mobility:1,cardio:1};why="strength-building goal";}
+              else if(gids.some(g=>/body_comp|composition|fat/.test(g))){rec={strength:2,mobility:1,cardio:2};why="body-composition goal";}
+              else if(gids.some(g=>/cardio|endurance|fitness/.test(g))){rec={strength:1,mobility:1,cardio:3};why="cardio goal";}
+              else if(gids.length){rec={strength:2,mobility:2,cardio:1};why="balanced default for your goals";}
+              if(!rec) return null;
+              const same=rec.strength===(targets.strength||0)&&rec.mobility===(targets.mobility||0)&&rec.cardio===(targets.cardio||0);
+              return (
+                <div style={{background:C.pl,borderRadius:10,padding:"10px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:600,color:C.pu}}>Recommended for your {why}</div>
+                    <div style={{fontSize:11,color:C.t2,marginTop:2}}>{rec.strength} strength · {rec.mobility} mobility · {rec.cardio} cardio per week</div>
+                  </div>
+                  {!same&&<button onClick={()=>setTargets(rec)} style={{...s.btn("p"),...s.btnSm,fontSize:11}}>Apply</button>}
+                  {same&&<span style={{fontSize:11,color:C.teal,fontWeight:600}}>✓ set</span>}
+                </div>
+              );
+            })()}
             {[
               {k:"strength",label:"Strength",color:C.pu,desc:"Exercises that challenge your muscles against resistance — building muscle mass, bone density, and metabolic health.",examples:"weight training, resistance machines, bodyweight exercises, CrossFit, circuit training"},
               {k:"mobility",label:"Mobility",color:C.or,desc:"Movement that improves your range of motion, flexibility, and body control. Reduces injury risk and keeps your joints healthy.",examples:"yoga, Pilates, stretching, core training"},
@@ -4383,8 +4422,17 @@ Max 250 words total. No intro, no outro.`}]})});
                 setEditNotes(false);
                 // Health notes changed — any existing plan assessment is stale
                 setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
+                // Re-check the plan's flags against the NEW notes (flags live in the
+                // plan text, so they'd otherwise stay stale forever)
+                if(workoutPlan.trim()&&apiKey){
+                  const rechecked=await analysePlan(workoutPlan,structured);
+                  if(rechecked&&rechecked.trim()){setWorkoutPlan(rechecked);await persist({workout_plan:rechecked});}
+                  setSavedNotes("Saved ✓ — plan re-checked against new notes");
+                }
               }} style={{...s.btn("p"),opacity:processingNotes?0.6:1}}>{processingNotes?"Analysing...":"Analyse & Save"}</button>
-              {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
+              {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
+                if(workoutPlan.trim()&&apiKey){const rc=await analysePlan(workoutPlan,healthNotes);if(rc&&rc.trim()){setWorkoutPlan(rc);await persist({workout_plan:rc});}setSavedNotes("Saved ✓ — plan re-checked against new notes");}
+              }} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {healthNotes&&<button onClick={()=>setEditNotes(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
             </div>
@@ -4418,8 +4466,8 @@ Max 250 words total. No intro, no outro.`}]})});
                 <option value="bodyweight">Bodyweight only</option>
               </select>
             </div>
-            {apiKey&&<button disabled={processingPlan} onClick={suggestPlan} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
-              {processingPlan?"Designing your plan...":(workoutPlan.trim()?"🏋️ Suggest a new plan (replaces current)":"🏋️ Suggest a plan for me")}
+            {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
+              {processingPlan?"Designing your plan...":<><Icon name="dumbbell" size={14} color="#fff"/> {workoutPlan.trim()?"Design a new plan (replaces current)":"Design a plan for me"}</>}
             </button>}
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
@@ -4441,7 +4489,7 @@ Max 250 words total. No intro, no outro.`}]})});
             <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
               <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
               {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:<><Icon name="target" size={13}/> Assess my plan</>}</button>}
-              {apiKey&&<button disabled={processingPlan} onClick={()=>{if(window.confirm("This will replace your current plan with a new AI-designed one. Continue?"))suggestPlan();}} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Suggest a new plan</>}</button>}
+              {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Design a new plan</>}</button>}
             </div>
             {assessment&&(
               <div style={{marginTop:12,padding:"12px 14px",background:C.pl,borderRadius:10,borderLeft:`3px solid ${C.pu}`}}>
@@ -4449,7 +4497,7 @@ Max 250 words total. No intro, no outro.`}]})});
                   <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.pu}}>Trainer assessment</div>
                   <button onClick={()=>{setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14}}>×</button>
                 </div>
-                <div style={{fontSize:12,color:C.tx,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{assessment}</div>
+                <AssessmentView text={assessment}/>
               </div>
             )}
           </>
@@ -4500,6 +4548,98 @@ Max 250 words total. No intro, no outro.`}]})});
         if(daysInApp<28) return null;
         return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
       })()}
+
+      {/* ── PLAN INTAKE WIZARD: the coach asks before prescribing ── */}
+      {showIntake&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowIntake(false);}}>
+          <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:4}}>Let's design your plan</h3>
+            <p style={{fontSize:12,color:C.t2,marginBottom:16}}>A few questions first — like a trainer would ask. Your goals, weekly targets and health notes are already included.</p>
+
+            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>How experienced are you with training?</label>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
+              {[["new","New to structured training","start with the basics, focus on form"],["returning","Coming back after a break","rebuild gradually from a former base"],["regular","Training regularly 6+ months","normal progressive programming"]].map(([v,l,d])=>(
+                <div key={v} onClick={()=>setIntake(p=>({...p,experience:v}))} style={{padding:"10px 12px",border:`1.5px solid ${intake.experience===v?C.pu:C.bd}`,background:intake.experience===v?C.pl:C.sf,borderRadius:10,cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:500}}>{l}</div>
+                  <div style={{fontSize:11,color:C.t3}}>{d}</div>
+                </div>
+              ))}
+            </div>
+
+            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>How long is a session for you?</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
+              {[30,45,60,90].map(m=>(
+                <button key={m} onClick={()=>setIntake(p=>({...p,session_min:m}))} style={{...s.btn(intake.session_min===m?"p":"s"),padding:"10px 0",justifyContent:"center"}}>{m}m</button>
+              ))}
+            </div>
+
+            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>Where do you train?</label>
+            <select value={equip} onChange={e=>setEquip(e.target.value)} style={{...s.input,marginBottom:14}}>
+              <option value="gym">Full gym</option>
+              <option value="home">Home — dumbbells & bands</option>
+              <option value="bodyweight">Bodyweight only</option>
+            </select>
+
+            {equip==="gym"&&(<>
+              <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>Machines or free weights?</label>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+                {[["machines","Machines"],["mix","Mix"],["free","Free weights"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setIntake(p=>({...p,style:v}))} style={{...s.btn(intake.style===v?"p":"s"),padding:"9px 0",justifyContent:"center",fontSize:12}}>{l}</button>
+                ))}
+              </div>
+            </>)}
+
+            {workoutPlan.trim()&&<p style={{fontSize:11,color:C.am,marginBottom:12}}>This replaces your current plan. Doctor-cleared exercises stay respected.</p>}
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowIntake(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={runIntakeAndSuggest} style={s.btn("p")}><Icon name="dumbbell" size={14} color="#fff"/> Design my plan</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Renders the trainer assessment as structured sections instead of a text blob
+function AssessmentView({text}){
+  const SECTIONS={
+    "VERDICT":{label:"Verdict",color:C.pu,bg:C.pl},
+    "SAFETY":{label:"Safety",color:C.red,bg:C.rl},
+    "WHAT'S WORKING":{label:"What's working",color:C.teal,bg:C.tl},
+    "GAPS & FIXES":{label:"Gaps & fixes",color:C.am,bg:C.al},
+    "ALIGNMENT":{label:"Alignment",color:C.sl,bg:C.sll},
+  };
+  const lines=(text||"").split("\n");
+  const blocks=[]; let cur=null; let stamp="";
+  lines.forEach(line=>{
+    const t=line.trim(); if(!t) return;
+    if(/^Assessed /.test(t)&&!cur){ stamp=t; return; }
+    const m=t.match(/^(VERDICT|SAFETY|WHAT'S WORKING|GAPS & FIXES|ALIGNMENT):?\s*(.*)$/);
+    if(m){ cur={key:m[1],items:m[2]?[m[2]]:[]}; blocks.push(cur); }
+    else if(cur){ cur.items.push(t.replace(/^[-•]\s*/,"")); }
+    else { blocks.push({key:null,items:[t]}); }
+  });
+  if(!blocks.length) return <div style={{fontSize:12,color:C.tx,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{text}</div>;
+  return (
+    <div>
+      {stamp&&<div style={{fontSize:10,color:C.t3,marginBottom:10}}>{stamp}</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {blocks.map((b,i)=>{
+          const sec=SECTIONS[b.key]||{label:b.key||"",color:C.t2,bg:C.s2};
+          return (
+            <div key={i} style={{background:C.sf,borderRadius:10,padding:"10px 12px",borderLeft:`3px solid ${sec.color}`}}>
+              {b.key&&<div style={{fontSize:10,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color:sec.color,marginBottom:4}}>{sec.label}</div>}
+              {b.items.map((it,j)=>(
+                <div key={j} style={{fontSize:12,color:C.tx,lineHeight:1.6,marginBottom:j<b.items.length-1?4:0,display:"flex",gap:6}}>
+                  {b.items.length>1&&<span style={{color:sec.color,flexShrink:0}}>·</span>}
+                  <span>{it}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
