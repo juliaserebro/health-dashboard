@@ -435,22 +435,22 @@ const C = {
 // ── SUPABASE ──────────────────────────────────────────────────────────────
 // ── STYLES ────────────────────────────────────────────────────────────────
 const s = {
-  shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 80px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
-  card:{background:C.sf,borderRadius:14,border:`1px solid rgba(0,0,0,.07)`,padding:"16px 18px",marginBottom:14},
+  shell:{maxWidth:980,margin:"0 auto",padding:"20px 16px 96px",fontFamily:"'Inter',-apple-system,sans-serif",fontSize:14,color:C.tx,background:C.bg,minHeight:"100vh"},
+  card:{background:C.sf,borderRadius:16,border:`1px solid rgba(0,0,0,.04)`,boxShadow:"0 1px 2px rgba(26,25,23,.04), 0 4px 16px rgba(26,25,23,.05)",padding:"16px 18px",marginBottom:14},
   hdr:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,gap:10,flexWrap:"wrap"},
   h1:{fontSize:32,fontWeight:600,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",letterSpacing:"-.5px",margin:0,lineHeight:1.1},
   tabs:{display:"flex",gap:2,marginBottom:20,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"},
   tb:(active)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,color:active?C.tx:C.t2,background:"none",border:"none",cursor:"pointer",padding:"8px 14px",borderBottom:active?`2px solid ${C.tx}`:"2px solid transparent",marginBottom:-1,whiteSpace:"nowrap",flexShrink:0}),
   mg:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14},
   mg2:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14},
-  mc:{background:C.sf,borderRadius:12,border:`1px solid rgba(0,0,0,.07)`,padding:"14px 16px"},
+  mc:{background:C.sf,borderRadius:14,border:`1px solid rgba(0,0,0,.04)`,boxShadow:"0 1px 2px rgba(26,25,23,.04), 0 3px 10px rgba(26,25,23,.04)",padding:"14px 16px"},
   ml:{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.t3,marginBottom:5},
   mv:{fontSize:21,fontWeight:600,letterSpacing:"-.5px",lineHeight:1.1},
   ms:{fontSize:11,marginTop:3},
   secLbl:{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:C.t3,marginBottom:16,display:"flex",alignItems:"center",gap:8},
   secLine:{flex:1,height:1,background:"linear-gradient(to right,rgba(0,0,0,.08),transparent)"},
   hr:{border:"none",borderTop:`2px solid ${C.s2}`,margin:"28px 0 24px"},
-  aiCard:{background:C.sf,borderRadius:12,border:`.5px solid ${C.bd}`,borderLeft:`3px solid ${C.pu}`,padding:"16px 18px",marginBottom:14},
+  aiCard:{background:C.sf,borderRadius:14,border:`1px solid rgba(0,0,0,.04)`,borderLeft:`3px solid ${C.pu}`,boxShadow:"0 1px 2px rgba(26,25,23,.04), 0 4px 16px rgba(26,25,23,.05)",padding:"16px 18px",marginBottom:14},
   aiLbl:{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:10,display:"flex",alignItems:"center",gap:6},
   btn:(v)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,padding:"8px 18px",borderRadius:8,cursor:"pointer",border:"none",...(v==="p"?{background:C.tx,color:"#fff"}:{background:C.sf,color:C.t2,border:`.5px solid ${C.bd}`})}),
   btnSm:{padding:"5px 12px",fontSize:12},
@@ -461,7 +461,7 @@ const s = {
   pb:{height:6,borderRadius:3,background:C.s2,overflow:"hidden",margin:"5px 0 3px"},
   pf:(w,bg)=>({height:"100%",borderRadius:3,width:w+"%",background:bg}),
   mo:{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
-  modal:{background:C.sf,borderRadius:12,padding:24,width:400,maxWidth:"100%"},
+  modal:{background:C.sf,borderRadius:16,padding:24,width:400,maxWidth:"100%",boxShadow:"0 12px 40px rgba(26,25,23,.18)"},
 };
 
 // ── MINI COMPONENTS ───────────────────────────────────────────────────────
@@ -4994,7 +4994,21 @@ export default function App() {
 
   return (
     <div style={s.shell}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}
+        .bottomNav{display:none}
+        button{-webkit-tap-highlight-color:transparent}
+        @media(max-width:640px){
+          .topTabs{display:none !important}
+          .appTitle{font-size:26px !important}
+          .bottomNav{display:flex !important;position:fixed;bottom:0;left:0;right:0;z-index:60;
+            background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+            border-top:1px solid rgba(0,0,0,.07);
+            padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+            justify-content:space-around;align-items:center}
+          .bottomNav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+            background:none;border:none;font-family:inherit;cursor:pointer;padding:4px 0;min-height:48px;justify-content:center}
+          .coachFab{bottom:calc(78px + env(safe-area-inset-bottom)) !important}
+        }`}</style>
       {IS_DEMO&&<div style={{background:"linear-gradient(90deg,#eeedf8,#e0f4ed)",color:"#4a42b0",fontSize:12,textAlign:"center",padding:"8px 14px",fontWeight:500,borderRadius:10,marginBottom:14,border:"1px solid rgba(74,66,176,.15)"}}>
         👋 You're exploring a live demo of Health Coach — all data belongs to Maya, a sample user.
       </div>}
@@ -5017,7 +5031,7 @@ export default function App() {
 
       <div style={s.hdr}>
         <div>
-          <h1 style={s.h1}>Health Coach</h1>
+          <h1 className="appTitle" style={s.h1}>Health Coach</h1>
           <div style={{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.t3,marginTop:6}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -5029,7 +5043,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={s.tabs}>
+      <div className="topTabs" style={s.tabs}>
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
@@ -5040,9 +5054,19 @@ export default function App() {
       {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey}/>}
 
       {/* COACH CHAT BUTTON */}
-      <button onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
+      <button className="coachFab" onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
         💬 Ask your coach
       </button>
+
+      {/* BOTTOM NAV — native-style tab bar, mobile only (CSS media query) */}
+      <nav className="bottomNav">
+        {[["dash","📊","Home"],["food","🍽️","Food"],["log","📝","Log"],["profile","👤","Profile"],["cycle","🌙","Cycle"]].map(([id,icon,label])=>(
+          <button key={id} onClick={()=>setTab(id)}>
+            <span style={{fontSize:20,filter:tab===id?"none":"grayscale(1) opacity(.55)"}}>{icon}</span>
+            <span style={{fontSize:10,fontWeight:tab===id?700:500,color:tab===id?C.pu:C.t3}}>{label}</span>
+          </button>
+        ))}
+      </nav>
 
       {/* CHAT MODAL */}
       {showChat&&(

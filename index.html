@@ -877,7 +877,7 @@ const s = {
   shell: {
     maxWidth: 980,
     margin: "0 auto",
-    padding: "20px 16px 80px",
+    padding: "20px 16px 96px",
     fontFamily: "'Inter',-apple-system,sans-serif",
     fontSize: 14,
     color: C.tx,
@@ -886,8 +886,9 @@ const s = {
   },
   card: {
     background: C.sf,
-    borderRadius: 14,
-    border: `1px solid rgba(0,0,0,.07)`,
+    borderRadius: 16,
+    border: `1px solid rgba(0,0,0,.04)`,
+    boxShadow: "0 1px 2px rgba(26,25,23,.04), 0 4px 16px rgba(26,25,23,.05)",
     padding: "16px 18px",
     marginBottom: 14
   },
@@ -943,8 +944,9 @@ const s = {
   },
   mc: {
     background: C.sf,
-    borderRadius: 12,
-    border: `1px solid rgba(0,0,0,.07)`,
+    borderRadius: 14,
+    border: `1px solid rgba(0,0,0,.04)`,
+    boxShadow: "0 1px 2px rgba(26,25,23,.04), 0 3px 10px rgba(26,25,23,.04)",
     padding: "14px 16px"
   },
   ml: {
@@ -988,9 +990,10 @@ const s = {
   },
   aiCard: {
     background: C.sf,
-    borderRadius: 12,
-    border: `.5px solid ${C.bd}`,
+    borderRadius: 14,
+    border: `1px solid rgba(0,0,0,.04)`,
     borderLeft: `3px solid ${C.pu}`,
+    boxShadow: "0 1px 2px rgba(26,25,23,.04), 0 4px 16px rgba(26,25,23,.05)",
     padding: "16px 18px",
     marginBottom: 14
   },
@@ -1087,10 +1090,11 @@ const s = {
   },
   modal: {
     background: C.sf,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 24,
     width: 400,
-    maxWidth: "100%"
+    maxWidth: "100%",
+    boxShadow: "0 12px 40px rgba(26,25,23,.18)"
   }
 };
 
@@ -10454,7 +10458,21 @@ function App() {
   }
   return /*#__PURE__*/React.createElement("div", {
     style: s.shell
-  }, /*#__PURE__*/React.createElement("style", null, `@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}`), IS_DEMO && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("style", null, `@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}
+        .bottomNav{display:none}
+        button{-webkit-tap-highlight-color:transparent}
+        @media(max-width:640px){
+          .topTabs{display:none !important}
+          .appTitle{font-size:26px !important}
+          .bottomNav{display:flex !important;position:fixed;bottom:0;left:0;right:0;z-index:60;
+            background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+            border-top:1px solid rgba(0,0,0,.07);
+            padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+            justify-content:space-around;align-items:center}
+          .bottomNav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+            background:none;border:none;font-family:inherit;cursor:pointer;padding:4px 0;min-height:48px;justify-content:center}
+          .coachFab{bottom:calc(78px + env(safe-area-inset-bottom)) !important}
+        }`), IS_DEMO && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(90deg,#eeedf8,#e0f4ed)",
       color: "#4a42b0",
@@ -10525,6 +10543,7 @@ function App() {
   }, "Open full app")), /*#__PURE__*/React.createElement("div", {
     style: s.hdr
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
+    className: "appTitle",
     style: s.h1
   }, "Health Coach"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -10581,6 +10600,7 @@ function App() {
       ...s.btnSm
     }
   }, "\u2699 Settings"))), /*#__PURE__*/React.createElement("div", {
+    className: "topTabs",
     style: s.tabs
   }, TABS.map(t => /*#__PURE__*/React.createElement("button", {
     key: t.id,
@@ -10625,6 +10645,7 @@ function App() {
     fitbitData: fitbitData,
     apiKey: apiKey
   }), /*#__PURE__*/React.createElement("button", {
+    className: "coachFab",
     onClick: () => setShowChat(true),
     style: {
       position: "fixed",
@@ -10645,7 +10666,23 @@ function App() {
       gap: 8,
       boxShadow: "0 4px 16px rgba(74,66,176,.35)"
     }
-  }, "\uD83D\uDCAC Ask your coach"), showChat && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCAC Ask your coach"), /*#__PURE__*/React.createElement("nav", {
+    className: "bottomNav"
+  }, [["dash", "📊", "Home"], ["food", "🍽️", "Food"], ["log", "📝", "Log"], ["profile", "👤", "Profile"], ["cycle", "🌙", "Cycle"]].map(([id, icon, label]) => /*#__PURE__*/React.createElement("button", {
+    key: id,
+    onClick: () => setTab(id)
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 20,
+      filter: tab === id ? "none" : "grayscale(1) opacity(.55)"
+    }
+  }, icon), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      fontWeight: tab === id ? 700 : 500,
+      color: tab === id ? C.pu : C.t3
+    }
+  }, label)))), showChat && /*#__PURE__*/React.createElement("div", {
     style: s.mo,
     onClick: e => {
       if (e.target === e.currentTarget) setShowChat(false);
