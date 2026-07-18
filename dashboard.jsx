@@ -3925,7 +3925,9 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [cycleTracking, setCycleTracking] = useState(profileData?.cycle_tracking!==false);
   const [equip, setEquip] = useState(profileData?.activity_targets?.equipment||"gym");
   const [showIntake, setShowIntake] = useState(false);
-  const [intake, setIntake] = useState(()=>({experience:"returning",session_min:60,style:"mix",...(profileData?.activity_targets?.training_prefs||{})}));
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyView, setHistoryView] = useState(null); // index of expanded past plan
+  const [intake, setIntake] = useState(()=>({experience:"returning",session_min:60,style:"mix",notes:"",...(profileData?.activity_targets?.training_prefs||{})}));
   const [assessing, setAssessing] = useState(false);
   const [assessment, setAssessment] = useState(()=>{try{return localStorage.getItem("plan_assessment")||"";}catch{return "";}});
 
@@ -3947,7 +3949,8 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
     const prefs=profileData?.activity_targets?.training_prefs||{};
     const expLabel={new:"new to structured training — start conservative, prioritise form and confidence",returning:"returning after a break — rebuild volume gradually from a former base",regular:"trains regularly (6+ months) — normal progressive programming"}[prefs.experience]||"experience level unknown — assume returning after a break";
     const styleLabel={machines:"prefers machines (guided movements)",free:"prefers free weights",mix:"comfortable mixing machines and free weights"}[prefs.style]||"no equipment-style preference stated";
-    const prefsLine=`\n- Session length: ~${prefs.session_min||60} minutes per strength session INCLUDING warm-up and rest between sets — the plan must genuinely fit this\n- Experience: ${expLabel}\n- Equipment style: ${styleLabel}`;
+    const prefsLine=`\n- Session length: ~${prefs.session_min||60} minutes per strength session INCLUDING warm-up and rest between sets — the plan must genuinely fit this\n- Experience: ${expLabel}\n- Equipment style: ${styleLabel}`
+      +(prefs.notes?`\n- CLIENT'S OWN COMMENTS (treat this as your client talking to you — address every point directly in your choices): "${prefs.notes}"`:"");
     return `CLIENT PROFILE:
 - ${pa.gender||"female"}, ${age} years old, ${w}kg, ${h}cm (BMR ~${Math.round(bmr)} kcal/day)
 - Goals:
@@ -3969,20 +3972,43 @@ ${recent}`;
     await persist({workout_plan:newPlan, activity_targets:{...at, cleared_exercises:cleared}});
   }
 
+  // Save a NEW plan: archive the outgoing one into plan_history (last 6),
+  // so the coach can progress from it and the user can restore it.
+  // Small tweaks (flag clears, replacement accepts) update workout_plan
+  // directly and deliberately do NOT create history entries.
+  async function persistPlan(newPlan){
+    let history=profileData?.plan_history||[];
+    const prev=(profileData?.workout_plan||"").trim(); // last PERSISTED plan, not edit-box state
+    if(prev&&prev!==newPlan.trim()){
+      history=[{plan:prev,saved_at:new Date().toISOString()},...history].slice(0,6);
+    }
+    setWorkoutPlan(newPlan);
+    await persist({workout_plan:newPlan, plan_history:history});
+  }
+
   // Persist intake answers, then generate — the wizard is the entry point
   async function runIntakeAndSuggest(){
     setShowIntake(false);
     const at=profileData?.activity_targets||{};
-    await persist({activity_targets:{...at, equipment:equip, training_prefs:{experience:intake.experience,session_min:intake.session_min,style:intake.style}}});
+    await persist({activity_targets:{...at, equipment:equip, training_prefs:{experience:intake.experience,session_min:intake.session_min,style:intake.style,notes:(intake.notes||"").trim()}}});
     await suggestPlan();
   }
 
   async function suggestPlan(){
     if(!apiKey||processingPlan) return;
     setProcessingPlan(true);
+    const prevPlanBlock=workoutPlan.trim()?`
+
+CURRENT PLAN (the client has been running this — design the NEW plan as a progression of it, not a reset):
+${workoutPlan}
+
+CONTINUITY RULES:
+- Carry working weights FORWARD and progress them; never drop back to beginner weights on exercises the client already does.
+- Keep exercises that are working unless the client's comments ask for change; if they asked to mix things up, vary the movements but preserve the progression level.
+- If the client's comments mention an exercise that hurts or feels wrong, replace it and briefly note the swap inline (e.g. "replacing lat pulldown per your note").`:"";
     const prompt=`You are an experienced, evidence-based personal trainer. Design a complete weekly workout plan for this client.
 
-${trainerContext()}
+${trainerContext()}${prevPlanBlock}
 
 REQUIREMENTS:
 - The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
@@ -4004,7 +4030,7 @@ Return ONLY the plan, nothing else.`;
       const d=await res.json();
       if(d.error) throw new Error(d.error.message);
       const plan=d.content?.[0]?.text?.trim()||"";
-      if(plan){setWorkoutPlan(plan);await persist({workout_plan:plan});setEditPlan(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}
+      if(plan){await persistPlan(plan);setEditPlan(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}
     }catch(e){console.log("Build plan error:",e.message);}
     setProcessingPlan(false);
   }
@@ -4021,12 +4047,16 @@ ${trainerContext()}
 
 THE PLAN AS WRITTEN:
 ${workoutPlan}
-
+${(profileData?.plan_history||[]).length?`
+PREVIOUS PLAN (saved ${new Date(profileData.plan_history[0].saved_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}) — compare for PROGRESSION (are weights/reps moving forward, stalling, or regressing?):
+${profileData.plan_history[0].plan}
+`:""}
 Assess it and answer in EXACTLY this structure (plain text, these ALL-CAPS labels):
 VERDICT: One or two sentences — done at the weekly schedule above, will this plan realistically achieve the stated goals? Yes / mostly / no, and why.
 SAFETY: Any exercise conflicting with the health restrictions, each on its own line as "⚠️ Exercise — reason". If none: "No safety conflicts found."
 WHAT'S WORKING: 2-3 short bullets on what to keep.
-GAPS & FIXES: 3-5 short bullets — missing movement patterns, volume or intensity gaps vs the goals, and CONCRETE progression targets (specific weights, reps or timelines, e.g. "leg press: work from 35kg to 50kg over ~8 weeks, add 2.5kg when 3x12 feels easy").
+GAPS & FIXES: 3-5 short bullets — missing movement patterns, volume or intensity gaps vs the goals, and CONCRETE progression targets (specific weights, reps or timelines, e.g. "leg press: work from 35kg to 50kg over ~8 weeks, add 2.5kg when 3x12 feels easy").${(profileData?.plan_history||[]).length?`
+PROGRESSION: 1-2 sentences comparing this plan to the previous one — which exercises moved forward, which stalled, and whether the pace is right.`:""}
 ALIGNMENT: One sentence — do the weekly activity targets themselves match the goals, or should they change?
 Max 250 words total. No intro, no outro.`}]})});
       const d=await res.json();
@@ -4473,11 +4503,11 @@ Max 250 words total. No intro, no outro.`}]})});
             <div style={saveRow}>
               <button disabled={processingPlan||!workoutPlan.trim()} onClick={async()=>{
                 const structured=await analysePlan(workoutPlan,healthNotes);
-                setWorkoutPlan(structured);
-                await persist({workout_plan:structured},setSavedPlan);
+                await persistPlan(structured);
+                setSavedPlan("Saved ✓");
                 setEditPlan(false);
               }} style={{...s.btn("p"),opacity:processingPlan?0.6:1}}>{processingPlan?"Organising...":"Organise & Save"}</button>
-              {workoutPlan&&!processingPlan&&<button onClick={async()=>{await persist({workout_plan:workoutPlan},setSavedPlan);setEditPlan(false);}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
+              {workoutPlan&&!processingPlan&&<button onClick={async()=>{await persistPlan(workoutPlan);setSavedPlan("Saved ✓");setEditPlan(false);}} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {workoutPlan&&<button onClick={()=>setEditPlan(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedPlan&&<span style={{fontSize:12,color:C.teal}}>{savedPlan}</span>}
             </div>
@@ -4498,6 +4528,24 @@ Max 250 words total. No intro, no outro.`}]})});
                   <button onClick={()=>{setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14}}>×</button>
                 </div>
                 <AssessmentView text={assessment}/>
+              </div>
+            )}
+            {/* Previous plans — quiet history with view + restore */}
+            {(profileData?.plan_history||[]).length>0&&(
+              <div style={{marginTop:12}}>
+                <button onClick={()=>setHistoryOpen(v=>!v)} style={{background:"none",border:"none",padding:0,fontSize:11,color:C.t3,cursor:"pointer",fontWeight:500}}>
+                  {historyOpen?"▾":"▸"} {profileData.plan_history.length} previous plan{profileData.plan_history.length!==1?"s":""} remembered
+                </button>
+                {historyOpen&&profileData.plan_history.map((h,i)=>(
+                  <div key={i} style={{marginTop:8,background:C.s2,borderRadius:10,padding:"9px 12px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{flex:1,fontSize:11.5,fontWeight:500,color:C.t2}}>Saved {new Date(h.saved_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</span>
+                      <button onClick={()=>setHistoryView(historyView===i?null:i)} style={{...s.btn("s"),...s.btnSm,fontSize:10,padding:"3px 9px"}}>{historyView===i?"Hide":"View"}</button>
+                      <button onClick={async()=>{if(window.confirm("Restore this plan? Your current plan will be kept in history."))await persistPlan(h.plan);}} style={{...s.btn("s"),...s.btnSm,fontSize:10,padding:"3px 9px"}}>Restore</button>
+                    </div>
+                    {historyView===i&&<div style={{marginTop:8,fontSize:11,color:C.t2,lineHeight:1.6,whiteSpace:"pre-wrap",maxHeight:220,overflowY:"auto"}}>{h.plan}</div>}
+                  </div>
+                ))}
               </div>
             )}
           </>
@@ -4589,7 +4637,13 @@ Max 250 words total. No intro, no outro.`}]})});
               </div>
             </>)}
 
-            {workoutPlan.trim()&&<p style={{fontSize:11,color:C.am,marginBottom:12}}>This replaces your current plan. Doctor-cleared exercises stay respected.</p>}
+            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:4}}>Tell your coach anything else <span style={{fontWeight:400,color:C.t3}}>(optional)</span></label>
+            <div style={{fontSize:10.5,color:C.t3,marginBottom:6,lineHeight:1.5}}>What you've been doing and how it felt · machines or exercises you like or dislike · anything that doesn't feel right · "I want to mix things up" · days that work best</div>
+            <textarea value={intake.notes||""} onChange={e=>setIntake(p=>({...p,notes:e.target.value}))} rows={3}
+              placeholder="e.g. I've been doing the leg press and it feels great, but the lat pulldown hurts my shoulder — and I'm bored of my current routine, surprise me"
+              style={{...s.input,resize:"vertical",marginBottom:14,fontFamily:"inherit"}}/>
+
+            {workoutPlan.trim()&&<p style={{fontSize:11,color:C.am,marginBottom:12}}>Your current plan is remembered and used for continuity — the new one progresses from it rather than starting over.</p>}
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowIntake(false)} style={s.btn("s")}>Cancel</button>
               <button onClick={runIntakeAndSuggest} style={s.btn("p")}><Icon name="dumbbell" size={14} color="#fff"/> Design my plan</button>
@@ -4608,6 +4662,7 @@ function AssessmentView({text}){
     "SAFETY":{label:"Safety",color:C.red,bg:C.rl},
     "WHAT'S WORKING":{label:"What's working",color:C.teal,bg:C.tl},
     "GAPS & FIXES":{label:"Gaps & fixes",color:C.am,bg:C.al},
+    "PROGRESSION":{label:"Progression",color:C.or,bg:C.orl},
     "ALIGNMENT":{label:"Alignment",color:C.sl,bg:C.sll},
   };
   const lines=(text||"").split("\n");
@@ -4615,7 +4670,7 @@ function AssessmentView({text}){
   lines.forEach(line=>{
     const t=line.trim(); if(!t) return;
     if(/^Assessed /.test(t)&&!cur){ stamp=t; return; }
-    const m=t.match(/^(VERDICT|SAFETY|WHAT'S WORKING|GAPS & FIXES|ALIGNMENT):?\s*(.*)$/);
+    const m=t.match(/^(VERDICT|SAFETY|WHAT'S WORKING|GAPS & FIXES|PROGRESSION|ALIGNMENT):?\s*(.*)$/);
     if(m){ cur={key:m[1],items:m[2]?[m[2]]:[]}; blocks.push(cur); }
     else if(cur){ cur.items.push(t.replace(/^[-•]\s*/,"")); }
     else { blocks.push({key:null,items:[t]}); }
