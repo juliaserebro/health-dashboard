@@ -452,7 +452,7 @@ const s = {
   hr:{border:"none",borderTop:`2px solid ${C.s2}`,margin:"28px 0 24px"},
   aiCard:{background:C.sf,borderRadius:14,border:`1px solid rgba(0,0,0,.04)`,borderLeft:`3px solid ${C.pu}`,boxShadow:"0 1px 2px rgba(26,25,23,.04), 0 4px 16px rgba(26,25,23,.05)",padding:"16px 18px",marginBottom:14},
   aiLbl:{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:10,display:"flex",alignItems:"center",gap:6},
-  btn:(v)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,padding:"8px 18px",borderRadius:8,cursor:"pointer",border:"none",...(v==="p"?{background:C.tx,color:"#fff"}:{background:C.sf,color:C.t2,border:`.5px solid ${C.bd}`})}),
+  btn:(v)=>({fontFamily:"inherit",fontSize:13,fontWeight:500,padding:"8px 18px",borderRadius:8,cursor:"pointer",border:"none",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,...(v==="p"?{background:C.tx,color:"#fff"}:{background:C.sf,color:C.t2,border:`.5px solid ${C.bd}`})}),
   btnSm:{padding:"5px 12px",fontSize:12},
   input:{width:"100%",padding:"8px 12px",border:`.5px solid ${C.bd}`,borderRadius:8,fontFamily:"inherit",fontSize:13,background:C.s2,color:C.tx,boxSizing:"border-box"},
   pill:(bg,color)=>({fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:color}),
@@ -466,7 +466,7 @@ const s = {
 
 // ── MINI COMPONENTS ───────────────────────────────────────────────────────
 function Card({children, style={}}) {
-  return <div style={{...s.card,...style}}>{children}</div>;
+  return <div className="hcCard" style={{...s.card,...style}}>{children}</div>;
 }
 function SecLabel({children}) {
   return <div style={s.secLbl}>{children}<div style={s.secLine}/></div>;
@@ -489,6 +489,34 @@ function Metric({label,value,sub,subColor,compact=false}) {
 }
 function Spinner() {
   return <span style={{width:14,height:14,border:`2px solid ${C.bd}`,borderTopColor:C.pu,borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite",verticalAlign:"middle",marginRight:6}}/>;
+}
+
+// ── ICON SYSTEM ──────────────────────────────────────────────────────────
+// One consistent stroke-based line-icon set (24 viewBox, 2px, round caps)
+// replacing the mixed emoji chrome. Usage: <Icon name="sync" size={16}/>
+const ICON_PATHS = {
+  home:      <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>,
+  food:      <><path d="M5 3v5a2.5 2.5 0 0 0 5 0V3"/><path d="M7.5 3v18"/><path d="M17 21V3c-2.2 1.8-3.5 5-3.5 8 0 2 1.2 3.5 3.5 3.5"/></>,
+  log:       <><path d="M17 3l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></>,
+  profile:   <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></>,
+  moon:      <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>,
+  sync:      <><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></>,
+  settings:  <><path d="M5 21v-5M5 10V3M12 21v-9M12 6V3M19 21v-3M19 12V3"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="16" r="2"/></>,
+  share:     <><path d="M12 3v13"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/></>,
+  chat:      <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>,
+  plus:      <path d="M12 5v14M5 12h14"/>,
+  dumbbell:  <><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5"/><path d="M6.5 12h11"/></>,
+  target:    <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".5"/></>,
+  repeat:    <><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></>,
+};
+function Icon({name,size=16,color="currentColor",strokeWidth=2,style={}}) {
+  const p = ICON_PATHS[name];
+  if(!p) return null;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{flexShrink:0,verticalAlign:"middle",...style}}>{p}</svg>
+  );
 }
 
 function CyclePhaseMetric({cycleDates, cycleLog}) {
@@ -2074,15 +2102,32 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>
               Readiness today — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
-              <div style={{fontSize:52,fontWeight:700,letterSpacing:-2,lineHeight:1,color:scoreCol}}>{totalScore}</div>
-              <div style={{flex:1}}>
-                <div style={{height:7,borderRadius:4,background:C.s2,overflow:"hidden",marginBottom:5}}>
-                  <div style={{width:totalScore+"%",height:"100%",background:scoreCol,borderRadius:4}}/>
+            {(()=>{
+              // Circular readiness gauge — CSS-animated ring fill on load
+              const R=40, CIRC=2*Math.PI*R;
+              const off=CIRC*(1-Math.min(100,totalScore)/100);
+              return (
+                <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:14}}>
+                  <div style={{position:"relative",width:104,height:104,flexShrink:0}}>
+                    <svg width="104" height="104" viewBox="0 0 104 104">
+                      <circle cx="52" cy="52" r={R} fill="none" stroke={C.s2} strokeWidth="9"/>
+                      <circle cx="52" cy="52" r={R} fill="none" stroke={scoreCol} strokeWidth="9"
+                        strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={off}
+                        transform="rotate(-90 52 52)"
+                        style={{transition:"stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"}}/>
+                    </svg>
+                    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                      <div style={{fontSize:30,fontWeight:700,letterSpacing:-1,lineHeight:1,color:scoreCol}}>{totalScore}</div>
+                      <div style={{fontSize:9,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginTop:2}}>/ 100</div>
+                    </div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:19,fontWeight:600,color:scoreCol,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>{scoreLabel}</div>
+                    <div style={{fontSize:11.5,color:C.t3,lineHeight:1.5,marginTop:3}}>from last night's sleep, training load, protein & heart rate</div>
+                  </div>
                 </div>
-                <div style={{fontSize:12,fontWeight:500,color:scoreCol}}>{scoreLabel}</div>
-              </div>
-            </div>
+              );
+            })()}
             <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
               {rows.map(([label,pts,col],i)=>(
                 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<rows.length-1?`.5px solid ${C.bd}`:"none"}}>
@@ -2325,7 +2370,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 ],
                 footer:`shared ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
               });
-            }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}>📤 Share my week</button>
+            }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}><Icon name="share" size={13}/> Share my week</button>
           </div>
         );
       })()}
@@ -2490,7 +2535,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             ],
             footer:`shared ${now3.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
           });
-        }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}>📤 Share my month</button>
+        }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}><Icon name="share" size={13}/> Share my month</button>
       </Card>
 
       {/* WEEK BY WEEK */}
@@ -3116,7 +3161,7 @@ Input: ${txtInput}`;
       {(quickChips.length>0||pinned.length>0||(allFood[tkey(new Date(Date.now()-864e5))]||[]).length>0)&&(
         <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:6,marginBottom:8,WebkitOverflowScrolling:"touch"}}>
           {(allFood[tkey(new Date(Date.now()-864e5))]||[]).length>0&&(
-            <button onClick={repeatYesterday} style={{...s.btn("p"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>↩ Repeat yesterday</button>
+            <button onClick={repeatYesterday} style={{...s.btn("p"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0}}><Icon name="repeat" size={12}/> Repeat yesterday</button>
           )}
           {pinned.map(p=>(
             <button key={"pin"+p.n} onClick={()=>cloneEntryTo(p,foodDate)} style={{...s.btn("s"),...s.btnSm,fontSize:11,whiteSpace:"nowrap",flexShrink:0,color:C.am}}>★ {p.n}</button>
@@ -3128,7 +3173,7 @@ Input: ${txtInput}`;
       )}
 
       <button onClick={()=>{setMealDate(foodDate);setEatenTime(new Date().toTimeString().slice(0,5));setShowTxt(true);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:12,width:"100%",marginBottom:14,background:C.sf,border:`1.5px dashed ${C.bd}`,borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:13,color:C.t2}}>
-        📝 Log a meal
+        <Icon name="plus" size={15}/> Log a meal
       </button>
 
       {/* FOOD ENTRIES */}
@@ -4366,8 +4411,8 @@ Max 250 words total. No intro, no outro.`}]})});
             <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}} onClearFlag={clearFlaggedExercise}/>
             <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
               <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
-              {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:"🎯 Assess my plan"}</button>}
-              {apiKey&&<button disabled={processingPlan} onClick={()=>{if(window.confirm("This will replace your current plan with a new AI-designed one. Continue?"))suggestPlan();}} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:"🏋️ Suggest a new plan"}</button>}
+              {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:<><Icon name="target" size={13}/> Assess my plan</>}</button>}
+              {apiKey&&<button disabled={processingPlan} onClick={()=>{if(window.confirm("This will replace your current plan with a new AI-designed one. Continue?"))suggestPlan();}} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Suggest a new plan</>}</button>}
             </div>
             {assessment&&(
               <div style={{marginTop:12,padding:"12px 14px",background:C.pl,borderRadius:10,borderLeft:`3px solid ${C.pu}`}}>
@@ -4997,6 +5042,9 @@ export default function App() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} * {box-sizing:border-box;margin:0;padding:0}
         .bottomNav{display:none}
         button{-webkit-tap-highlight-color:transparent}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+        .hcCard{animation:fadeUp .32s cubic-bezier(.3,.7,.4,1) both}
+        @media(prefers-reduced-motion:reduce){.hcCard{animation:none}}
         @media(max-width:640px){
           .topTabs{display:none !important}
           .appTitle{font-size:26px !important}
@@ -5029,19 +5077,31 @@ export default function App() {
         View-only mode — showing last synced data &nbsp;|&nbsp; <a href={window.location.pathname} style={{color:"#1a6896"}}>Open full app</a>
       </div>}
 
-      <div style={s.hdr}>
+      {/* ── HEADER: quiet wordmark, the date is the human line, icon-only actions ── */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:16}}>
         <div>
-          <h1 className="appTitle" style={s.h1}>Health Coach</h1>
-          <div style={{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.t3,marginTop:6}}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+          <div style={{fontSize:11,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase",color:C.t3}}>
+            Health <span style={{color:C.pu}}>Coach</span>
+          </div>
+          <h1 className="appTitle" style={{...s.h1,fontSize:24,marginTop:3}}>
+            {new Date().toLocaleDateString("en-GB",{weekday:"long",timeZone:getTz()})}<span style={{color:C.t3,fontStyle:"normal",fontFamily:"'Inter',sans-serif",fontSize:15,fontWeight:400,marginLeft:8}}>{new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",timeZone:getTz()})}</span>
+          </h1>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,background:C.s2,color:C.t3}}>{syncStatus}</span>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
           {IS_DEMO
-            ? <span style={{fontSize:11,padding:"5px 12px",borderRadius:20,background:C.s2,color:C.t3}}>Demo data</span>
-            : <button onClick={()=>setShowSync(true)} style={{...s.btn("s"),...s.btnSm}}>🔄 Sync data</button>}
-          <button onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setShowSett(true);}} style={{...s.btn("s"),...s.btnSm}}>⚙ Settings</button>
+            ? <span style={{fontSize:11,padding:"5px 12px",borderRadius:20,background:C.s2,color:C.t3}}>Demo</span>
+            : <button title={syncStatus} onClick={()=>setShowSync(true)} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
+                <Icon name="sync" size={17} style={ghSyncing?{animation:"spin 1s linear infinite"}:{}}/>
+              </button>}
+          <button title="Settings" onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setShowSett(true);}} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
+            <Icon name="settings" size={17}/>
+          </button>
         </div>
       </div>
+      {/* Sync status: only surfaces when something needs attention */}
+      {/error|Tap Sync|Reconnect|syncing|Syncing/i.test(syncStatus)&&(
+        <div style={{fontSize:11,color:/error/i.test(syncStatus)?C.red:C.t3,marginTop:-8,marginBottom:12}}>{syncStatus}</div>
+      )}
 
       <div className="topTabs" style={s.tabs}>
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
@@ -5055,14 +5115,14 @@ export default function App() {
 
       {/* COACH CHAT BUTTON */}
       <button className="coachFab" onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
-        💬 Ask your coach
+        <Icon name="chat" size={16} color="#fff"/> Ask your coach
       </button>
 
       {/* BOTTOM NAV — native-style tab bar, mobile only (CSS media query) */}
       <nav className="bottomNav">
-        {[["dash","📊","Home"],["food","🍽️","Food"],["log","📝","Log"],["profile","👤","Profile"],["cycle","🌙","Cycle"]].map(([id,icon,label])=>(
+        {[["dash","home","Home"],["food","food","Food"],["log","log","Log"],["profile","profile","Profile"],["cycle","moon","Cycle"]].map(([id,icon,label])=>(
           <button key={id} onClick={()=>setTab(id)}>
-            <span style={{fontSize:20,filter:tab===id?"none":"grayscale(1) opacity(.55)"}}>{icon}</span>
+            <Icon name={icon} size={21} color={tab===id?C.pu:C.t3} strokeWidth={tab===id?2.2:1.8}/>
             <span style={{fontSize:10,fontWeight:tab===id?700:500,color:tab===id?C.pu:C.t3}}>{label}</span>
           </button>
         ))}
