@@ -2301,11 +2301,21 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               const avgSleepMin=weekSleepRecs.length?Math.round(weekSleepRecs.reduce((s,r)=>s+r.total,0)/weekSleepRecs.length):0;
               const protDays=weekKeys.filter(dk=>dk<=todayStr&&(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
               const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+              const dayName=(d)=>d.toLocaleDateString("en-GB",{weekday:"short"});
               const sat=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+6);
+              const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
+              // Covered period: week start through today (or the full week if it's over)
+              const [ty2,tm2,td2]=todayStr.split("-").map(Number);
+              const todayD=new Date(ty2,tm2-1,td2);
+              const covEnd=todayStr>=satStr?sat:todayD;
+              const isFullWeek=todayStr>=satStr;
+              const period=isFullWeek
+                ?`Full week · ${fmt(weekStart)} – ${fmt(sat)}`
+                :`${dayName(weekStart)}–${dayName(covEnd)} so far · ${fmt(weekStart)} – ${fmt(covEnd)}`;
               const name=(profileData?.name||"My").split(" ")[0];
               shareStatsCard({
                 heading:`${name==="My"?"My":name+"'s"} week`,
-                subheading:`${fmt(weekStart)} – ${fmt(sat)} · consistency check`,
+                subheading:period,
                 rows:[
                   {label:"Total steps",value:stepsTotal.toLocaleString(),color:"#0f7b5f"},
                   {label:"Training sessions",value:`${totalDone} of ${totalTarget}`,color:"#4a42b0"},
@@ -2313,7 +2323,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                   ...(avgSleepMin?[{label:"Avg sleep",value:`${Math.floor(avgSleepMin/60)}h ${avgSleepMin%60}m`,color:"#2d65a8"}]:[]),
                   ...(protDays?[{label:"Protein goal hit",value:`${protDays} day${protDays!==1?"s":""}`,color:"#a05f0a"}]:[]),
                 ],
-                footer:"my week in numbers"
+                footer:`shared ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
               });
             }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}>📤 Share my week</button>
           </div>
@@ -2462,9 +2472,15 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           const totalSteps=mSteps.reduce((s,x)=>s+x.steps,0);
           const protDays=Object.entries(allFood).filter(([d,meals])=>d.startsWith(monthKey)&&meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
           const name=(profileData?.name||"My").split(" ")[0];
+          const todayIL3=now3.toLocaleDateString("en-CA",{timeZone:getTz()});
+          const dayNum=parseInt(todayIL3.slice(8),10);
+          const lastDay=new Date(parseInt(todayIL3.slice(0,4)),parseInt(todayIL3.slice(5,7)),0).getDate();
+          const monthLabel=now3.toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()});
+          const monthShort=now3.toLocaleDateString("en-GB",{month:"short",timeZone:getTz()});
+          const monthPeriod=dayNum>=lastDay?`Full month · ${monthLabel}`:`${monthLabel} · 1–${dayNum} ${monthShort} so far`;
           shareStatsCard({
             heading:`${name==="My"?"My":name+"'s"} month`,
-            subheading:`${now3.toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})} · consistency`,
+            subheading:monthPeriod,
             rows:[
               {label:"Active days",value:String(activeDates.size),color:"#0f7b5f"},
               {label:"Total steps",value:totalSteps.toLocaleString(),color:"#0f7b5f"},
@@ -2472,7 +2488,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               {label:"Mobility · Cardio",value:`${cat("mobility")} · ${cat("cardio")}`,color:"#b35a1f"},
               ...(protDays?[{label:"Protein goal hit",value:`${protDays} days`,color:"#a05f0a"}]:[]),
             ],
-            footer:"my month in numbers"
+            footer:`shared ${now3.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
           });
         }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}>📤 Share my month</button>
       </Card>
