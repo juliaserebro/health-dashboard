@@ -3927,6 +3927,49 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [showIntake, setShowIntake] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyView, setHistoryView] = useState(null); // index of expanded past plan
+  const [showTweak, setShowTweak] = useState(false);
+  const [tweakText, setTweakText] = useState("");
+  const [tweaking, setTweaking] = useState(false);
+  const [tweakErr, setTweakErr] = useState("");
+
+  // Occasional plan updates in plain words ("swapped leg press for hack squat",
+  // "tried 40kg, felt fine") — applied surgically, no per-session logging ritual.
+  async function tweakPlan(){
+    const txt=tweakText.trim();
+    if(!txt||!apiKey||tweaking) return;
+    setTweaking(true); setTweakErr("");
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,messages:[{role:"user",content:
+`You are the client's personal trainer. The client tells you, in passing, an update about their workout plan. Apply it to the plan SURGICALLY.
+
+CLIENT SAYS: "${txt}"
+
+RULES:
+- Change ONLY the lines the comment requires (a swapped exercise, an updated weight, a removed/added movement). Every other line must remain byte-identical — same headers, same format, same order.
+- If they say something worked or they moved up in weight, update that exercise's numbers accordingly.
+- If they swapped a machine/exercise, replace that line with the new one in the same format (Exercise name — weight · sets×reps · rest), estimating sensible numbers from the old line.
+- If the comment conflicts with the health restrictions below, still apply it but append: ⚠️ FLAGGED: [exercise] — [reason]. Honour clearances — never flag anything a physician cleared.
+- If the comment is unclear or doesn't relate to the plan, return the plan unchanged.
+Return ONLY the full updated plan text, nothing else.
+
+HEALTH NOTES: ${healthNotes||"none"}
+
+CURRENT PLAN:
+${workoutPlan}`}]})});
+      const d=await res.json();
+      if(d.error) throw new Error(d.error.message);
+      const updated=d.content?.[0]?.text?.trim()||"";
+      if(updated){
+        setWorkoutPlan(updated);
+        await persist({workout_plan:updated}); // evolution of the same plan — no history entry
+        setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
+        setTweakText(""); setShowTweak(false);
+        setSavedPlan("Plan updated ✓");setTimeout(()=>setSavedPlan(""),2500);
+      }
+    }catch(e){ setTweakErr("Couldn't apply that — "+e.message.slice(0,80)); }
+    setTweaking(false);
+  }
   const [intake, setIntake] = useState(()=>({experience:"returning",session_min:60,style:"mix",notes:"",...(profileData?.activity_targets?.training_prefs||{})}));
   const [assessing, setAssessing] = useState(false);
   const [assessment, setAssessment] = useState(()=>{try{return localStorage.getItem("plan_assessment")||"";}catch{return "";}});
@@ -4517,6 +4560,7 @@ Max 250 words total. No intro, no outro.`}]})});
           <>
             <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}} onClearFlag={clearFlaggedExercise}/>
             <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+              {apiKey&&<button disabled={tweaking} onClick={()=>{setShowTweak(true);setTweakErr("");}} style={{...s.btn("p"),...s.btnSm}}>{tweaking?<><Spinner/>Updating...</>:<><Icon name="repeat" size={13} color="#fff"/> Update my plan</>}</button>}
               <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
               {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:<><Icon name="target" size={13}/> Assess my plan</>}</button>}
               {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Design a new plan</>}</button>}
@@ -4596,6 +4640,25 @@ Max 250 words total. No intro, no outro.`}]})});
         if(daysInApp<28) return null;
         return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
       })()}
+
+      {/* ── QUICK PLAN UPDATE: surgical free-text tweaks, no logging ritual ── */}
+      {showTweak&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowTweak(false);}}>
+          <div style={s.modal}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:4}}>Update my plan</h3>
+            <p style={{fontSize:12,color:C.t2,marginBottom:6}}>Tell your coach what changed and it'll update just that part — the rest of your plan stays exactly as is.</p>
+            <div style={{fontSize:10.5,color:C.t3,marginBottom:8,lineHeight:1.5}}>e.g. "swapped leg press for hack squat" · "moved up to 40kg on rows, felt good" · "drop the plank, add dead bug" · "the shoulder press hurts, replace it"</div>
+            <textarea value={tweakText} onChange={e=>{setTweakText(e.target.value);setTweakErr("");}} rows={3} autoFocus
+              placeholder="What did you change or want to change?"
+              style={{...s.input,resize:"vertical",marginBottom:tweakErr?4:12,fontFamily:"inherit"}}/>
+            {tweakErr&&<div style={{fontSize:11,color:C.red,marginBottom:10}}>{tweakErr}</div>}
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowTweak(false)} style={s.btn("s")}>Cancel</button>
+              <button disabled={!tweakText.trim()||tweaking} onClick={tweakPlan} style={{...s.btn("p"),opacity:tweakText.trim()&&!tweaking?1:.5}}>{tweaking?<><Spinner/>Applying...</>:"Apply update"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── PLAN INTAKE WIZARD: the coach asks before prescribing ── */}
       {showIntake&&(
