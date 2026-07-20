@@ -3927,6 +3927,7 @@ function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData
   const [showIntake, setShowIntake] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyView, setHistoryView] = useState(null); // index of expanded past plan
+  const [planErr, setPlanErr] = useState("");
   const [showTweak, setShowTweak] = useState(false);
   const [tweakText, setTweakText] = useState("");
   const [tweaking, setTweaking] = useState(false);
@@ -4026,7 +4027,15 @@ ${recent}`;
       history=[{plan:prev,saved_at:new Date().toISOString()},...history].slice(0,6);
     }
     setWorkoutPlan(newPlan);
-    await persist({workout_plan:newPlan, plan_history:history});
+    setProfileData(p=>({...p,workout_plan:newPlan,plan_history:history}));
+    try{
+      await supa("POST","profiles",{uid:UID,workout_plan:newPlan,plan_history:history},"on_conflict=uid");
+    }catch(e){
+      // plan_history column may not exist yet — never let that lose the plan itself
+      console.log("Plan+history save failed, saving plan only:",e.message);
+      try{ await supa("POST","profiles",{uid:UID,workout_plan:newPlan},"on_conflict=uid"); }
+      catch(e2){ setPlanErr("Plan created but couldn't save to the server — "+e2.message.slice(0,120)); }
+    }
   }
 
   // Persist intake answers, then generate — the wizard is the entry point
@@ -4039,7 +4048,7 @@ ${recent}`;
 
   async function suggestPlan(){
     if(!apiKey||processingPlan) return;
-    setProcessingPlan(true);
+    setProcessingPlan(true); setPlanErr("");
     const prevPlanBlock=workoutPlan.trim()?`
 
 CURRENT PLAN (the client has been running this — design the NEW plan as a progression of it, not a reset):
@@ -4069,12 +4078,21 @@ FORMAT (exactly):
 - If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
 Return ONLY the plan, nothing else.`;
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,messages:[{role:"user",content:prompt}]})});
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,messages:[{role:"user",content:prompt}]})});
       const d=await res.json();
-      if(d.error) throw new Error(d.error.message);
+      if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       const plan=d.content?.[0]?.text?.trim()||"";
-      if(plan){await persistPlan(plan);setEditPlan(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}}
-    }catch(e){console.log("Build plan error:",e.message);}
+      if(!plan) throw new Error("The coach returned an empty plan. Try again.");
+      await persistPlan(plan);
+      setEditPlan(false);
+      setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
+      setPlanErr("");
+      setSavedPlan(d.stop_reason==="max_tokens"?"Plan created ✓ (long plan — check the end is complete)":"Plan created ✓");
+      setTimeout(()=>setSavedPlan(""),4000);
+    }catch(e){
+      console.log("Build plan error:",e.message);
+      setPlanErr("Couldn't design the plan — "+(e.message||"unknown error").slice(0,160));
+    }
     setProcessingPlan(false);
   }
 
@@ -4540,8 +4558,9 @@ Max 250 words total. No intro, no outro.`}]})});
               </select>
             </div>
             {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
-              {processingPlan?"Designing your plan...":<><Icon name="dumbbell" size={14} color="#fff"/> {workoutPlan.trim()?"Design a new plan (replaces current)":"Design a plan for me"}</>}
+              {processingPlan?<><Spinner/>Designing your plan...</>:<><Icon name="dumbbell" size={14} color="#fff"/> {workoutPlan.trim()?"Design a new plan (replaces current)":"Design a plan for me"}</>}
             </button>}
+            {planErr&&<div style={{fontSize:11.5,color:C.red,background:C.rl,borderRadius:8,padding:"8px 10px",marginBottom:10,lineHeight:1.5}}>{planErr}</div>}
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
               <button disabled={processingPlan||!workoutPlan.trim()} onClick={async()=>{
@@ -4565,6 +4584,8 @@ Max 250 words total. No intro, no outro.`}]})});
               {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:<><Icon name="target" size={13}/> Assess my plan</>}</button>}
               {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Design a new plan</>}</button>}
             </div>
+            {planErr&&<div style={{fontSize:11.5,color:C.red,background:C.rl,borderRadius:8,padding:"8px 10px",marginTop:10,lineHeight:1.5}}>{planErr}</div>}
+            {savedPlan&&<div style={{fontSize:12,color:C.teal,marginTop:10}}>{savedPlan}</div>}
             {assessment&&(
               <div style={{marginTop:12,padding:"12px 14px",background:C.pl,borderRadius:10,borderLeft:`3px solid ${C.pu}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>

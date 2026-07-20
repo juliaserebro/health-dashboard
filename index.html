@@ -8387,6 +8387,7 @@ function TabProfile({
   const [showIntake, setShowIntake] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyView, setHistoryView] = useState(null); // index of expanded past plan
+  const [planErr, setPlanErr] = useState("");
   const [showTweak, setShowTweak] = useState(false);
   const [tweakText, setTweakText] = useState("");
   const [tweaking, setTweaking] = useState(false);
@@ -8541,10 +8542,29 @@ ${recent}`;
       }, ...history].slice(0, 6);
     }
     setWorkoutPlan(newPlan);
-    await persist({
+    setProfileData(p => ({
+      ...p,
       workout_plan: newPlan,
       plan_history: history
-    });
+    }));
+    try {
+      await supa("POST", "profiles", {
+        uid: UID,
+        workout_plan: newPlan,
+        plan_history: history
+      }, "on_conflict=uid");
+    } catch (e) {
+      // plan_history column may not exist yet — never let that lose the plan itself
+      console.log("Plan+history save failed, saving plan only:", e.message);
+      try {
+        await supa("POST", "profiles", {
+          uid: UID,
+          workout_plan: newPlan
+        }, "on_conflict=uid");
+      } catch (e2) {
+        setPlanErr("Plan created but couldn't save to the server — " + e2.message.slice(0, 120));
+      }
+    }
   }
 
   // Persist intake answers, then generate — the wizard is the entry point
@@ -8568,6 +8588,7 @@ ${recent}`;
   async function suggestPlan() {
     if (!apiKey || processingPlan) return;
     setProcessingPlan(true);
+    setPlanErr("");
     const prevPlanBlock = workoutPlan.trim() ? `
 
 CURRENT PLAN (the client has been running this — design the NEW plan as a progression of it, not a reset):
@@ -8607,7 +8628,7 @@ Return ONLY the plan, nothing else.`;
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 2500,
+          max_tokens: 4000,
           messages: [{
             role: "user",
             content: prompt
@@ -8615,18 +8636,21 @@ Return ONLY the plan, nothing else.`;
         })
       });
       const d = await res.json();
-      if (d.error) throw new Error(d.error.message);
+      if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
       const plan = d.content?.[0]?.text?.trim() || "";
-      if (plan) {
-        await persistPlan(plan);
-        setEditPlan(false);
-        setAssessment("");
-        try {
-          localStorage.removeItem("plan_assessment");
-        } catch {}
-      }
+      if (!plan) throw new Error("The coach returned an empty plan. Try again.");
+      await persistPlan(plan);
+      setEditPlan(false);
+      setAssessment("");
+      try {
+        localStorage.removeItem("plan_assessment");
+      } catch {}
+      setPlanErr("");
+      setSavedPlan(d.stop_reason === "max_tokens" ? "Plan created ✓ (long plan — check the end is complete)" : "Plan created ✓");
+      setTimeout(() => setSavedPlan(""), 4000);
     } catch (e) {
       console.log("Build plan error:", e.message);
+      setPlanErr("Couldn't design the plan — " + (e.message || "unknown error").slice(0, 160));
     }
     setProcessingPlan(false);
   }
@@ -9831,11 +9855,21 @@ Max 250 words total. No intro, no outro.`
       width: "100%",
       justifyContent: "center"
     }
-  }, processingPlan ? "Designing your plan..." : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Icon, {
+  }, processingPlan ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Spinner, null), "Designing your plan...") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Icon, {
     name: "dumbbell",
     size: 14,
     color: "#fff"
-  }), " ", workoutPlan.trim() ? "Design a new plan (replaces current)" : "Design a plan for me")), /*#__PURE__*/React.createElement("textarea", {
+  }), " ", workoutPlan.trim() ? "Design a new plan (replaces current)" : "Design a plan for me")), planErr && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.red,
+      background: C.rl,
+      borderRadius: 8,
+      padding: "8px 10px",
+      marginBottom: 10,
+      lineHeight: 1.5
+    }
+  }, planErr), /*#__PURE__*/React.createElement("textarea", {
     value: workoutPlan,
     onChange: e => setWorkoutPlan(e.target.value),
     placeholder: "e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above",
@@ -9946,7 +9980,23 @@ Max 250 words total. No intro, no outro.`
   }, processingPlan ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Spinner, null), "Designing...") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Icon, {
     name: "dumbbell",
     size: 13
-  }), " Design a new plan"))), assessment && /*#__PURE__*/React.createElement("div", {
+  }), " Design a new plan"))), planErr && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.red,
+      background: C.rl,
+      borderRadius: 8,
+      padding: "8px 10px",
+      marginTop: 10,
+      lineHeight: 1.5
+    }
+  }, planErr), savedPlan && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.teal,
+      marginTop: 10
+    }
+  }, savedPlan), assessment && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 12,
       padding: "12px 14px",
