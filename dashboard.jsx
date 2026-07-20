@@ -3767,26 +3767,43 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
   const [suggesting, setSuggesting] = React.useState({});
   if(!text) return null;
 
+  // Strip markdown the model may emit (#, **bold**, bullets, --- rules)
+  const clean=(l)=>l.replace(/^#{1,6}\s*/,"").replace(/^[-*+]\s+/,"").replace(/\*\*/g,"").replace(/^\d+\.\s+/,"").trim();
+
   // First pass: collect all ⚠️ FLAGGED lines
   const flagged = {};
   text.split('\n').forEach(line=>{
-    const t=line.trim();
+    const t=clean(line);
     const m=t.match(/^⚠️\s*(?:FLAGGED:)?\s*(.+?)\s*[—\-]\s*(.+)$/i);
     if(m&&/^⚠/.test(t)) flagged[m[1].trim().toLowerCase()]=m[2].trim();
   });
 
-  // Second pass: build sections
+  // Second pass: build sections.
+  // Header = markdown heading, or a line with no lowercase letters (allows
+  // digits/punctuation like "STRENGTH DAY 1 — FULL BODY (~60 MIN)"), or a
+  // short line ending in ':'. Nothing is ever dropped — unmatched lines
+  // render as plain notes inside the current section.
   const sections=[];
   let cur=null;
-  text.split('\n').forEach(line=>{
-    const t=line.trim();
-    if(!t||/^⚠/.test(t)) return;
-    if(/^[A-Z][A-Z &/()\-]{2,}$/.test(t)){cur={title:t,exercises:[]};sections.push(cur);return;}
-    if(!cur) return;
-    const dash=t.indexOf(' — ');
-    const name=dash>-1?t.slice(0,dash).trim():t;
-    const rest2=dash>-1?t.slice(dash+3).split(/\s*·\s*/):[];
-    cur.exercises.push({name,cols:rest2,raw:t});
+  const ensure=()=>{ if(!cur){cur={title:null,exercises:[]};sections.push(cur);} return cur; };
+  text.split('\n').forEach(raw=>{
+    const isMdHeading=/^#{1,6}\s+/.test(raw.trim());
+    const t=clean(raw);
+    if(!t||/^[-–—_*=]{3,}$/.test(t)) return;           // blank or horizontal rule
+    if(/^⚠/.test(t)) return;                            // flags handled above
+    const noLower=!/[a-z]/.test(t) && /[A-Z]/.test(t) && t.length<=70;
+    if(isMdHeading||noLower||(/:$/.test(t)&&t.length<=48)){
+      cur={title:t.replace(/:$/,""),exercises:[]};sections.push(cur);return;
+    }
+    const sec=ensure();
+    const dash=t.indexOf(' — ')>-1?t.indexOf(' — '):t.indexOf(' - ');
+    if(dash>-1){
+      const name=t.slice(0,dash).trim();
+      const cols=t.slice(dash+3).split(/\s*·\s*/).map(x=>x.trim()).filter(Boolean);
+      sec.exercises.push({name,cols,raw:t});
+    } else {
+      sec.exercises.push({name:t,cols:[],raw:t,note:true}); // keep it visible
+    }
   });
 
   async function suggest(ex, reason) {
@@ -3816,11 +3833,13 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
     <div>
       {sections.map((sec,si)=>(
         <div key={si} style={{marginBottom:18}}>
-          <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:8,paddingBottom:4,borderBottom:`1px solid ${C.s2}`}}>{sec.title}</div>
+          {sec.title&&<div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t3,marginBottom:8,paddingBottom:4,borderBottom:`1px solid ${C.s2}`}}>{sec.title}</div>}
           {sec.exercises.map((ex,ei)=>{
             const flagKey=Object.keys(flagged).find(k=>ex.name.toLowerCase().includes(k)||k.includes(ex.name.toLowerCase()));
             const reason=flagKey?flagged[flagKey]:null;
             const sug=suggesting[ex.name];
+            // Non-exercise line (a coaching note / progression sentence) — show as prose
+            if(ex.note) return <div key={ei} style={{fontSize:12,color:C.t2,lineHeight:1.6,padding:"4px 0"}}>{ex.name}</div>;
             return (
               <div key={ei} style={{marginBottom:reason?10:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0",borderBottom:`1px solid ${C.s2}`,opacity:reason?0.55:1}}>
@@ -4076,6 +4095,7 @@ FORMAT (exactly):
 - Each exercise on its own line: Exercise name — weight · sets×reps · rest.
 - End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
 - If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
+- PLAIN TEXT ONLY: no markdown at all — no #, no **bold**, no ---, no bullet dashes. Headers are bare ALL-CAPS lines.
 Return ONLY the plan, nothing else.`;
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,messages:[{role:"user",content:prompt}]})});
