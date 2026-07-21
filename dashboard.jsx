@@ -244,29 +244,43 @@ function calculateCyclePhase(periodStartDatesOrStr, avgPeriodLength=5) {
   const today = new Date();
   const lastPeriod = new Date(lastPeriodStart+"T12:00:00");
   const daysSince = Math.floor((today - lastPeriod) / 864e5) + 1;
-  const cycleDay = ((daysSince - 1) % avgCycleLength) + 1;
 
   // Fixed 14-day luteal; ovulatory window is 2 days before luteal; follicular fills the rest
   const lutealStartDay = avgCycleLength - 14 + 1;
   const ovulatoryStartDay = lutealStartDay - 2;
   const follicularStartDay = avgPL + 1;
 
+  // LATE HANDLING: once we pass the expected cycle length WITHOUT a new period
+  // being logged, do NOT wrap into a phantom day-1. The person is simply late —
+  // hold them in extended luteal and report how many days overdue. Only a new
+  // logged period start begins a new cycle.
+  // calendarDaysSince = full days elapsed since the period start (start day = 0).
+  // Period is DUE when this equals avgCycleLength; each day beyond that is 1 late.
+  const calendarDaysSince = daysSince - 1;
+  const daysLate = calendarDaysSince - avgCycleLength;
+  const isLate = daysLate > 0;
+  const cycleDay = isLate ? daysSince : ((daysSince - 1) % avgCycleLength) + 1;
+
   let phase;
-  if (cycleDay <= avgPL)                 phase = 'menstrual';
+  if (isLate)                            phase = 'luteal'; // late = still pre-menstrual
+  else if (cycleDay <= avgPL)            phase = 'menstrual';
   else if (cycleDay < ovulatoryStartDay) phase = 'follicular';
   else if (cycleDay < lutealStartDay)    phase = 'ovulatory';
   else                                    phase = 'luteal';
 
-  const cyclesElapsed = Math.floor((daysSince - 1) / avgCycleLength);
+  // Next period: the most recent expected date that is today or in the future,
+  // unless late — then it's the overdue expected date (kept in the past).
+  const cyclesElapsed = isLate ? 0 : Math.floor((daysSince - 1) / avgCycleLength);
   const nextPeriod = new Date(lastPeriod);
   nextPeriod.setDate(lastPeriod.getDate() + avgCycleLength * (cyclesElapsed + 1));
 
-  return {phase, cycleDay, nextPeriod:nextPeriod.toISOString().slice(0,10), avgCycleLength, avgPeriodLength:avgPL, confidence, variability, cyclesUsedForCalculation:cycleLengths.length};
+  return {phase, cycleDay, isLate, daysLate, nextPeriod:nextPeriod.toISOString().slice(0,10), avgCycleLength, avgPeriodLength:avgPL, confidence, variability, cyclesUsedForCalculation:cycleLengths.length};
 }
 
 function getPhaseDisplayText(result) {
   const labels = {menstrual:'Menstrual',follicular:'Follicular',ovulatory:'Ovulatory',luteal:'Luteal',unknown:'Not enough data yet'};
   const prefix = {no_data:'',low:'Estimated — ',moderate:'Likely ',high:'',very_low:'Uncertain — '};
+  if (result.isLate) return `Period late by ${result.daysLate} day${result.daysLate!==1?'s':''}`;
   return (prefix[result.confidence]||'') + (labels[result.phase]||result.phase);
 }
 
@@ -1724,17 +1738,21 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
       const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePhaseStr?`Cycle phase: ${cyclePhaseStr}`:null,cycleResult:_wCycleResult},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
       const userMsg = `Write this week's weekly coach review covering ${dateRange} (Sunday through Saturday — Israeli week convention). Week data: ${weekSummary}
 
-Write 4–6 sentences covering exactly these four things in order:
-1. One trend observed across the full week — not a single day, a pattern across multiple days
-2. One cross-factor insight only visible across a week of data (e.g. best readiness scores followed days with both a workout and 7+ hours of sleep)
+Cover exactly these four things, one short bullet each, in this order:
+1. One trend observed across the full week — a pattern across multiple days
+2. One cross-factor insight only visible across a week of data (e.g. best readiness followed days with both a workout and 7+ hours of sleep)
 3. One honest acknowledgment of where the week was harder — no guilt, just honesty
-4. One specific focus for the coming week tied to the user's goals — specific and actionable
+4. One specific focus for the coming week tied to the user's goals — actionable
 
-Warm first-person coach voice. Reference actual numbers. Do not mention any single day in isolation — week-level view only. End naturally, not formally.
+Warm first-person coach voice. Reference actual numbers. Week-level view only.
 
 ${buildLogContext(logEntries)}
 
-Return plain text only — no JSON, no headers, no bullet points. Just the paragraph.`;
+FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji + short CAPS label, then a colon, then one sentence. No intro, no outro, nothing else. Example shape:
+📈 THE TREND: <one sentence>
+🔗 WHAT CONNECTS: <one sentence>
+🌧️ THE HARD PART: <one sentence>
+🎯 THIS WEEK: <one sentence>`;
       const text = await callCoachAI(userMsg, systemPrompt);
       const record = {text, dateRange, generatedAt: now.toISOString(), dismissed: false};
       setWeeklyReview(record);
@@ -2387,7 +2405,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           {weeklyReviewLoading&&!weeklyReview?.text
             ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Writing your weekly review...</div>
             : weeklyReview?.text
-              ? <div style={{fontSize:13,color:C.tx,lineHeight:1.65}}>{weeklyReview.text}</div>
+              ? <BulletView text={weeklyReview.text}/>
               : <div style={{fontSize:12,color:C.t3}}>—</div>}
           {weeklyReview?.text&&!weeklyReviewLoading&&(
             <button onClick={()=>generateWeeklyReview(true)} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:8}}>Refresh</button>
@@ -3462,8 +3480,10 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             ["ovulatory",Math.max(avgPeriodLen+2,lutealS-2),lutealS],
             ["luteal",lutealS+1,len],
           ];
+          // When late, the marker sits at the very end of the ring (period-due point)
+          const markDay=info.isLate?len:day;
           const angleFor=(d)=>2*Math.PI*((d-0.5)/len)-Math.PI/2;
-          const mx=55+R*Math.cos(angleFor(day)), my=55+R*Math.sin(angleFor(day));
+          const mx=55+R*Math.cos(angleFor(markDay)), my=55+R*Math.sin(angleFor(markDay));
           return (
             <div style={{display:"flex",alignItems:"center",gap:18}}>
               <div style={{position:"relative",width:110,height:110,flexShrink:0}}>
@@ -3481,12 +3501,14 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                 <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
                   <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Day</div>
                   <div style={{fontSize:28,fontWeight:700,letterSpacing:-1,lineHeight:1,color:phase?phase.c:C.tx}}>{day}</div>
-                  <div style={{fontSize:9,color:C.t3,marginTop:2}}>of {len}</div>
+                  <div style={{fontSize:9,color:info.isLate?C.am:C.t3,marginTop:2}}>{info.isLate?`+${info.daysLate} late`:`of ${len}`}</div>
                 </div>
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:20,fontWeight:600,color:phase?phase.c:C.pi,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>{getPhaseDisplayText(info)}</div>
-                {info.nextPeriod&&<div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Next period ~ {fmtDate(info.nextPeriod)}</div>}
+                <div style={{fontSize:20,fontWeight:600,color:info.isLate?C.am:(phase?phase.c:C.pi),fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>{getPhaseDisplayText(info)}</div>
+                {info.isLate
+                  ? <div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Was expected ~ {fmtDate(info.nextPeriod)}. Log the start when it arrives.</div>
+                  : info.nextPeriod&&<div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Next period ~ {fmtDate(info.nextPeriod)}</div>}
                 {(info.confidence==="very_low"||info.confidence==="no_data")
                   ? <div style={{fontSize:10.5,color:C.am,marginTop:5,lineHeight:1.5}}>Rough estimate — cycles vary or data is thin. More dates will sharpen this.</div>
                   : info.cyclesUsedForCalculation>0&&<div style={{fontSize:10.5,color:C.t3,marginTop:5}}>based on {info.cyclesUsedForCalculation} logged cycle{info.cyclesUsedForCalculation!==1?"s":""}</div>}
@@ -4759,6 +4781,32 @@ Max 250 words total. No intro, no outro.`}]})});
   );
 }
 
+// Renders coach prose as scannable rows. Each line shaped "emoji LABEL: text"
+// becomes a labelled bullet; falls back to plain paragraphs otherwise.
+function BulletView({text, style={}}){
+  const lines=(text||"").split("\n").map(l=>l.trim()).filter(Boolean);
+  const rows=lines.map(l=>{
+    const m=l.match(/^([\p{Emoji}☀-➿️]+)?\s*([A-Z][A-Z '&/]{2,40}):\s*(.+)$/u);
+    if(m) return {emoji:(m[1]||"").trim(), label:m[2].trim(), body:m[3].trim()};
+    return {body:l.replace(/^[-•*]\s*/,"")};
+  });
+  const labelled=rows.filter(r=>r.label).length>=2; // only treat as bullets if it really is one
+  if(!labelled) return <div style={{fontSize:13,color:C.tx,lineHeight:1.7,...style}}>{text}</div>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:9}}>
+      {rows.map((r,i)=>(
+        <div key={i} style={{display:"flex",gap:9,alignItems:"flex-start"}}>
+          <span style={{fontSize:15,lineHeight:1.3,flexShrink:0,width:20,textAlign:"center"}}>{r.emoji||"•"}</span>
+          <div style={{flex:1}}>
+            {r.label&&<div style={{fontSize:10,fontWeight:700,letterSpacing:".06em",color:C.t3}}>{r.label}</div>}
+            <div style={{fontSize:12.5,color:C.tx,lineHeight:1.55,marginTop:r.label?1:0}}>{r.body}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Renders the trainer assessment as structured sections instead of a text blob
 function AssessmentView({text}){
   const SECTIONS={
@@ -4818,7 +4866,7 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
     const bl=profileData?.behavioral_baseline||{};
     const patterns=(profileData?.detected_patterns||[]).map(p=>`- ${p.description}`).join('\n')||'still learning';
     const goals=(profileData?.goals||[]).map(g=>g.label).join(', ')||'general fitness';
-    const prompt=`You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name||'Julia'}, ${profileData?.gender||'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours||'?'}h, bedtime ${bl.typical_bedtime||'?'}, avg deep sleep ${bl.avg_deep_sleep_pct||'?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes||'none'}\n\nWrite 4–6 sentences. Reference the user's actual baseline, their strongest patterns, and one thing that makes them unique. Warm, direct, first person. They should feel genuinely seen. Start with "After [X] weeks together..."`;
+    const prompt=`You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name||'Julia'}, ${profileData?.gender||'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours||'?'}h, bedtime ${bl.typical_bedtime||'?'}, avg deep sleep ${bl.avg_deep_sleep_pct||'?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes||'none'}\n\nReturn 4–5 bullets, each a distinct thing you've learned about them, grouped by topic. Reference their actual baseline and strongest patterns; include one thing that makes them unique. Warm, direct, first person, so they feel genuinely seen.\n\nFORMAT — return ONLY these lines, each: topic emoji + short CAPS label + colon + one sentence. No intro or outro. Example shape:\n😴 YOUR SLEEP: <one sentence>\n💪 IN TRAINING: <one sentence>\n🥗 WITH FOOD: <one sentence>\n🌙 YOUR CYCLE: <one sentence>\n✨ WHAT STANDS OUT: <one sentence>`;
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:prompt}]})});
       const d=await res.json();
@@ -4835,7 +4883,7 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
       <SecLabel>What your coach knows about you</SecLabel>
       <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
         {loading&&<div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Generating your coach summary...</div>}
-        {memory&&<div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>{memory}</div>}
+        {memory&&<BulletView text={memory}/>}
         {!loading&&memory&&!IS_DEMO&&<button onClick={()=>{setMemory(null);try{localStorage.removeItem(CACHE_KEY);}catch{}}} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
         {!loading&&!memory&&!apiKey&&<div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to generate your coach summary.</div>}
       </Card>
@@ -5381,8 +5429,10 @@ export default function App() {
             border-top:1px solid rgba(0,0,0,.07);
             padding:6px 4px calc(6px + env(safe-area-inset-bottom));
             justify-content:space-around;align-items:center}
-          .bottomNav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
-            background:none;border:none;font-family:inherit;cursor:pointer;padding:4px 0;min-height:48px;justify-content:center}
+          .bottomNav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+            background:none;border:none;font-family:inherit;cursor:pointer;padding:6px 0;min-height:52px;justify-content:center;position:relative}
+          .bottomNav button .navPill{position:absolute;top:2px;left:50%;transform:translateX(-50%);
+            width:52px;height:30px;border-radius:16px;background:#eeedf8;z-index:0;transition:opacity .2s}
           .coachFab{bottom:calc(78px + env(safe-area-inset-bottom)) !important}
         }`}</style>
       {IS_DEMO&&<div style={{background:"linear-gradient(90deg,#eeedf8,#e0f4ed)",color:"#4a42b0",fontSize:12,textAlign:"center",padding:"8px 14px",fontWeight:500,borderRadius:10,marginBottom:14,border:"1px solid rgba(74,66,176,.15)"}}>
@@ -5450,8 +5500,9 @@ export default function App() {
       <nav className="bottomNav">
         {[["dash","home","Home"],["food","food","Food"],["log","log","Log"],["profile","profile","Profile"],["cycle","moon","Cycle"]].map(([id,icon,label])=>(
           <button key={id} onClick={()=>setTab(id)}>
-            <Icon name={icon} size={21} color={tab===id?C.pu:C.t3} strokeWidth={tab===id?2.2:1.8}/>
-            <span style={{fontSize:10,fontWeight:tab===id?700:500,color:tab===id?C.pu:C.t3}}>{label}</span>
+            {tab===id&&<span className="navPill"/>}
+            <span style={{position:"relative",zIndex:1,display:"flex"}}><Icon name={icon} size={21} color={tab===id?C.pu:C.t3} strokeWidth={tab===id?2.2:1.8}/></span>
+            <span style={{position:"relative",zIndex:1,fontSize:10,fontWeight:tab===id?700:500,color:tab===id?C.pu:C.t3}}>{label}</span>
           </button>
         ))}
       </nav>
