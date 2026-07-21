@@ -4876,15 +4876,19 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
     setLoading(false);
   }
 
-  React.useEffect(()=>{ if(!memory&&apiKey) generate(); },[apiKey]);
+  // Generate once on first load if there's no summary yet.
+  React.useEffect(()=>{ if(!memory&&apiKey&&!IS_DEMO) generate(); },[apiKey]);
 
   return (
     <div>
       <SecLabel>What your coach knows about you</SecLabel>
       <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pu}`}}>
         {loading&&<div style={{fontSize:13,color:C.t2,display:"flex",alignItems:"center",gap:8}}><Spinner/>Generating your coach summary...</div>}
-        {memory&&<BulletView text={memory}/>}
-        {!loading&&memory&&!IS_DEMO&&<button onClick={()=>{setMemory(null);try{localStorage.removeItem(CACHE_KEY);}catch{}}} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
+        {!loading&&memory&&<BulletView text={memory}/>}
+        {/* Regenerate must call generate() directly — clearing state alone never
+            re-runs it (the effect only depends on apiKey). Keeps the old text
+            visible until the fresh one lands, so it never goes blank. */}
+        {!loading&&memory&&!IS_DEMO&&<button onClick={()=>generate()} style={{...s.btn("s"),...s.btnSm,marginTop:10,fontSize:11}}>Regenerate</button>}
         {!loading&&!memory&&!apiKey&&<div style={{fontSize:12,color:C.t3}}>Add your API key in Settings to generate your coach summary.</div>}
       </Card>
     </div>
