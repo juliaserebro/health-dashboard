@@ -241,9 +241,13 @@ function calculateCyclePhase(periodStartDatesOrStr, avgPeriodLength=5) {
     }
   }
 
-  const today = new Date();
+  // Compare CALENDAR dates in the active timezone, both anchored to noon, so
+  // adding today's date reads as cycle day 1 regardless of the current time of
+  // day (raw new Date() vs a noon anchor previously produced day 0 = falsy).
+  const todayStr = new Date().toLocaleDateString("en-CA", {timeZone: getTz()});
+  const today = new Date(todayStr + "T12:00:00");
   const lastPeriod = new Date(lastPeriodStart+"T12:00:00");
-  const daysSince = Math.floor((today - lastPeriod) / 864e5) + 1;
+  const daysSince = Math.round((today - lastPeriod) / 864e5) + 1;
 
   // Fixed 14-day luteal; ovulatory window is 2 days before luteal; follicular fills the rest
   const lutealStartDay = avgCycleLength - 14 + 1;
