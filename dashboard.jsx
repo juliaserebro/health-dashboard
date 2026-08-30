@@ -1632,6 +1632,11 @@ function buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbi
 ${logCtx}`;
 }
 
+// Coach content schema version. Bump whenever generated insights gain fields
+// the renderer depends on — cached content from an older schema is discarded
+// rather than displayed, because the invalidation logic cannot evaluate it.
+const COACH_SCHEMA = 2; // 2 = insights carry depends_on / suggests_food
+
 // ── LIVE METRICS + INSIGHT INVALIDATION ──────────────────────────────────────
 // Tier 0: running totals are arithmetic, not insight. They are recomputed on
 // every render from live data and substituted into the generated text, so a
@@ -1732,10 +1737,17 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       if(profileData?.coach_content) setCoachContent(profileData.coach_content);
       return;
     }
+    // Legacy stored content: strip metric-bearing insights we cannot validate,
+    // keeping the headline (narrative, not a running total). Better than either
+    // showing a possibly-stale number or blanking the card entirely.
+    const _stale = profileData?.coach_content && (profileData.coach_content._schema||1) < COACH_SCHEMA;
     // Stored content (Supabase) always renders first — works for any visitor,
     // regardless of whether this session can regenerate. localStorage below is
     // only a speed cache, never the source of truth.
-    if(profileData?.coach_content && !coachContent) setCoachContent(profileData.coach_content);
+    if(profileData?.coach_content && !coachContent){
+      const cc=profileData.coach_content;
+      setCoachContent(_stale ? {...cc, domain_insights:(cc.domain_insights||[]).filter(i=>!i.depends_on&&!/\b\d+\s*(g|kcal|cal|steps?|sessions?)\b/i.test(i.content||""))} : cc);
+    }
     if(!apiKey) return; // session can't generate: stored content stays, no error states
     const now = new Date();
     const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -1747,7 +1759,12 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
           const isNewFormat = Array.isArray(parsed.domain_insights) || parsed.isLearning || parsed.isWeekly;
           const generatedAt = parsed._generatedAt ? new Date(parsed._generatedAt) : null;
           const hoursSince = generatedAt ? (now - generatedAt)/3600000 : 999;
-          if(isNewFormat && hoursSince < 6){ setCoachContent(parsed); return; }
+          // Legacy content (pre-schema-2) carries no data dependencies, so a
+          // stale claim in it can never be invalidated — regenerate instead of
+          // serving it. Templated/learning cards are exempt: they contain no
+          // metric claims, so there is nothing to go stale.
+          const schemaOk = (parsed._schema||1) >= COACH_SCHEMA || parsed.isLearning || parsed.isWeekly;
+          if(isNewFormat && schemaOk && hoursSince < 6){ setCoachContent(parsed); return; }
         }
       }catch(e){}
     }
@@ -1937,6 +1954,7 @@ EVENT-RESPONSE RULES:
       if(m){
         const content = JSON.parse(m[0]);
         content._generatedAt = new Date().toISOString();
+        content._schema = COACH_SCHEMA;
         content._foodHash = (allFood[todayKey]||[]).map(f=>f.dbid||f.eaten_time||f.n).join("|");
         setCoachContent(content);
         localStorage.setItem("coach_content_"+todayKey, JSON.stringify(content));
