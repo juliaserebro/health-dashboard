@@ -214,111 +214,186 @@ function isSleepDataStale(fitbitData, tz) {
   return localHour >= 14 && daysDiff >= 2;
 }
 
-// Safe cycle-day helper — avoids UTC-midnight vs local-midnight bug.
-// Returns 1 on the start date, 28 on day 27, wraps at 28.
-function calcCycleDay(startDateStr) {
-  const nowStr = new Date().toLocaleDateString("en-CA", {timeZone: getTz()});
-  const d1 = new Date(startDateStr + "T12:00:00");
-  const d2 = new Date(nowStr + "T12:00:00");
-  const diff = Math.round((d2 - d1) / 864e5);
-  if (diff < 0) return 1;
-  return (diff % 28) + 1;
+
+// ── CYCLE ENGINE — single source of truth for every consumer ─────────────────
+// Governing principles: confirmed data only; absence is not negative data;
+// never silently roll over; the follicular phase absorbs all variability;
+// two-tier confidence (retrospective = plain, real-time = hedged).
+//
+// Luteal band (gated proposal, 3.2): 11-15 days, midpoint 13 — from the
+// 612k-cycle dataset (28-day cycles average ~12.6d luteal) and the year-long
+// study showing luteal is stabler than follicular but not fixed at 14.
+const LUTEAL_BAND={min:11,max:15,mid:13};
+// One consistent gap-eligibility rule everywhere (2.4): 11-89 days inclusive.
+const GAP_MIN=11, GAP_MAX=89;
+
+function addDaysKey(dk,n){
+  const [y,m,d]=dk.split("-").map(Number);
+  const dt=new Date(y,m-1,d+n);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 }
+const _median=(a)=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);const m=Math.floor(s.length/2);return s.length%2?s[m]:Math.round((s[m-1]+s[m])/2);};
 
-// Dr. Shira's clinical model: luteal phase is biologically fixed at 14 days;
-// follicular phase absorbs all cycle-length variability.
-// Accepts an array of period start date strings (most recent first) and avgPeriodLength.
-// Can also be called with a single date string for backward compat (wraps to array).
-function calculateCyclePhase(periodStartDatesOrStr, avgPeriodLength=5) {
-  const periodStartDates = Array.isArray(periodStartDatesOrStr)
-    ? periodStartDatesOrStr
-    : (periodStartDatesOrStr ? [periodStartDatesOrStr] : []);
-  const avgPL = avgPeriodLength || 5;
+// Master switch — mirrors profiles.cycle_tracking, set on profile load / settings save
+let ACTIVE_CYCLE_TRACKING=true;
+function setActiveCycleTracking(v){ ACTIVE_CYCLE_TRACKING=v!==false; }
 
-  if (!periodStartDates || periodStartDates.length === 0) {
-    return {phase:'unknown',cycleDay:null,nextPeriod:null,confidence:'no_data',variability:'insufficient_data',avgCycleLength:28,avgPeriodLength:avgPL,cyclesUsedForCalculation:0};
+function computeCycleState(cycleLog){
+  if(!ACTIVE_CYCLE_TRACKING) return {enabled:false,phase:null,tier:null,cycleDay:null};
+  const meta=(cycleLog&&cycleLog.cycle_meta)||{};
+  const avgPL=(cycleLog&&cycleLog.avg_period_length)||5;
+  const dates=[...((cycleLog&&cycleLog.period_start_dates)||[])].filter(Boolean).sort((a,b)=>new Date(b)-new Date(a));
+  const base={enabled:true,avgPeriodLength:avgPL,selfRegular:meta.self_regular!==false,
+    pendingExclusion:!!meta.pending_exclusion,lateAck:meta.late_ack||null};
+  if(!dates.length) return {...base,phase:'unknown',tier:'realtime',cycleDay:null,confidence:'no_data',
+    variability:'insufficient_data',median:28,effectiveMedian:28,usedGaps:0,allGaps:0,pastWindow:false};
+  const lastStart=dates[0];
+
+  // Gaps newest-first, each tagged with the start date that ENDS it
+  const gaps=[];
+  for(let i=0;i<dates.length-1;i++){
+    gaps.push({len:Math.round((dayKeyToNoon(dates[i])-dayKeyToNoon(dates[i+1]))/864e5),endDate:dates[i]});
+  }
+  // Exceptional / unknowable cycles are excluded from BOTH centre and spread —
+  // one-off disruption (user flag) or unknowable length ("I don't know" answer)
+  const excSet=new Set(((cycleLog&&cycleLog.exceptional_cycles)||[]).map(e=>e.date));
+  const eligible=gaps.filter(g=>g.len>=GAP_MIN&&g.len<=GAP_MAX&&!excSet.has(g.endDate));
+
+  // ADAPTIVE HISTORY WINDOW (gated proposal, 2.5): last 4 eligible gaps if
+  // their range <= 7 days; widen to last 8 if range > 7; to last 12 (max) if
+  // the range of 8 is still > 10. Regular users converge fast and track drift;
+  // irregular users get enough samples to characterise their real distribution;
+  // 12 (~1 year) caps staleness.
+  const lensOf=(n)=>eligible.slice(0,n).map(g=>g.len);
+  const rangeOf=(a)=>a.length?Math.max(...a)-Math.min(...a):0;
+  let used=lensOf(4);
+  if(eligible.length>4&&rangeOf(used)>7){
+    used=lensOf(8);
+    if(eligible.length>8&&rangeOf(used)>10) used=lensOf(12);
   }
 
-  const sorted = [...periodStartDates].filter(Boolean).sort((a,b) => new Date(b)-new Date(a));
-  const lastPeriodStart = sorted[0];
+  // CENTRE = median (outliers do not move the prediction).
+  // Onboarding fallback: a remembered min-max range seeds the model pre-data.
+  const rr=meta.remembered_range;
+  const medRaw=_median(used);
+  const med=medRaw!=null?medRaw:(rr&&rr.min&&rr.max?Math.round((Number(rr.min)+Number(rr.max))/2):28);
 
-  // Gap lengths between consecutive period starts
-  const cycleLengths = [];
-  for (let i = 0; i < sorted.length-1; i++) {
-    const diff = Math.round((new Date(sorted[i])-new Date(sorted[i+1])) / 864e5);
-    if (diff > 10 && diff < 90) cycleLengths.push(diff); // sanity bounds
-  }
+  // SPREAD = full min-max of the used window, outliers INCLUDED (2.2) —
+  // disrupted-but-recurring cycles honestly widen the range. Biology floor +/-2d.
+  let lo=used.length?Math.min(...used):(rr&&rr.min?Number(rr.min):med-4);
+  let hi=used.length?Math.max(...used):(rr&&rr.max?Number(rr.max):med+4);
+  lo=Math.min(lo,med-2); hi=Math.max(hi,med+2);
 
-  let avgCycleLength = 28;
-  let confidence = 'low';
-  let variability = 'insufficient_data';
+  const mean=used.length?used.reduce((a,b)=>a+b,0)/used.length:med;
+  const sd=used.length>1?Math.sqrt(used.reduce((s2,l)=>s2+(l-mean)**2,0)/used.length):null;
+  const variability=used.length<2?'insufficient_data':sd>7?'highly_irregular':sd>4?'irregular':'regular';
+  let confidence;
+  if(used.length===0) confidence=rr?'low':'no_data';
+  else if(used.length===1) confidence='low';
+  else if(variability==='highly_irregular') confidence='very_low';
+  else if(variability==='regular'&&used.length>=3) confidence='high';
+  else confidence='moderate';
 
-  if (cycleLengths.length === 0) {
-    confidence = 'low';
-  } else if (cycleLengths.length === 1) {
-    avgCycleLength = cycleLengths[0];
-    confidence = 'low';
-  } else {
-    avgCycleLength = Math.round(cycleLengths.reduce((a,b)=>a+b,0) / cycleLengths.length);
-    const variance = cycleLengths.reduce((sum,len)=>sum+Math.pow(len-avgCycleLength,2),0) / cycleLengths.length;
-    const stdDev = Math.sqrt(variance);
-    if (stdDev > 7) {
-      variability = 'highly_irregular';
-      confidence = 'very_low';
-    } else if (stdDev > 4) {
-      variability = 'irregular';
-      confidence = 'moderate';
-    } else {
-      variability = 'regular';
-      confidence = cycleLengths.length >= 3 ? 'high' : 'moderate';
+  // Day count — calendar days, never rolls over
+  const cycleDay=calDaysAgo(lastStart)+1;
+  const elapsed=cycleDay-1;
+
+  // OVULATION REPORT for the current cycle re-anchors the back half:
+  // predicted period ~ ovulation + luteal band. Confidence-raiser, not truth.
+  const ov=((cycleLog&&cycleLog.ovulation_reports)||[]).find(r=>r.cycle_start===lastStart);
+  let ovAdjusted=false, centreMed=med;
+  if(ov&&ov.date){
+    const ovDay=Math.round((dayKeyToNoon(ov.date)-dayKeyToNoon(lastStart))/864e5);
+    if(ovDay>3&&ovDay<elapsed+40){
+      const oLo=ovDay+LUTEAL_BAND.min, oHi=ovDay+LUTEAL_BAND.max;
+      if(oHi>elapsed-1){ lo=oLo; hi=oHi; centreMed=ovDay+LUTEAL_BAND.mid; ovAdjusted=true; }
     }
   }
 
-  // Compare CALENDAR dates in the active timezone, both anchored to noon, so
-  // adding today's date reads as cycle day 1 regardless of the current time of
-  // day (raw new Date() vs a noon anchor previously produced day 0 = falsy).
-  const todayStr = new Date().toLocaleDateString("en-CA", {timeZone: getTz()});
-  const today = new Date(todayStr + "T12:00:00");
-  const lastPeriod = new Date(lastPeriodStart+"T12:00:00");
-  const daysSince = Math.round((today - lastPeriod) / 864e5) + 1;
+  // ELIMINATION (2.6): days already fully passed without a logged period are no
+  // longer possible lengths. Today itself is NOT eliminated — absence today is
+  // not evidence a period did not start today.
+  const winLo=Math.max(lo,elapsed);
+  const winHi=Math.max(hi,winLo); // elimination can outrun the old ceiling
+  const effMed=Math.max(centreMed,winLo);
+  const pastWindow=elapsed>hi;
+  const daysPastPredicted=Math.max(0,elapsed-centreMed);
 
-  // Fixed 14-day luteal; ovulatory window is 2 days before luteal; follicular fills the rest
-  const lutealStartDay = avgCycleLength - 14 + 1;
-  const ovulatoryStartDay = lutealStartDay - 2;
-  const follicularStartDay = avgPL + 1;
-
-  // LATE HANDLING: once we pass the expected cycle length WITHOUT a new period
-  // being logged, do NOT wrap into a phantom day-1. The person is simply late —
-  // hold them in extended luteal and report how many days overdue. Only a new
-  // logged period start begins a new cycle.
-  // calendarDaysSince = full days elapsed since the period start (start day = 0).
-  // Period is DUE when this equals avgCycleLength; each day beyond that is 1 late.
-  const calendarDaysSince = daysSince - 1;
-  const daysLate = calendarDaysSince - avgCycleLength;
-  const isLate = daysLate > 0;
-  const cycleDay = isLate ? daysSince : ((daysSince - 1) % avgCycleLength) + 1;
-
+  // PHASE — anchored backward from the (updated) predicted period using the
+  // band midpoint; menstrual is forward from the confirmed bleed.
+  const lutealStart=effMed-LUTEAL_BAND.mid+1;
+  const ovulStart=lutealStart-2;
   let phase;
-  if (isLate)                            phase = 'luteal'; // late = still pre-menstrual
-  else if (cycleDay <= avgPL)            phase = 'menstrual';
-  else if (cycleDay < ovulatoryStartDay) phase = 'follicular';
-  else if (cycleDay < lutealStartDay)    phase = 'ovulatory';
-  else                                    phase = 'luteal';
+  if(pastWindow||meta.pending_exclusion) phase='unknown';        // 3.4: assertion stops
+  else if(cycleDay<=avgPL) phase='menstrual';                    // anchored to logged bleed
+  else if(cycleDay<ovulStart) phase='follicular';                // absorbs all uncertainty
+  else if(cycleDay<lutealStart) phase='ovulatory';
+  else phase='luteal';
+  // Boundary softness: within the band half-width of a boundary, hedge harder
+  const halfBand=Math.round((LUTEAL_BAND.max-LUTEAL_BAND.min)/2);
+  const boundary=phase!=='menstrual'&&phase!=='unknown'&&
+    (Math.abs(cycleDay-lutealStart)<=halfBand||Math.abs(cycleDay-ovulStart)<=halfBand);
 
-  // Next period: the most recent expected date that is today or in the future,
-  // unless late — then it's the overdue expected date (kept in the past).
-  const cyclesElapsed = isLate ? 0 : Math.floor((daysSince - 1) / avgCycleLength);
-  const nextPeriod = new Date(lastPeriod);
-  nextPeriod.setDate(lastPeriod.getDate() + avgCycleLength * (cyclesElapsed + 1));
-
-  return {phase, cycleDay, isLate, daysLate, nextPeriod:nextPeriod.toISOString().slice(0,10), avgCycleLength, avgPeriodLength:avgPL, confidence, variability, cyclesUsedForCalculation:cycleLengths.length};
+  return {...base,phase,tier:'realtime',cycleDay,confidence,variability,sd,
+    median:med,effectiveMedian:effMed,windowLo:winLo,windowHi:winHi,
+    predDate:addDaysKey(lastStart,effMed),medianDate:addDaysKey(lastStart,centreMed),
+    winStartDate:addDaysKey(lastStart,winLo),winEndDate:addDaysKey(lastStart,winHi),
+    pastWindow,daysPastPredicted,usedGaps:used.length,allGaps:gaps.length,
+    eligibleGaps:eligible.length,boundary,ovAdjusted,lastStart};
 }
 
-function getPhaseDisplayText(result) {
-  const labels = {menstrual:'Menstrual',follicular:'Follicular',ovulatory:'Ovulatory',luteal:'Luteal',unknown:'Not enough data yet'};
-  const prefix = {no_data:'',low:'Estimated — ',moderate:'Likely ',high:'',very_low:'Uncertain — '};
-  if (result.isLate) return `Period late by ${result.daysLate} day${result.daysLate!==1?'s':''}`;
-  return (prefix[result.confidence]||'') + (labels[result.phase]||result.phase);
+// Memoised accessor — one computation shared by every consumer (3.1)
+let _cycMemo={k:null,v:null};
+function getCycleState(cycleLog){
+  const k=JSON.stringify([cycleLog&&cycleLog.period_start_dates,cycleLog&&cycleLog.avg_period_length,
+    cycleLog&&cycleLog.ovulation_reports,cycleLog&&cycleLog.exceptional_cycles,
+    cycleLog&&cycleLog.cycle_meta,ACTIVE_CYCLE_TRACKING,todayKeyTz()]);
+  if(_cycMemo.k===k) return _cycMemo.v;
+  const v=computeCycleState(cycleLog);
+  _cycMemo={k,v};
+  return v;
+}
+
+// RETROSPECTIVE labelling (7.1): a date between two confirmed bleeds gets a
+// high-confidence label anchored to the KNOWN cycle length. Returns null for
+// the current open cycle, ineligible gaps, and excluded cycles — pattern
+// detection only learns where labels are settled.
+function retroPhaseForDate(dk, cycleLog){
+  const dates=[...((cycleLog&&cycleLog.period_start_dates)||[])].filter(Boolean).sort();
+  if(dates.length<2) return null;
+  const avgPL=(cycleLog&&cycleLog.avg_period_length)||5;
+  const excSet=new Set(((cycleLog&&cycleLog.exceptional_cycles)||[]).map(e=>e.date));
+  for(let i=0;i<dates.length-1;i++){
+    if(dk>=dates[i]&&dk<dates[i+1]){
+      const len=Math.round((dayKeyToNoon(dates[i+1])-dayKeyToNoon(dates[i]))/864e5);
+      if(len<GAP_MIN||len>GAP_MAX||excSet.has(dates[i+1])) return null;
+      const day=Math.round((dayKeyToNoon(dk)-dayKeyToNoon(dates[i]))/864e5)+1;
+      const lutealStart=len-LUTEAL_BAND.mid+1, ovulStart=lutealStart-2;
+      const phase=day<=avgPL?'menstrual':day<ovulStart?'follicular':day<lutealStart?'ovulatory':'luteal';
+      return {phase,tier:'retrospective',cycleEnd:dates[i+1],cycleLen:len};
+    }
+  }
+  return null;
+}
+
+// Uniform prompt injection (8) — phase, day, confidence tier, real-time vs
+// retrospective, and the hedging requirement, for every AI consumer.
+function cyclePromptBlock(state){
+  if(!state||state.enabled===false) return "Cycle: not tracked. Do not reference cycle phase.";
+  if(!state.cycleDay) return "Cycle: no dates logged. Do not reference cycle phase.";
+  if(state.phase==='unknown') return `Cycle: day ${state.cycleDay} — past the predicted window with no period logged. Current phase is UNKNOWN (real-time). Do NOT reference cycle phase in advice, do NOT speculate why, never suggest the user forgot to log, never imply pregnancy.`;
+  return `Cycle: day ${state.cycleDay}, phase estimate: ${state.phase}${state.boundary?" (near a phase boundary — extra uncertain)":""} — REAL-TIME ESTIMATE. Always use tentative language ("likely", "probably"); never state real-time phase as fact regardless of confidence. Data confidence: ${state.confidence} (median ${state.median}d over ${state.usedGaps} cycle${state.usedGaps!==1?"s":""}). Next period predicted around ${state.medianDate} (window ${state.winStartDate} to ${state.winEndDate}).`;
+}
+
+function getPhaseDisplayText(state) {
+  if(!state||state.enabled===false) return 'Not tracked';
+  const labels={menstrual:'Menstrual',follicular:'Follicular',ovulatory:'Ovulatory',luteal:'Luteal'};
+  if(state.phase==='unknown') return state.cycleDay?'Phase unclear':'Not enough data yet';
+  if(state.phase==='menstrual') return 'Menstrual'; // anchored to the logged bleed
+  const l=labels[state.phase]||state.phase;
+  if(state.confidence==='very_low') return 'Uncertain — possibly '+l;
+  if(state.confidence==='low'||state.boundary) return 'Estimated — '+l;
+  return 'Likely '+l; // real-time is hedged even at high confidence (4.2)
 }
 
 async function saveCycleDates(newDate, avgPeriodLen=5) {
@@ -331,19 +406,42 @@ async function saveCycleDates(newDate, avgPeriodLen=5) {
   // belongs at read time in the calculation, never at write time.
   const merged = [...new Set([...existingDates, newDate])]
     .sort((a,b)=>new Date(b)-new Date(a));
-  const cycleLengths = [];
+  // Median with the ONE consistent eligibility rule (2.1/2.4); exceptional
+  // cycles excluded. avg_cycle_length column now stores the median (legacy readers).
+  const excSet = new Set((existing?.[0]?.exceptional_cycles||[]).map(e=>e.date));
+  const eligible=[];
   for(let i=0;i<merged.length-1;i++){
-    cycleLengths.push(Math.round((new Date(merged[i])-new Date(merged[i+1]))/864e5));
+    const len=Math.round((dayKeyToNoon(merged[i])-dayKeyToNoon(merged[i+1]))/864e5);
+    if(len>=GAP_MIN&&len<=GAP_MAX&&!excSet.has(merged[i])) eligible.push(len);
   }
-  const avgCycleLength = cycleLengths.length ? Math.round(cycleLengths.reduce((a,b)=>a+b,0)/cycleLengths.length) : 28;
-  let cycle_variability = 'insufficient_data';
-  if (cycleLengths.length >= 2) {
-    const variance = cycleLengths.reduce((s,l)=>s+Math.pow(l-avgCycleLength,2),0)/cycleLengths.length;
-    const std = Math.sqrt(variance);
-    cycle_variability = std > 7 ? 'highly_irregular' : std > 4 ? 'irregular' : 'regular';
+  const medLen=_median(eligible)||28;
+  let cycle_variability='insufficient_data';
+  if(eligible.length>=2){
+    const mn=eligible.reduce((a,b)=>a+b,0)/eligible.length;
+    const std=Math.sqrt(eligible.reduce((s,l)=>s+Math.pow(l-mn,2),0)/eligible.length);
+    cycle_variability=std>7?'highly_irregular':std>4?'irregular':'regular';
   }
-  await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
-  return {merged, avgCycleLength, cycle_variability};
+  // "I don't know" resolution (3.5): if a pending exclusion exists, the gap
+  // ending at this NEW date is unknowable — mark it excluded permanently.
+  const prevMeta=existing?.[0]?.cycle_meta||{};
+  let exceptional=existing?.[0]?.exceptional_cycles||[];
+  let newMeta=prevMeta;
+  if(prevMeta.pending_exclusion&&merged[0]===newDate){
+    exceptional=[...exceptional.filter(e=>e.date!==newDate),{date:newDate,reason:'unknown_length'}];
+    newMeta={...prevMeta,pending_exclusion:false,late_ack:null};
+  } else if(merged[0]===newDate&&prevMeta.late_ack){
+    newMeta={...prevMeta,late_ack:null}; // new cycle started — clear the ack
+  }
+  const payload={uid:UID,period_start_dates:merged,avg_cycle_length:medLen,avg_period_length:existingPeriodLen,
+    last_period_start:merged[0],cycle_variability,exceptional_cycles:exceptional,cycle_meta:newMeta};
+  try{
+    await supa("POST","cycle_logs",payload,"on_conflict=uid");
+  }catch(e){
+    // Columns may not exist yet (the original 422 cause: PGRST204, column
+    // absent from schema) — never lose the dates over a missing column.
+    await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:medLen,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
+  }
+  return {merged, avgCycleLength:medLen, cycle_variability, exceptional_cycles:exceptional, cycle_meta:newMeta};
 }
 
 async function supa(method, table, body, query) {
@@ -575,9 +673,9 @@ function Icon({name,size=16,color="currentColor",strokeWidth=2,style={}}) {
 function CyclePhaseMetric({cycleDates, cycleLog}) {
   const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
   if(!lastPeriodStart) return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15}}>—</div><div style={{...s.ms,color:C.t3}}>add in Cycle tab</div></div>;
-  const datesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : [lastPeriodStart];
-  const res = calculateCyclePhase(datesArr, cycleLog?.avg_period_length||5);
-  const ph = res.phase?getPhaseDisplayText(res):"—";
+  const res = getCycleState(cycleLog?.period_start_dates?.length ? cycleLog : {period_start_dates:[lastPeriodStart],avg_period_length:cycleLog?.avg_period_length||5});
+  if(res.enabled===false) return null; // master switch off — no cycle tile at all
+  const ph = getPhaseDisplayText(res);
   return <div style={s.mc}><div style={s.ml}>Cycle phase</div><div style={{...s.mv,fontSize:15,color:C.pi}}>{ph}</div><div style={{...s.ms,color:C.pi}}>Day {res.cycleDay||"—"} of cycle</div></div>;
 }
 
@@ -1205,12 +1303,16 @@ FOOD SENSITIVITY RULE: Never suggest a food item that conflicts with the user's 
 food sensitivities or restrictions. If restrictions are "none specified," do not assume
 any restriction. If suggesting specific foods (e.g. in a nutrition insight or micro-suggestion),
 always check against this list first.
-Cycle tracking: ${profileData?.cycle_tracking?'active':'not tracking'}${todayData?.cycleResult?`
-Current cycle phase: ${todayData.cycleResult.confidence==='very_low'||todayData.cycleResult.confidence==='no_data'?'uncertain — limited cycle data available':todayData.cycleResult.phase}
-Cycle day: ${todayData.cycleResult.cycleDay||'unknown'} of ${todayData.cycleResult.avgCycleLength}-day cycle
-Cycle data confidence: ${todayData.cycleResult.confidence} (based on ${todayData.cycleResult.cyclesUsedForCalculation} logged cycle gap${todayData.cycleResult.cyclesUsedForCalculation!==1?'s':''})`:''}
+${cyclePromptBlock(todayData?.cycleResult)}
 
-CYCLE PHASE RULE: If cycle data confidence is "low" or "very_low" or "no_data", do not make confident cycle-phase-based suggestions. Either omit cycle references entirely, or use very tentative language: "if you're tracking accurately, you may be in your luteal phase — though with limited data this is just an estimate."
+CYCLE EVIDENCE RULES — the strength of your language must match the evidence tier:
+TIER 1 (may state plainly):
+- Iron & bleeding: menstruating women have substantially higher iron needs (95th-percentile ~18.9mg/day at ~15% bioavailability; lower bioavailability on vegetarian diets). You MAY suggest iron-rich foods around/after bleeding, vitamin C alongside iron-containing meals, and that tea/coffee/calcium with a meal inhibit absorption. You may NOT recommend supplements or assess iron status — iron status is not observable from app data.
+- Premenstrual symptom timing: symptoms characteristically emerge in the luteal phase and resolve within ~a week of menses onset. Per-person symptom patterns from HER OWN logs may be referenced plainly when retrospectively confirmed.
+- Biometric shifts: RHR and skin temperature rise mid-to-late luteal; HRV falls (~3-9%). May be mentioned as known physiology.
+TIER 2 (must hedge; prefer the user's own logged data over population claims): appetite/energy intake, resting energy expenditure, substrate use, protein turnover, insulin sensitivity.
+TIER 3 (never say): phase-based training prescription (evidence is trivial/premature); sleep-architecture-by-phase claims (wearable studies found no phase effect — a symptom-disrupted night is symptom-driven, not architecture); supplement cycling.
+HARD BOUNDARIES: no diagnosis ever (not PMS, PMDD, iron deficiency, anovulation, or pregnancy — if logged mood suggests severe cyclical distress, suggest a conversation with a clinician without naming a condition). A bleed does not prove ovulation occurred — never assert ovulation happened. Real-time phase estimates are ALWAYS hedged regardless of confidence; only retrospectively-confirmed patterns anchored to logged bleeds may be stated plainly. When the cycle block above says phase is UNKNOWN or not tracked, make no cycle-based statements at all.
 
 BEHAVIORAL BASELINE (inferred from 14+ days of actual behaviour):
 Typical sleep duration: ${bl.typical_sleep_hours?bl.typical_sleep_hours+'h':'not yet established'}
@@ -1261,46 +1363,42 @@ Before generating each subsection, check: does this contradict anything already 
 ${COACH_FEW_SHOT_EXAMPLES}`;
 }
 
-function buildLast30Days(fitbitData, allFood, cycleDates, profileData) {
-  const now = new Date();
+function buildLast30Days(fitbitData, allFood, cycleDates, profileData, cycleLog) {
   const tz = profileData?.timezone || getTz();
   const protTgt = profileData?.protein_target || 100;
   const stepTgt = profileData?.step_target || 8000;
-  const confDates = (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
   const days = [];
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 864e5);
-    const dk = d.toLocaleDateString("en-CA", {timeZone: tz});
+    const dk = dayKeyNBack(i);
+    const d = dayKeyToNoon(dk);
     const sleepRec = (fitbitData.sleep||[]).find(s=>s.date===dk);
     const stepsRec = (fitbitData.steps||[]).find(s=>s.date===dk);
     const dayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===dk);
     const foodEntries = allFood[dk] || [];
-    let cyclePhase = null;
-    if (confDates.length) {
-      const startD = new Date(confDates[0].d+"T12:00:00");
-      const targetD = new Date(dk+"T12:00:00");
-      const diff = Math.round((targetD - startD) / 864e5);
-      if (diff >= 0) { const cd = (diff % 28) + 1; cyclePhase = cd<=5?'menstrual':cd<=13?'follicular':cd<=16?'ovulatory':'luteal'; }
-    }
+    // RETROSPECTIVE labelling only (7.1): a day is labelled only if it sits
+    // between two confirmed bleed dates, so its cycle length is KNOWN. The
+    // current open cycle, ineligible gaps and excluded cycles yield null —
+    // pattern detection must never learn from guessed phases.
+    const retro = ACTIVE_CYCLE_TRACKING ? retroPhaseForDate(dk, cycleLog) : null;
+    const cyclePhase = retro ? retro.phase : null;
+    const cycleEnd = retro ? retro.cycleEnd : null;
     const proteinG = Math.round(foodEntries.reduce((s,e)=>s+(e.p||0),0));
-    const last7Count = Array.from({length:7},(_,j)=>{
-      const pd = new Date(d.getTime()-j*864e5);
-      return pd.toLocaleDateString("en-CA",{timeZone:tz});
-    }).filter(pk=>(fitbitData.workouts||[]).some(w=>w.date===pk)).length;
+    const last7Count = Array.from({length:7},(_,j)=>dayKeyNBack(i+j))
+      .filter(pk=>(fitbitData.workouts||[]).some(w=>w.date===pk)).length;
     days.push({
       date:dk, sleepHours:sleepRec?sleepRec.total/60:null,
       deepSleepMinutes:sleepRec?sleepRec.deep:null, remSleepMinutes:sleepRec?sleepRec.rem:null,
       bedtime:sleepRec?sleepRec.bedtime:null, steps:stepsRec?stepsRec.steps:null,
       stepsHit:stepsRec?stepsRec.steps>=stepTgt:false, hasWorkout:dayWorkouts.length>0,
-      trainingDaysLast7:last7Count, cyclePhase, proteinG,
+      trainingDaysLast7:last7Count, cyclePhase, cycleEnd, proteinG,
       proteinHit:proteinG>=protTgt*0.9, foodLogged:foodEntries.length>0
     });
   }
   return days;
 }
 
-async function runPatternDetection(profileData, fitbitData, allFood, cycleDates) {
-  const last30 = buildLast30Days(fitbitData, allFood, cycleDates, profileData);
+async function runPatternDetection(profileData, fitbitData, allFood, cycleDates, cycleLog, logEntries) {
+  const last30 = buildLast30Days(fitbitData, allFood, cycleDates, profileData, cycleLog);
   const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
   const patterns = [];
 
@@ -1317,13 +1415,39 @@ async function runPatternDetection(profileData, fitbitData, allFood, cycleDates)
   const highLoad=last30.filter(d=>d.trainingDaysLast7>=5);
   if(highLoad.length>=3) patterns.push({id:'high_training_load',description:'Training 5+ days in a row detected consistently',occurrences:highLoad.length,confidence:'moderate',suggestion:'Consider a rest or mobility day when reaching 5 consecutive training days'});
 
-  // Cycle × sleep
-  if(profileData?.cycle_tracking){
-    const lut=last30.filter(d=>d.cyclePhase==='luteal'&&d.sleepHours);
-    const fol=last30.filter(d=>d.cyclePhase==='follicular'&&d.sleepHours);
-    if(lut.length>=4&&fol.length>=4){
-      const diff=avg(fol.map(d=>d.sleepHours))-avg(lut.map(d=>d.sleepHours));
-      if(diff>0.4) patterns.push({id:'cycle_sleep_drop',description:`Sleep averages ${diff.toFixed(1)}h less during luteal phase`,occurrences:lut.length,confidence:'high',suggestion:'Prioritise earlier bedtimes during your luteal phase'});
+  // Cycle x sleep — retrospective, multi-cycle, confounder-checked (7.2/7.3).
+  // Runs only on days labelled against CONFIRMED bleed dates.
+  if(profileData?.cycle_tracking && ACTIVE_CYCLE_TRACKING){
+    // 7.3 CONFOUNDER SUPPRESSION: a night with a simpler explanation already in
+    // the data (late bedtime, alcohol, illness/stress/travel context, hard
+    // session) cannot be attributed to cycle phase.
+    const confounded = new Set();
+    (logEntries||[]).forEach(e=>{
+      if(!e.dt) return;
+      const dk=tsToDayKey(e.dt);
+      const t=(e.txt||"").toLowerCase();
+      if(/wine|alcohol|beer|drink|cocktail/.test(t)) confounded.add(dk);
+      if(e.tag==="life_context"||e.tag==="life"||e.tag==="medical") confounded.add(dk);
+      if(/ill|sick|flu|fever|cold|travel|flight|jet ?lag|stress/.test(t)) confounded.add(dk);
+    });
+    last30.forEach(d=>{ if(d.bedtime){const h=parseInt(String(d.bedtime).split(":")[0],10); if(h>=1&&h<=4) confounded.add(d.date);} });
+
+    const clean = last30.filter(d=>d.sleepHours&&d.cyclePhase&&!confounded.has(d.date));
+    const lut = clean.filter(d=>d.cyclePhase==='luteal');
+    const fol = clean.filter(d=>d.cyclePhase==='follicular');
+    // REPETITION ACROSS CYCLES (7.2): the effect must appear in >=2 distinct
+    // confirmed cycles, not within a single one.
+    const lutCycles = new Set(lut.map(d=>d.cycleEnd));
+    if(lut.length>=4 && fol.length>=4 && lutCycles.size>=2){
+      const diff = avg(fol.map(d=>d.sleepHours)) - avg(lut.map(d=>d.sleepHours));
+      if(diff>0.4){
+        // Confidence DERIVED from the labelling and sample, never hardcoded
+        const conf = (lutCycles.size>=3 && lut.length>=8 && fol.length>=8) ? 'moderate' : 'low';
+        patterns.push({id:'cycle_sleep_drop',
+          description:`Sleep averaged ${diff.toFixed(1)}h less in the luteal phase across ${lutCycles.size} confirmed cycles (nights with a simpler explanation excluded)`,
+          occurrences:lut.length, confidence:conf, tier:'retrospective',
+          suggestion:'If this holds up, protecting bedtime in the second half of the cycle may help'});
+      }
     }
   }
 
@@ -1462,7 +1586,7 @@ LOG RELEVANCE RULES — apply judgment to each entry's age and content:
 - When unsure whether an entry is routine or serious, treat it as routine (expires after 2 days).`;
 }
 
-function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData}) {
+function buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbitData, profileData}) {
   const now = new Date();
   const todayStr = now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:getTz()});
   const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -1475,8 +1599,9 @@ function buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, pro
   const mealNames = todayFood.map(e=>e.n).join(", ")||"nothing logged yet";
   const yAlcohol = logEntries.filter(e=>e.dt&&tsToDayKey(e.dt)===yKey&&e.txt&&/wine|alcohol|beer|drink/i.test(e.txt)).map(e=>e.txt).join("; ");
   const conf = cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d));
-  let cycleCtx = "Cycle not tracked";
-  if(conf.length){const cd=calcCycleDay(conf[0].d);const ph=cd<=5?"menstrual":cd<=13?"follicular":cd<=16?"ovulatory":"luteal";cycleCtx=`Cycle day ${cd}/28, phase: ${ph}`;}
+  const cycleCtx = cyclePromptBlock(getCycleState(
+    cycleLog?.period_start_dates?.length ? cycleLog
+    : (conf.length ? {period_start_dates:conf.map(x=>x.d),avg_period_length:5} : null)));
   const logCtx = buildLogContext(logEntries);
   const todaySteps=(fitbitData.steps||[]).find(s=>s.date===todayKey);
   const lastSleep=getLastNightSleep(fitbitData, getTz());
@@ -1515,7 +1640,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const tp = todayFood.reduce((s,e)=>s+(e.p||0),0);
 
   function buildCtx() {
-    return buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
+    return buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbitData, profileData});
   }
 
   async function callCoachAI(userMessage, systemPrompt) {
@@ -1565,10 +1690,10 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       const sleepStale = isSleepDataStale(fitbitData, getTz());
       const todaySteps = (fitbitData.steps||[]).find(s=>s.date===todayKey);
       const todayWorkouts = (fitbitData.workouts||[]).filter(w=>w.date===todayKey);
-      const _cycleDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : (cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
-      let cyclePhaseStr = null;
-      let cycleResult = null;
-      if(_cycleDatesArr.length){cycleResult=calculateCyclePhase(_cycleDatesArr,cycleLog?.avg_period_length||5);cyclePhaseStr=`Day ${cycleResult.cycleDay}/${cycleResult.avgCycleLength}, ${cycleResult.phase} phase (confidence: ${cycleResult.confidence})`;}
+      const _cLog = cycleLog?.period_start_dates?.length ? cycleLog
+        : (()=>{const d=(cycleDates||[]).filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);return d.length?{period_start_dates:d,avg_period_length:5}:null;})();
+      const cycleResult = getCycleState(_cLog);
+      const cyclePhaseStr = cyclePromptBlock(cycleResult);
       const todayFoodEntries = allFood[todayKey]||[];
       const prot = Math.round(todayFoodEntries.reduce((s,e)=>s+(e.p||0),0));
       const foodNames = todayFoodEntries.map(e=>e.n||e.name||e.description).filter(Boolean);
@@ -1821,11 +1946,8 @@ Rules: do not suggest any food already eaten; notice qualitative patterns (varie
       const stepDaysHit = weekKeys.filter(dk=>{const r=(fitbitData.steps||[]).find(s=>s.date===dk);return r&&r.steps>=(profileData?.step_target||8000);}).length;
       const weekSummary = `Week ${dateRange}: ${weekWorkouts.length} workouts (${[...new Set(weekWorkouts.map(w=>w.type))].join(", ")||"none"}), avg sleep ${avgSleepMin?Math.floor(avgSleepMin/60)+"h"+(avgSleepMin%60)+"m":"not tracked"}, protein target hit ${protDaysHit}/7 days, step target hit ${stepDaysHit}/7 days.`;
       const now = new Date();
-      const _wDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : [];
-      const _wCycleResult = _wDatesArr.length ? calculateCyclePhase(_wDatesArr, cycleLog?.avg_period_length||5) : null;
-      let cyclePhaseStr = null;
-      if(_wCycleResult){cyclePhaseStr=_wCycleResult.phase;}
-      const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePhaseStr?`Cycle phase: ${cyclePhaseStr}`:null,cycleResult:_wCycleResult},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
+      const _wCycleResult = getCycleState(cycleLog?.period_start_dates?.length ? cycleLog : null);
+      const systemPrompt = buildCoachSystemPrompt(profileData,{cyclePhase:cyclePromptBlock(_wCycleResult),cycleResult:_wCycleResult},profileData?.detected_patterns||[],profileData?.behavioral_baseline||null,{trainingDays:weekWorkouts.length,proteinDaysHit:protDaysHit,stepDaysHit:stepDaysHit,avgSleep:avgSleepMin?`${Math.floor(avgSleepMin/60)}h${avgSleepMin%60}m`:"n/a",pendingFeedback:[]});
       const userMsg = `Write this week's weekly coach review covering ${dateRange} (Sunday through Saturday — Israeli week convention). Week data: ${weekSummary}
 
 Cover exactly these four things, one short bullet each, in this order:
@@ -1910,11 +2032,11 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
     const isSunday = dowIL === 0;
     // Cycle phase — use full dates array for confidence-aware calculation
-    const _aiDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
-    let cyclePhase = "cycle phase unknown";
-    let cyclePhaseName = "unknown";
-    let _aiCycleResult = null;
-    if(_aiDatesArr.length){_aiCycleResult=calculateCyclePhase(_aiDatesArr,cycleLog?.avg_period_length||5);cyclePhaseName=_aiCycleResult.phase;cyclePhase=`cycle day ${_aiCycleResult.cycleDay}/${_aiCycleResult.avgCycleLength}, ${_aiCycleResult.phase} phase (confidence: ${_aiCycleResult.confidence})`;}
+    const _aiLog = cycleLog?.period_start_dates?.length ? cycleLog
+      : (()=>{const d=cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);return d.length?{period_start_dates:d,avg_period_length:5}:null;})();
+    const _aiCycleResult = getCycleState(_aiLog);
+    const cyclePhaseName = (_aiCycleResult&&_aiCycleResult.phase)||"unknown";
+    const cyclePhase = cyclePromptBlock(_aiCycleResult);
     // Today nutrition
     const todayFoodKey = todayKey; // already timezone-aware (en-CA local)
     const tf = allFood[todayFoodKey]||[];
@@ -2080,10 +2202,9 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           </Card>
         );
 
-        // Luteal phase detection
-        const _rDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
-        let isLuteal = false;
-        if(_rDatesArr.length){const _rRes=calculateCyclePhase(_rDatesArr,cycleLog?.avg_period_length||5);isLuteal=_rRes.phase==="luteal";}
+        // Cycle-phase REM adjustment removed (7.4): wearable studies found no
+        // systematic phase effect on sleep architecture. Symptom-driven bad
+        // nights are real but are not a phase adjustment.
 
         // "Yesterday" = calendar date of last sleep's date minus 1 day
         const yDate = lastSleep ? (()=>{
@@ -2102,9 +2223,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
         // REM sleep % — 14 pts (luteal thresholds apply)
         const remPct = lastSleep&&lastSleep.total>0 ? lastSleep.rem/lastSleep.total*100 : 0;
-        const remScore = isLuteal
-          ? (remPct>=17?14:remPct>=12?10:remPct>=8?5:1)
-          : (remPct>=20?14:remPct>=15?10:remPct>=10?5:1);
+        const remScore = remPct>=20?14:remPct>=15?10:remPct>=10?5:1;
 
         // Bedtime — 10 pts
         const bedtimeScore = (()=>{
@@ -2161,8 +2280,8 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const base = Math.max(20, baseBeforeAlc-alcPenalty);
 
         // Sleep quality bonus (above 100)
-        const bonusThresh1 = isLuteal ? [20,17] : [23,23];
-        const bonusThresh2 = isLuteal ? [17,12] : [20,20];
+        const bonusThresh1 = [23,23];
+        const bonusThresh2 = [20,20];
         let bonus = 0;
         if(base>=60){
           if(deepPct>=bonusThresh1[0]&&remPct>=bonusThresh1[1]) bonus=8;
@@ -2197,7 +2316,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         const rows = [
           [`Sleep duration (${h}h ${mm}m)`, `${durScore}/28`, durScore>=28?C.tm:durScore>=20?C.am:C.red],
           [`Deep sleep (${lastSleep?.deep||0}m, ${Math.round(deepPct)}%)`, `${deepScore}/18`, deepScore>=18?C.tm:deepScore>=13?C.am:C.red],
-          [`REM sleep (${lastSleep?.rem||0}m, ${Math.round(remPct)}%)${isLuteal?" ◦":""}`, `${remScore}/14`, remScore>=14?C.tm:remScore>=10?C.am:C.red],
+          [`REM sleep (${lastSleep?.rem||0}m, ${Math.round(remPct)}%)`, `${remScore}/14`, remScore>=14?C.tm:remScore>=10?C.am:C.red],
           [`Bedtime ${lastSleep?.bedtime||"--:--"}`, `${bedtimeScore}/10`, bedtimeScore>=10?C.tm:bedtimeScore>=5?C.am:C.red],
           [`Training load yesterday`, `${loadScore}/12`, loadScore>=12?C.tm:loadScore>=8?C.am:C.red],
           [`Protein yesterday (${yProt}g)`, `${protScore}/10`, protScore>=10?C.tm:protScore>=7?C.am:C.red],
@@ -2247,11 +2366,6 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.tl}}>
                   <span style={{color:C.teal}}>✨ Sleep quality bonus (deep {Math.round(deepPct)}% + REM {Math.round(remPct)}%)</span>
                   <span style={{fontWeight:600,color:C.teal}}>{`+${bonus}`}</span>
-                </div>
-              )}
-              {isLuteal&&(
-                <div style={{fontSize:11,color:C.t3,padding:"5px 10px",background:C.s2,borderTop:`.5px solid ${C.bd}`}}>
-                  ◦ Luteal phase — REM naturally lower
                 </div>
               )}
             </div>
@@ -3544,148 +3658,237 @@ Input: ${txtInput}`;
 }
 
 // ── CYCLE TAB ─────────────────────────────────────────────────────────────
+// ── SYMPTOM TAXONOMY (Phase 5) — fertility-tracking deliberately excluded ────
+const SYMPTOMS_PHYSICAL=["Cramps","Back pain","Bloating","Tender breasts","Headache","Acne","Fatigue","Nausea","Hot flashes"];
+const SYMPTOMS_MOOD=["Annoyed","Anxious","Energised","Low","Happy","Stressed"];
+const DISCHARGE_TYPES=["Dry","Sticky","Creamy","Watery","Egg-white"];
+// Bleed intensity is SEPARATE from symptoms — it feeds the iron logic, the
+// strongest evidence-backed claim in the system.
+const BLEED_LEVELS=[["spotting","Spotting"],["light","Light"],["medium","Medium"],["heavy","Heavy"]];
+
 function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [dateInput, setDateInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [periodLenInput, setPeriodLenInput] = useState("");
   const [savingPeriodLen, setSavingPeriodLen] = useState(false);
   const [editingPeriodLen, setEditingPeriodLen] = useState(false);
+  const [showSymptom, setShowSymptom] = useState(false);
+  const [symDate, setSymDate] = useState(tkey());
+  const [symDraft, setSymDraft] = useState({bleed:null,symptoms:[],mood:[],discharge:null,note:""});
+  const [customInput, setCustomInput] = useState("");
+  const [ovHelp, setOvHelp] = useState(false);
+  const [busyAnswer, setBusyAnswer] = useState(false);
+  const [rangeMin, setRangeMin] = useState("");
+  const [rangeMax, setRangeMax] = useState("");
 
-  // Show dates from cycle_logs if available, else fall back to legacy cycle_dates rows
   const periodDates = cycleLog?.period_start_dates?.length
     ? cycleLog.period_start_dates
     : cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);
-
   const avgPeriodLen = cycleLog?.avg_period_length || 5;
   const lastPeriodStart = cycleLog?.last_period_start || periodDates[0] || null;
-  const cycleCount = periodDates.length;
 
-  // Avg cycle length: calculated from gaps between dates
-  const calcAvgFromDates = (dates) => {
-    const lens=[];
-    for(let i=0;i<dates.length-1;i++) lens.push(Math.round((new Date(dates[i])-new Date(dates[i+1]))/864e5));
-    return lens.length ? Math.round(lens.reduce((a,b)=>a+b,0)/lens.length) : null;
-  };
-  const calculatedAvgCycle = calcAvgFromDates(periodDates);
-  const avgCycleLen = cycleLog?.avg_cycle_length || calculatedAvgCycle || 28;
+  // SINGLE SOURCE OF TRUTH (2.3/3.1) — every number and label on this tab
+  const st = getCycleState(cycleLog?.period_start_dates?.length ? cycleLog
+    : (periodDates.length?{...(cycleLog||{}),period_start_dates:periodDates,avg_period_length:avgPeriodLen}:cycleLog));
 
-  const info = periodDates.length ? calculateCyclePhase(periodDates, avgPeriodLen) : null;
+  const symptomLogs = cycleLog?.symptom_logs || {};
+  const customSymptoms = cycleLog?.custom_symptoms || [];
+  const exceptional = cycleLog?.exceptional_cycles || [];
+  const excSet = new Set(exceptional.map(e=>e.date));
+  const meta = cycleLog?.cycle_meta || {};
 
-  const lutealS = avgCycleLen - 14;
   const PHASES={
-    menstrual:{n:"Menstrual",days:`Days 1–${avgPeriodLen}`,c:C.red,bg:C.rl},
-    follicular:{n:"Follicular",days:`Days ${avgPeriodLen+1}–${lutealS-3}`,c:C.teal,bg:C.tl},
-    ovulatory:{n:"Ovulatory",days:`Days ${lutealS-2}–${lutealS}`,c:C.am,bg:C.al},
-    luteal:{n:"Luteal",days:`Days ${lutealS+1}–${avgCycleLen}`,c:C.pu,bg:C.pl},
+    menstrual:{n:"Menstrual",c:C.red,bg:C.rl},
+    follicular:{n:"Follicular",c:C.teal,bg:C.tl},
+    ovulatory:{n:"Ovulatory",c:C.am,bg:C.al},
+    luteal:{n:"Luteal",c:C.pu,bg:C.pl},
   };
-  const phase = info?.phase ? PHASES[info.phase] : null;
+  const phase = st.phase&&PHASES[st.phase] ? PHASES[st.phase] : null;
+  const fmtDate = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) : "—";
+  const fmtShort = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}) : "—";
 
-  function buildLog(dates, overridePeriodLen) {
-    const lens=[];
-    for(let i=0;i<dates.length-1;i++) lens.push(Math.round((new Date(dates[i])-new Date(dates[i+1]))/864e5));
-    const avg=lens.length?Math.round(lens.reduce((a,b)=>a+b,0)/lens.length):28;
-    return {uid:UID,period_start_dates:dates,avg_cycle_length:avg,avg_period_length:overridePeriodLen||avgPeriodLen,last_period_start:dates[0]};
+  // Persist a partial patch to cycle_logs; degrades if new columns are absent
+  async function saveCycleLog(patch){
+    const next={...(cycleLog||{}),uid:UID,period_start_dates:periodDates,
+      avg_period_length:avgPeriodLen,last_period_start:lastPeriodStart,...patch};
+    setCycleLog(next);
+    try{localStorage.setItem("jcycle_log",JSON.stringify(next));}catch(e){}
+    try{ await supa("POST","cycle_logs",next,"on_conflict=uid"); }
+    catch(e){
+      // New columns may not exist yet — never lose the core dates over that
+      try{ await supa("POST","cycle_logs",{uid:UID,period_start_dates:next.period_start_dates,
+        avg_cycle_length:next.avg_cycle_length,avg_period_length:next.avg_period_length,
+        last_period_start:next.last_period_start},"on_conflict=uid"); }catch(e2){}
+    }
+    return next;
   }
 
   async function addDate(){
     if(!dateInput||saving) return;
     setSaving(true);
     try {
-      const {merged, avgCycleLength} = await saveCycleDates(dateInput, avgPeriodLen);
-      const newLog = {uid:UID,period_start_dates:merged,avg_cycle_length:avgCycleLength,avg_period_length:avgPeriodLen,last_period_start:merged[0]};
+      const r = await saveCycleDates(dateInput, avgPeriodLen);
+      const newLog = {...(cycleLog||{}),uid:UID,period_start_dates:r.merged,avg_cycle_length:r.avgCycleLength,
+        avg_period_length:avgPeriodLen,last_period_start:r.merged[0],cycle_variability:r.cycle_variability,
+        exceptional_cycles:r.exceptional_cycles||exceptional,cycle_meta:r.cycle_meta||meta};
       setCycleLog(newLog);
-      setCycleDates(merged.map((d,i)=>({id:i,d,ok:true})));
+      setCycleDates(r.merged.map((d,i)=>({id:i,d,ok:true})));
       localStorage.setItem("jcycle_log",JSON.stringify(newLog));
       setDateInput("");
-    } catch(e){
-      console.error("Cycle save error:",e.message);
-      const sorted=[dateInput,...periodDates].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>new Date(b)-new Date(a)); // no write-time cap (Phase 0)
-      const newLog=buildLog(sorted, avgPeriodLen);
-      setCycleLog(newLog);
-      setCycleDates(sorted.map((d,i)=>({id:i,d,ok:true})));
-      localStorage.setItem("jcycle_log",JSON.stringify(newLog));
-      setDateInput("");
-    }
+    } catch(e){ console.error("Cycle save error:",e.message); }
     setSaving(false);
   }
 
   async function delDate(dateStr){
     const newDates = periodDates.filter(d=>d!==dateStr);
-    if(newDates.length===0){
-      const empty={uid:UID,period_start_dates:[],avg_cycle_length:28,avg_period_length:avgPeriodLen,last_period_start:null};
-      setCycleLog(empty);
-      setCycleDates([]);
-      localStorage.removeItem("jcycle_log");
-      try{await supa("POST","cycle_logs",empty,"on_conflict=uid");}catch(e){}
-      return;
-    }
-    const newLog=buildLog(newDates, avgPeriodLen);
-    setCycleLog(newLog);
+    await saveCycleLog({period_start_dates:newDates,last_period_start:newDates[0]||null});
     setCycleDates(newDates.map((d,i)=>({id:i,d,ok:true})));
-    localStorage.setItem("jcycle_log",JSON.stringify(newLog));
-    try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
+    if(!newDates.length) localStorage.removeItem("jcycle_log");
   }
 
   async function savePeriodLen(){
     const v=parseInt(periodLenInput,10);
     if(!v||v<1||v>14) return;
     setSavingPeriodLen(true);
-    const newLog={...buildLog(periodDates,v),avg_period_length:v};
-    setCycleLog(newLog);
-    localStorage.setItem("jcycle_log",JSON.stringify(newLog));
-    try{await supa("POST","cycle_logs",newLog,"on_conflict=uid");}catch(e){}
-    setPeriodLenInput("");
-    setSavingPeriodLen(false);
-    setEditingPeriodLen(false);
+    await saveCycleLog({avg_period_length:v});
+    setPeriodLenInput(""); setSavingPeriodLen(false); setEditingPeriodLen(false);
   }
 
-  const fmtDate = d => d ? new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) : "—";
+  // ── 3.5 The three answers, which are NOT equivalent ───────────────────────
+  async function answerStarted(){ // "It started on [date]" — backfill a real cycle
+    if(!dateInput){ setBusyAnswer("needdate"); return; }
+    await addDate();
+    await saveCycleLog({cycle_meta:{...meta,late_ack:null,pending_exclusion:false}});
+  }
+  async function answerNotYet(){ // This is DATA — cycle stays open, enters history when it arrives
+    setBusyAnswer(true);
+    await saveCycleLog({cycle_meta:{...meta,late_ack:{at:new Date().toISOString(),kind:"not_yet"},pending_exclusion:false}});
+    setBusyAnswer(false);
+  }
+  async function answerUnknown(){ // ABSENCE, not data — cycle excluded permanently
+    setBusyAnswer(true);
+    await saveCycleLog({cycle_meta:{...meta,late_ack:{at:new Date().toISOString(),kind:"unknown"},pending_exclusion:true}});
+    setBusyAnswer(false);
+  }
+
+  async function toggleExceptional(dateStr){ // 3.6 — one-off disruption only
+    const next = excSet.has(dateStr)
+      ? exceptional.filter(e=>e.date!==dateStr)
+      : [...exceptional,{date:dateStr,reason:"user_flagged"}];
+    await saveCycleLog({exceptional_cycles:next});
+  }
+
+  async function reportOvulation(){ // Phase 6 — confidence-raiser, never overrides a bleed
+    const reports=(cycleLog?.ovulation_reports||[]).filter(r=>r.cycle_start!==st.lastStart);
+    await saveCycleLog({ovulation_reports:[...reports,{cycle_start:st.lastStart,date:tkey(),reported_at:new Date().toISOString()}]});
+  }
+  const ovForThisCycle=(cycleLog?.ovulation_reports||[]).find(r=>r.cycle_start===st.lastStart);
+
+  function openSymptom(dk){
+    const ex=symptomLogs[dk]||{bleed:null,symptoms:[],mood:[],discharge:null,note:""};
+    setSymDate(dk); setSymDraft({bleed:ex.bleed||null,symptoms:ex.symptoms||[],mood:ex.mood||[],discharge:ex.discharge||null,note:ex.note||""});
+    setShowSymptom(true);
+  }
+  async function saveSymptom(){
+    const clean={...symDraft};
+    const empty=!clean.bleed&&!clean.discharge&&!clean.note.trim()&&!clean.symptoms.length&&!clean.mood.length;
+    const next={...symptomLogs};
+    if(empty) delete next[symDate]; else next[symDate]={...clean,note:clean.note.trim()};
+    await saveCycleLog({symptom_logs:next});
+    setShowSymptom(false);
+  }
+  const toggleIn=(arr,v)=>arr.includes(v)?arr.filter(x=>x!==v):[...arr,v];
+  const todaySym=symptomLogs[tkey()];
+
+  // ── Master switch OFF (Phase 9) ───────────────────────────────────────────
+  if(st.enabled===false) return (
+    <div>
+      <Card>
+        <div style={{fontSize:16,fontWeight:600,color:C.t2,fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic",marginBottom:6}}>Cycle tracking is off</div>
+        <div style={{fontSize:12,color:C.t2,lineHeight:1.6}}>No cycle phase is being calculated, and nothing cycle-related reaches your coach, your readiness score, or pattern detection. Your logged dates are kept. You can turn tracking back on in ⚙ Settings.</div>
+      </Card>
+    </div>
+  );
 
   return (
     <div>
-      {/* ── PHASE HERO: segmented cycle ring, day marker, serif phase name ── */}
+      {/* ── ONE-TIME SETUP: regularity shapes the app's language before any
+             data exists. Deviation-in-days is deliberately NOT asked — people
+             approximate a range far better, and a wrong number looks like data. */}
+      {meta.self_regular===undefined&&(
+        <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pi}`}}>
+          <div style={{fontSize:13,fontWeight:500,marginBottom:4}}>Are your cycles fairly regular?</div>
+          <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6,marginBottom:10}}>Either answer is completely normal — it just tells the app how confidently to talk about timing.</div>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={()=>saveCycleLog({cycle_meta:{...meta,self_regular:true}})} style={{...s.btn("p"),...s.btnSm}}>Fairly regular</button>
+            <button onClick={()=>saveCycleLog({cycle_meta:{...meta,self_regular:false}})} style={{...s.btn("s"),...s.btnSm}}>They vary a lot</button>
+          </div>
+          <div style={{fontSize:11,color:C.t2,marginBottom:6}}>Optional — the shortest and longest cycle you can remember:</div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <input type="number" min="15" max="90" value={rangeMin} onChange={e=>setRangeMin(e.target.value)} placeholder="25" style={{...s.input,width:64,padding:"4px 8px",fontSize:12}}/>
+            <span style={{fontSize:12,color:C.t3}}>to</span>
+            <input type="number" min="15" max="90" value={rangeMax} onChange={e=>setRangeMax(e.target.value)} placeholder="34" style={{...s.input,width:64,padding:"4px 8px",fontSize:12}}/>
+            <span style={{fontSize:12,color:C.t3}}>days</span>
+            <button disabled={!rangeMin||!rangeMax} onClick={()=>saveCycleLog({cycle_meta:{...meta,
+              self_regular:meta.self_regular!==undefined?meta.self_regular:(Number(rangeMax)-Number(rangeMin)<=7),
+              remembered_range:{min:Number(rangeMin),max:Number(rangeMax)}}})}
+              style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:rangeMin&&rangeMax?1:.5}}>Save</button>
+          </div>
+        </Card>
+      )}
+
+      {/* ── PHASE HERO ─────────────────────────────────────────────────────── */}
       <Card style={{marginBottom:14}}>
-        {info?.cycleDay?(()=>{
-          const day=info.cycleDay, len=info.avgCycleLength||avgCycleLen;
-          const R=44, CIRC=2*Math.PI*R, GAP=0.012; // small gap between phase arcs
+        {st.cycleDay?(()=>{
+          const effMed=st.effectiveMedian;
+          const lutealStart=effMed-LUTEAL_BAND.mid+1;
+          const ovulStart=lutealStart-2;
+          // Past the predicted window the ring simply extends — no rollover
+          const len=Math.max(effMed, st.cycleDay);
+          const R=44, CIRC=2*Math.PI*R, GAP=0.012;
           const segs=[
-            ["menstrual",1,avgPeriodLen],
-            ["follicular",avgPeriodLen+1,Math.max(avgPeriodLen+1,lutealS-3)],
-            ["ovulatory",Math.max(avgPeriodLen+2,lutealS-2),lutealS],
-            ["luteal",lutealS+1,len],
+            ["menstrual",1,Math.min(avgPeriodLen,effMed)],
+            ["follicular",avgPeriodLen+1,Math.max(avgPeriodLen+1,ovulStart-1)],
+            ["ovulatory",Math.max(avgPeriodLen+2,ovulStart),Math.max(ovulStart,lutealStart-1)],
+            ["luteal",lutealStart,effMed],
           ];
-          // When late, the marker sits at the very end of the ring (period-due point)
-          const markDay=info.isLate?len:day;
           const angleFor=(d)=>2*Math.PI*((d-0.5)/len)-Math.PI/2;
-          const mx=55+R*Math.cos(angleFor(markDay)), my=55+R*Math.sin(angleFor(markDay));
+          const mx=55+R*Math.cos(angleFor(st.cycleDay)), my=55+R*Math.sin(angleFor(st.cycleDay));
+          const markCol=st.phase==="unknown"?C.t3:(phase?phase.c:C.pi);
           return (
             <div style={{display:"flex",alignItems:"center",gap:18}}>
               <div style={{position:"relative",width:110,height:110,flexShrink:0}}>
                 <svg width="110" height="110" viewBox="0 0 110 110">
+                  {/* Beyond the predicted date: neutral, unasserted territory */}
+                  {len>effMed&&(()=>{const f0=effMed/len+GAP/2,f1=1;return (
+                    <circle cx="55" cy="55" r={R} fill="none" stroke={C.s2} strokeWidth="9" strokeLinecap="round"
+                      strokeDasharray={`${(f1-f0)*CIRC} ${CIRC}`} strokeDashoffset={-f0*CIRC} transform="rotate(-90 55 55)"/>);})()}
                   {segs.map(([key,from,to])=>{
                     const f0=(from-1)/len+GAP/2, f1=to/len-GAP/2;
                     if(f1<=f0) return null;
                     return <circle key={key} cx="55" cy="55" r={R} fill="none"
-                      stroke={PHASES[key].c} strokeOpacity={info.phase===key?1:0.28} strokeWidth="9"
+                      stroke={PHASES[key].c} strokeOpacity={st.phase===key?1:0.28} strokeWidth="9"
                       strokeLinecap="round" strokeDasharray={`${(f1-f0)*CIRC} ${CIRC}`}
                       strokeDashoffset={-f0*CIRC} transform="rotate(-90 55 55)"/>;
                   })}
-                  <circle cx={mx} cy={my} r="6" fill={phase?phase.c:C.pi} stroke="#fff" strokeWidth="2.5"/>
+                  <circle cx={mx} cy={my} r="6" fill={markCol} stroke="#fff" strokeWidth="2.5"/>
                 </svg>
                 <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
                   <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Day</div>
-                  <div style={{fontSize:28,fontWeight:700,letterSpacing:-1,lineHeight:1,color:phase?phase.c:C.tx}}>{day}</div>
-                  <div style={{fontSize:9,color:info.isLate?C.am:C.t3,marginTop:2}}>{info.isLate?`+${info.daysLate} late`:`of ${len}`}</div>
+                  <div style={{fontSize:28,fontWeight:700,letterSpacing:-1,lineHeight:1,color:markCol}}>{st.cycleDay}</div>
+                  {!st.pastWindow&&<div style={{fontSize:9,color:C.t3,marginTop:2}}>of ~{effMed}</div>}
                 </div>
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:20,fontWeight:600,color:info.isLate?C.am:(phase?phase.c:C.pi),fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>{getPhaseDisplayText(info)}</div>
-                {info.isLate
-                  ? <div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Was expected ~ {fmtDate(info.nextPeriod)}. Log the start when it arrives.</div>
-                  : info.nextPeriod&&<div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Next period ~ {fmtDate(info.nextPeriod)}</div>}
-                {(info.confidence==="very_low"||info.confidence==="no_data")
-                  ? <div style={{fontSize:10.5,color:C.am,marginTop:5,lineHeight:1.5}}>Rough estimate — cycles vary or data is thin. More dates will sharpen this.</div>
-                  : info.cyclesUsedForCalculation>0&&<div style={{fontSize:10.5,color:C.t3,marginTop:5}}>based on {info.cyclesUsedForCalculation} logged cycle{info.cyclesUsedForCalculation!==1?"s":""}</div>}
+                <div style={{fontSize:20,fontWeight:600,color:st.phase==="unknown"?C.t2:(phase?phase.c:C.pi),fontFamily:"'Playfair Display',Georgia,serif",fontStyle:"italic"}}>
+                  {st.pastWindow?"Past predicted date":getPhaseDisplayText(st)}
+                </div>
+                {st.pastWindow
+                  ? <div style={{fontSize:11.5,color:C.t2,marginTop:5,lineHeight:1.5}}>Was expected around {fmtShort(st.medianDate)}. Log the start when it arrives.</div>
+                  : <div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Expected around {fmtShort(st.medianDate)} <span style={{color:C.t3}}>(likely {fmtShort(st.winStartDate)} – {fmtShort(st.winEndDate)})</span></div>}
+                {st.usedGaps>0
+                  ? <div style={{fontSize:10.5,color:C.t3,marginTop:5}}>median {st.median}d from {st.usedGaps} cycle{st.usedGaps!==1?"s":""}{st.ovAdjusted?" · adjusted to your ovulation report":""}</div>
+                  : <div style={{fontSize:10.5,color:C.t3,marginTop:5,lineHeight:1.5}}>Estimate only — no complete cycle recorded yet. It sharpens once you log a second period start.</div>}
               </div>
             </div>
           );
@@ -3697,13 +3900,36 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         )}
       </Card>
 
-      {/* ── CYCLE NUMBERS: three stat tiles (period length editable in place) ── */}
+      {/* ── 3.5 ASK ONCE past the window. Three answers, not equivalent. ────── */}
+      {st.pastWindow&&!meta.late_ack&&(
+        <Card style={{marginBottom:14,borderLeft:`3px solid ${C.pi}`}}>
+          <div style={{fontSize:13,fontWeight:500,marginBottom:4}}>No period logged in a while</div>
+          <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6,marginBottom:10}}>{st.selfRegular===false
+            ? "Your cycles vary, so this is entirely expected — the app just can't estimate a phase right now. Want to update it?"
+            : "Cycle length varies for everyone — the prediction has simply expired, which isn't a problem. Want to update it?"}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <button onClick={answerStarted} style={{...s.btn("p"),...s.btnSm,justifyContent:"flex-start"}}>It started — add the date below</button>
+            <button onClick={answerNotYet} disabled={busyAnswer===true} style={{...s.btn("s"),...s.btnSm,justifyContent:"flex-start"}}>It hasn't come yet</button>
+            <button onClick={answerUnknown} disabled={busyAnswer===true} style={{...s.btn("s"),...s.btnSm,justifyContent:"flex-start"}}>I'm not sure / skip</button>
+          </div>
+          {busyAnswer==="needdate"&&<div style={{fontSize:11,color:C.am,marginTop:8}}>Add the start date in Cycle history below, then tap Add.</div>}
+        </Card>
+      )}
+      {st.pastWindow&&meta.late_ack&&(
+        <div style={{fontSize:11,color:C.t3,marginBottom:14,paddingLeft:2}}>
+          {meta.late_ack.kind==="not_yet"
+            ? "Noted — this cycle is still open and will be recorded in full once it ends."
+            : "Noted — this cycle's length can't be known, so it won't be used for predictions."}
+        </div>
+      )}
+
+      {/* ── CYCLE NUMBERS — one computation, used everywhere ─────────────────── */}
       {lastPeriodStart&&(
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
           <div style={s.mc}>
-            <div style={s.ml}>Avg cycle</div>
-            <div style={{...s.mv,color:C.pi}}>{avgCycleLen}<span style={{fontSize:12,fontWeight:400}}> d</span></div>
-            <div style={{...s.ms,color:C.t3}}>{info?.cyclesUsedForCalculation>0?`from ${info.cyclesUsedForCalculation} cycle${info.cyclesUsedForCalculation!==1?"s":""}`:"default"}</div>
+            <div style={s.ml}>Typical cycle</div>
+            <div style={{...s.mv,color:C.pi}}>{st.median}<span style={{fontSize:12,fontWeight:400}}> d</span></div>
+            <div style={{...s.ms,color:C.t3}}>{st.usedGaps>0?`median of ${st.usedGaps}`:"estimate"}</div>
           </div>
           <div style={{...s.mc,position:"relative"}}>
             <div style={s.ml}>Avg period</div>
@@ -3722,50 +3948,195 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             )}
           </div>
           <div style={s.mc}>
-            <div style={s.ml}>Next period</div>
-            <div style={{...s.mv,color:C.pi,fontSize:16}}>{info?.nextPeriod?new Date(info.nextPeriod+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</div>
-            <div style={{...s.ms,color:C.t3}}>{info?.nextPeriod?new Date(info.nextPeriod+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long"}):"estimate"}</div>
+            <div style={s.ml}>Expected</div>
+            <div style={{...s.mv,color:C.pi,fontSize:16}}>{fmtShort(st.medianDate)}</div>
+            <div style={{...s.ms,color:C.t3}}>{st.usedGaps>1?`${fmtShort(st.winStartDate)}–${fmtShort(st.winEndDate)}`:"estimate"}</div>
           </div>
         </div>
       )}
 
+      {/* ── PHASE 5: SYMPTOMS & BLEED ────────────────────────────────────────── */}
+      <Card>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Today</div>
+          <button onClick={()=>openSymptom(tkey())} style={{...s.btn("p"),...s.btnSm,fontSize:11}}><Icon name="plus" size={12} color="#fff"/> Log symptoms</button>
+        </div>
+        {todaySym?(
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+            {todaySym.bleed&&<span style={{...s.pill(C.rl,C.red),fontSize:10}}>🩸 {(BLEED_LEVELS.find(b=>b[0]===todaySym.bleed)||[,todaySym.bleed])[1]}</span>}
+            {(todaySym.symptoms||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
+            {(todaySym.mood||[]).map(x=><span key={x} style={{...s.pill(C.al,C.am),fontSize:10}}>{x}</span>)}
+            {todaySym.discharge&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>{todaySym.discharge}</span>}
+            {todaySym.note&&<span style={{fontSize:11,color:C.t2}}>· {todaySym.note}</span>}
+            <button onClick={()=>openSymptom(tkey())} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>edit</button>
+          </div>
+        ):(
+          <div style={{fontSize:11.5,color:C.t3}}>Nothing logged today. Bleed intensity, symptoms and mood all help your coach spot your own patterns.</div>
+        )}
+        {Object.keys(symptomLogs).length>0&&(
+          <div style={{marginTop:10,paddingTop:10,borderTop:`.5px solid ${C.bd}`}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:6}}>Recent</div>
+            {Object.keys(symptomLogs).sort().reverse().slice(0,5).map(dk=>{
+              const e=symptomLogs[dk];
+              return (
+                <div key={dk} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,padding:"4px 0"}}>
+                  <span style={{color:C.t2,flex:"0 0 68px"}}>{fmtShort(dk)}</span>
+                  <span style={{flex:1,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {[e.bleed?"🩸"+(BLEED_LEVELS.find(b=>b[0]===e.bleed)||[,e.bleed])[1]:null,...(e.symptoms||[]),...(e.mood||[])].filter(Boolean).join(", ")||e.note||"—"}
+                  </span>
+                  <button onClick={()=>openSymptom(dk)} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer"}}>edit</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* ── PHASE 6: OVULATION (optional, non-nagging) ───────────────────────── */}
+      {st.cycleDay&&(
+        <Card>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Ovulation</div>
+          {ovForThisCycle?(
+            <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6}}>
+              Reported around {fmtShort(ovForThisCycle.date)}. Your prediction window now counts forward from there — this narrows the estimate, it doesn't make it certain.
+              <button onClick={reportOvulation} style={{background:"none",border:"none",color:C.pu,fontSize:11,cursor:"pointer",marginLeft:6,textDecoration:"underline"}}>update to today</button>
+            </div>
+          ):(
+            <>
+              <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6,marginBottom:8}}>Optional. If you notice signs of ovulation, telling the app roughly when helps it read the rest of your cycle more accurately.</div>
+              <button onClick={reportOvulation} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>I think I'm ovulating around now</button>
+            </>
+          )}
+          <button onClick={()=>setOvHelp(v=>!v)} style={{background:"none",border:"none",padding:0,marginTop:8,fontSize:11,color:C.pu,cursor:"pointer",fontWeight:500}}>{ovHelp?"▾":"▸"} How do I know if I'm ovulating?</button>
+          {ovHelp&&(
+            <div style={{fontSize:11,color:C.t2,lineHeight:1.7,marginTop:6,background:C.s2,borderRadius:8,padding:"10px 12px"}}>
+              Commonly reported signs, roughly around the middle of a cycle:<br/>
+              • <strong>Cervical fluid changes</strong> — often becomes clearer, wetter and more stretchy (egg-white-like) in the days approaching ovulation, then dries up afterwards.<br/>
+              • <strong>A mild one-sided ache</strong> in the lower abdomen, usually lasting hours rather than days.<br/>
+              • <strong>Slight breast tenderness</strong> or bloating in the days after.<br/>
+              • <strong>A small rise in resting temperature</strong> that persists — this shows up <em>after</em> ovulation, so it confirms rather than predicts.<br/><br/>
+              These signs vary a lot between people and between cycles, and perceived ovulation doesn't always match actual ovulation — so this is treated as a helpful hint, never as fact. This is informational only, not fertility or contraception guidance.
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── CYCLE HISTORY ────────────────────────────────────────────────────── */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
-        <p style={{fontSize:11.5,color:C.t2,marginBottom:12}}>Add each period start date (day 1 = first day of full flow). More dates → sharper predictions for your coach.</p>
+        <p style={{fontSize:11.5,color:C.t2,marginBottom:12}}>Add each period start date (day 1 = first day of full flow). Past dates are welcome — more history sharpens the prediction.</p>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
           <input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)} style={{...s.input,flex:1}}/>
           <button onClick={addDate} disabled={saving} style={{...s.btn("p"),...s.btnSm}}>{saving?"Saving...":"Add"}</button>
         </div>
         {periodDates.length===0
           ? <div style={{textAlign:"center",padding:"12px 0",color:C.t3,fontSize:13}}><strong style={{display:"block",color:C.t2}}>No dates added yet</strong>Add your most recent period start date above.</div>
-          : periodDates.map((d,i)=>(
-            <div key={d} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:i<periodDates.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
-              <strong>{fmtDate(d)}</strong>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                {i===0&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Most recent</span>}
-                <button onClick={()=>delDate(d)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
+          : periodDates.map((d,i)=>{
+            const nextOlder=periodDates[i+1];
+            const len=nextOlder?Math.round((dayKeyToNoon(d)-dayKeyToNoon(nextOlder))/864e5):null;
+            const isExc=excSet.has(d);
+            return (
+              <div key={d} style={{padding:"7px 0",borderBottom:i<periodDates.length-1?`.5px solid ${C.bd}`:"none",fontSize:12}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div>
+                    <strong style={{textDecoration:isExc?"line-through":"none",opacity:isExc?.6:1}}>{fmtDate(d)}</strong>
+                    {len&&<span style={{fontSize:10,color:C.t3,marginLeft:8}}>{len}-day cycle</span>}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {i===0&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Most recent</span>}
+                    {len&&<button onClick={()=>toggleExceptional(d)} title={isExc?"Include this cycle again":"Exclude: disrupted by a one-off event"}
+                      style={{background:"none",border:"none",color:isExc?C.am:C.t3,cursor:"pointer",fontSize:11}}>{isExc?"excluded":"exclude"}</button>}
+                    <button onClick={()=>delDate(d)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
+                  </div>
+                </div>
+                {isExc&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>Not used for predictions — flagged as a one-off.</div>}
               </div>
-            </div>
-          ))
+            );
+          })
         }
+        {periodDates.length>1&&<div style={{fontSize:10,color:C.t3,marginTop:10,lineHeight:1.5}}>Only flag a cycle as one-off if something unrepeatable disrupted it (illness, surgery). Regularly disrupted cycles are part of your real pattern and should stay in.</div>}
       </Card>
 
+      {/* ── PHASE GUIDE ──────────────────────────────────────────────────────── */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Phase guide</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {Object.entries(PHASES).map(([key,p])=>(
-            <div key={key} style={{padding:10,background:p.bg,borderRadius:10,border:info?.phase===key?`1.5px solid ${p.c}`:"1.5px solid transparent"}}>
-              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()} · {p.days}{info?.phase===key&&<span style={{marginLeft:6,fontSize:9,fontWeight:700}}>← NOW</span>}</div>
+            <div key={key} style={{padding:10,background:p.bg,borderRadius:10,border:st.phase===key?`1.5px solid ${p.c}`:"1.5px solid transparent"}}>
+              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()}{st.phase===key&&<span style={{marginLeft:6,fontSize:9,fontWeight:700}}>← LIKELY NOW</span>}</div>
               <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>
-                {key==="menstrual"?"Lower intensity. Gentle yoga, walking. Iron-rich foods. Rest is productive.":
-                 key==="follicular"?"Rising energy. Best window for new challenges and heavier strength work.":
-                 key==="ovulatory"?"Peak strength. Ideal for gym sessions. High protein supports performance.":
-                 "Fatigue rises. Higher protein and magnesium. Scale back from day 22."}
+                {key==="menstrual"?"Iron needs are higher while bleeding — iron-rich foods with vitamin C help; tea, coffee and calcium with the same meal reduce absorption.":
+                 key==="follicular"?"The variable part of the cycle — its length is what makes cycles differ. Energy often builds through it.":
+                 key==="ovulatory"?"A short window before the luteal phase. Timing is an estimate unless you report signs yourself.":
+                 "Typically 11–15 days before your period. Premenstrual symptoms characteristically appear here and ease within a week of bleeding starting."}
               </div>
             </div>
           ))}
         </div>
+        <div style={{fontSize:10,color:C.t3,marginTop:10,lineHeight:1.5}}>Phase boundaries are estimates counted back from your predicted period. Training and sleep guidance is not adjusted by phase — the evidence doesn't support it.</div>
       </Card>
+
+      {/* ── SYMPTOM MODAL ────────────────────────────────────────────────────── */}
+      {showSymptom&&(
+        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowSymptom(false);}}>
+          <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
+            <h3 style={{fontSize:16,fontWeight:600,marginBottom:10}}>Log symptoms</h3>
+            <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label>
+            <input type="date" value={symDate} onChange={e=>setSymDate(e.target.value)} style={{...s.input,marginBottom:14}}/>
+
+            <div style={{fontSize:11,fontWeight:600,color:C.t2,marginBottom:6}}>Bleeding</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+              {BLEED_LEVELS.map(([v,l])=>(
+                <button key={v} onClick={()=>setSymDraft(p=>({...p,bleed:p.bleed===v?null:v}))}
+                  style={{...s.btn(symDraft.bleed===v?"p":"s"),padding:"6px 12px",fontSize:11}}>{l}</button>
+              ))}
+            </div>
+
+            <div style={{fontSize:11,fontWeight:600,color:C.t2,marginBottom:6}}>Physical</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+              {[...SYMPTOMS_PHYSICAL,...customSymptoms].map(x=>(
+                <button key={x} onClick={()=>setSymDraft(p=>({...p,symptoms:toggleIn(p.symptoms,x)}))}
+                  style={{...s.btn(symDraft.symptoms.includes(x)?"p":"s"),padding:"6px 12px",fontSize:11}}>{x}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              <input value={customInput} onChange={e=>setCustomInput(e.target.value)} placeholder="Add your own symptom" style={{...s.input,flex:1,padding:"5px 8px",fontSize:11}}/>
+              <button disabled={!customInput.trim()} onClick={async()=>{
+                const v=customInput.trim();
+                if(!v||[...SYMPTOMS_PHYSICAL,...customSymptoms].includes(v)){setCustomInput("");return;}
+                await saveCycleLog({custom_symptoms:[...customSymptoms,v]});
+                setSymDraft(p=>({...p,symptoms:[...p.symptoms,v]}));
+                setCustomInput("");
+              }} style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:customInput.trim()?1:.5}}>Add</button>
+            </div>
+
+            <div style={{fontSize:11,fontWeight:600,color:C.t2,marginBottom:6}}>Mood</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+              {SYMPTOMS_MOOD.map(x=>(
+                <button key={x} onClick={()=>setSymDraft(p=>({...p,mood:toggleIn(p.mood,x)}))}
+                  style={{...s.btn(symDraft.mood.includes(x)?"p":"s"),padding:"6px 12px",fontSize:11}}>{x}</button>
+              ))}
+            </div>
+
+            <div style={{fontSize:11,fontWeight:600,color:C.t2,marginBottom:6}}>Discharge</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+              {DISCHARGE_TYPES.map(x=>(
+                <button key={x} onClick={()=>setSymDraft(p=>({...p,discharge:p.discharge===x?null:x}))}
+                  style={{...s.btn(symDraft.discharge===x?"p":"s"),padding:"6px 12px",fontSize:11}}>{x}</button>
+              ))}
+            </div>
+
+            <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Notes</label>
+            <textarea value={symDraft.note} onChange={e=>setSymDraft(p=>({...p,note:e.target.value}))} rows={2}
+              placeholder="Anything that doesn't fit a tag" style={{...s.input,resize:"vertical",marginBottom:14,fontFamily:"inherit"}}/>
+
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowSymptom(false)} style={s.btn("s")}>Cancel</button>
+              <button onClick={saveSymptom} style={s.btn("p")}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5073,11 +5444,16 @@ function CycleHeaderPill({cycleDates, cycleLog, onPress}) {
   const lastPeriodStart = cycleLog?.last_period_start || cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d))[0]?.d || null;
   let label="cycle", bg=C.pil, col=C.pi;
   const _hDatesArr = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : (lastPeriodStart?[lastPeriodStart]:[]);
-  if(_hDatesArr.length){
-    const {phase,cycleDay}=calculateCyclePhase(_hDatesArr,cycleLog?.avg_period_length||5);
-    label=`Day ${cycleDay} · ${phase}`;
-    bg=phase==="menstrual"?C.rl:phase==="follicular"?C.tl:phase==="ovulatory"?C.al:C.pl;
-    col=phase==="menstrual"?C.red:phase==="follicular"?C.teal:phase==="ovulatory"?C.am:C.pu;
+  const _hSt=getCycleState(cycleLog?.period_start_dates?.length?cycleLog:(_hDatesArr.length?{period_start_dates:_hDatesArr,avg_period_length:5}:null));
+  if(_hSt.enabled===false) return null; // master switch off
+  if(_hSt.cycleDay){
+    const phase=_hSt.phase;
+    // Hedged like everywhere else (4.2) — the pill may not state bare fact
+    label=phase==="unknown"?`Day ${_hSt.cycleDay} · phase unclear`
+      :phase==="menstrual"?`Day ${_hSt.cycleDay} · menstrual`
+      :`Day ${_hSt.cycleDay} · likely ${phase}`;
+    bg=phase==="menstrual"?C.rl:phase==="follicular"?C.tl:phase==="ovulatory"?C.al:phase==="unknown"?C.s2:C.pl;
+    col=phase==="menstrual"?C.red:phase==="follicular"?C.teal:phase==="ovulatory"?C.am:phase==="unknown"?C.t2:C.pu;
   }
   return <button onClick={onPress} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,background:bg,color:col,border:"none",cursor:"pointer",fontFamily:"inherit"}}>{label}</button>;
 }
@@ -5128,6 +5504,10 @@ export default function App() {
   useEffect(()=>{ if(profileData?.protein_target) setSettProt(profileData.protein_target); },[profileData?.protein_target]);
   // Publish the profile timezone to the module-level helper used by metric components
   useEffect(()=>{ if(profileData?.timezone) setActiveTz(profileData.timezone); },[profileData?.timezone]);
+  // Master cycle switch: gates EVERY consumer via the shared engine (Phase 9).
+  // Disabled = no phase computed, none in prompts, no scoring, no prompts about
+  // missing periods. This is also the pregnancy handling: stop asserting.
+  useEffect(()=>{ setActiveCycleTracking(profileData?.cycle_tracking); },[profileData?.cycle_tracking]);
   useEffect(()=>{ if(profileData?.week_start){setActiveWeekStart(profileData.week_start);setSettWeekStart(profileData.week_start);} },[profileData?.week_start]);
 
   // Intelligence layer — runs once after data loads, then after each sync
@@ -5137,8 +5517,8 @@ export default function App() {
     const now=Date.now();
     if(now-_intelligenceTs.current<60000) return; // debounce: 60s minimum between runs
     _intelligenceTs.current=now;
-    const last30=buildLast30Days(fitbitData,allFood,cycleDates,profileData);
-    runPatternDetection(profileData,fitbitData,allFood,cycleDates).then(patterns=>{
+    const last30=buildLast30Days(fitbitData,allFood,cycleDates,profileData,cycleLog);
+    runPatternDetection(profileData,fitbitData,allFood,cycleDates,cycleLog,logEntries).then(patterns=>{
       setProfileData(p=>({...p,detected_patterns:patterns}));
       return buildBehavioralBaseline(last30);
     }).then(baseline=>{
@@ -5510,6 +5890,7 @@ export default function App() {
       setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart}));
       setActiveTz(settTimezone);
       setActiveWeekStart(settWeekStart);
+      setActiveCycleTracking(settCycle);
     }catch(e){}
     setShowSett(false);
   }
@@ -5534,7 +5915,7 @@ export default function App() {
   }
 
   function buildCtxForChat(){
-    let ctx = buildCtxFull({allFood, logEntries, cycleDates, protTgt, fitbitData, profileData});
+    let ctx = buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbitData, profileData});
     // Include today's in-app coach insights so chat and coach card are consistent
     try{
       const todayKey = new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
@@ -5776,7 +6157,7 @@ export default function App() {
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
                 <div>
                   <div style={{fontSize:13,fontWeight:500}}>Cycle tracking</div>
-                  <div style={{fontSize:11,color:C.t3}}>Show cycle phase across the app</div>
+                  <div style={{fontSize:11,color:C.t3,lineHeight:1.5,maxWidth:240}}>When off, no phase is calculated anywhere — nothing cycle-related reaches your coach, readiness, or patterns. Your logged dates are kept.</div>
                 </div>
                 <button onClick={()=>setSettCycle(v=>!v)} style={{...s.btn(settCycle?"p":"s"),...s.btnSm}}>{settCycle?"On":"Off"}</button>
               </div>
