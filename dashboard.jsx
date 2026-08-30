@@ -437,13 +437,10 @@ async function saveCycleDates(newDate, avgPeriodLen=5) {
   }
   const payload={uid:UID,period_start_dates:merged,avg_cycle_length:medLen,avg_period_length:existingPeriodLen,
     last_period_start:merged[0],cycle_variability,exceptional_cycles:exceptional,cycle_meta:newMeta};
-  try{
-    await supa("POST","cycle_logs",payload,"on_conflict=uid");
-  }catch(e){
-    // Columns may not exist yet (the original 422 cause: PGRST204, column
-    // absent from schema) — never lose the dates over a missing column.
-    await supa("POST","cycle_logs",{uid:UID,period_start_dates:merged,avg_cycle_length:medLen,avg_period_length:existingPeriodLen,last_period_start:merged[0]},"on_conflict=uid");
-  }
+  // No reduced-field fallback: the columns exist, and a silent partial save
+  // loses user-entered data (one-off flags, unknowable-cycle exclusions).
+  // Let it throw — the caller surfaces it.
+  await supa("POST","cycle_logs",payload,"on_conflict=uid");
   return {merged, avgCycleLength:medLen, cycle_variability, exceptional_cycles:exceptional, cycle_meta:newMeta};
 }
 
@@ -3193,6 +3190,12 @@ function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState=
   const [txtInput, setTxtInput] = useState("");
   const [mealDate, setMealDate] = useState(tkey());
   const [eatenTime, setEatenTime] = useState(new Date().toTimeString().slice(0,5));
+  // The picker's change event is not always delivered to React before submit
+  // (iOS wheel popover + tapping the submit button in one gesture), which left
+  // state holding the seeded "now" while the input visibly showed the user's
+  // choice. Submit reads the DOM value so it uses what the user can see.
+  const timeRef = React.useRef(null);
+  const dateRef = React.useRef(null);
   const [analysing, setAnalysing] = useState(false);
   const [aiMsg, setAiMsg] = useState("");
   const [editIdx, setEditIdx] = useState(null);
@@ -3445,6 +3448,9 @@ Input: ${txt}`;
   async function analyseText() {
     if(IS_DEMO){ showDemoToast(); return; }
     if(!txtInput.trim()) return;
+    // Source of truth is what the user sees, not what onChange happened to commit
+    const eatenTimeVal = (timeRef.current && timeRef.current.value) || eatenTime;
+    const mealDateVal  = (dateRef.current && dateRef.current.value) || mealDate;
     if(!apiKey){ setAiMsg("⚠️ Add your Anthropic API key in ⚙ Settings to analyse meals — this device doesn't have it yet."); return; }
     setAnalysing(true); setAiMsg("Analysing meal...");
     try {
@@ -3481,16 +3487,16 @@ Input: ${txtInput}`;
       if(d.error) throw new Error(d.error.message);
       const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
       const entry = JSON.parse(raw);
-      entry.eaten_time = eatenTime;
-      entry.time = eatenTime; // keep for display compat
+      entry.eaten_time = eatenTimeVal;
+      entry.time = eatenTimeVal; // keep for display compat
       entry.source = "estimated";
       entry.parsed_items = entry.parsed_items ? entry.parsed_items.map(i=>({...i,src:"ai_estimate"})) : null;
-      const targetDate = mealDate || foodDate;
+      const targetDate = mealDateVal || foodDate;
       let saveErr = null;
       // Try full payload first, then fall back to core columns if schema mismatch
       try {
         const rows = await supa("POST","food_log",{
-          user_id:UID, log_date:targetDate, meal_time:eatenTime, eaten_time:eatenTime,
+          user_id:UID, log_date:targetDate, meal_time:eatenTimeVal, eaten_time:eatenTimeVal,
           name:entry.n, detail:entry.det||null,
           protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k,
           parsed_items: entry.parsed_items ? JSON.stringify(entry.parsed_items) : null
@@ -3502,7 +3508,7 @@ Input: ${txtInput}`;
           // Keep the user's chosen time on the fallback path too — dropping it
           // here silently lost the time whenever the full insert failed.
           const rows2 = await supa("POST","food_log",{
-            user_id:UID, log_date:targetDate, meal_time:eatenTime, eaten_time:eatenTime,
+            user_id:UID, log_date:targetDate, meal_time:eatenTimeVal, eaten_time:eatenTimeVal,
             name:entry.n, detail:entry.det||null,
             protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
           });
@@ -3671,8 +3677,8 @@ Input: ${txtInput}`;
             <h3 style={{marginBottom:6,fontSize:16,fontWeight:600}}>Describe your meal</h3>
             <p style={{fontSize:13,color:C.t2,marginBottom:16}}>Type what you ate and how much.</p>
             <div style={{display:"flex",gap:8,marginBottom:8}}>
-              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label><input type="date" value={mealDate} onChange={e=>setMealDate(e.target.value)} style={s.input}/></div>
-              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>When did you eat this?</label><input type="time" value={eatenTime} onChange={e=>setEatenTime(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label><input ref={dateRef} type="date" value={mealDate} onChange={e=>setMealDate(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1}}><label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>When did you eat this?</label><input ref={timeRef} type="time" value={eatenTime} onChange={e=>setEatenTime(e.target.value)} style={s.input}/></div>
             </div>
             <textarea value={txtInput} onChange={e=>setTxtInput(e.target.value)} placeholder="e.g. 150g grilled chicken, mixed salad, olive oil dressing" style={{...s.input,resize:"vertical",minHeight:72,marginBottom:16}}/>
             {!apiKey&&<div style={{fontSize:12,color:C.am,marginBottom:12,lineHeight:1.5}}>⚠️ No API key on this device yet — open ⚙ Settings and paste your Anthropic key to enable meal analysis.</div>}
@@ -3844,6 +3850,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [openPhase, setOpenPhase] = useState(null);
   const [oneOffHelp, setOneOffHelp] = useState(false);
+  const [cycleSaveErr, setCycleSaveErr] = useState("");
   const [rangeMin, setRangeMin] = useState("");
   const [rangeMax, setRangeMax] = useState("");
 
@@ -3879,12 +3886,13 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       avg_period_length:avgPeriodLen,last_period_start:lastPeriodStart,...patch};
     setCycleLog(next);
     try{localStorage.setItem("jcycle_log",JSON.stringify(next));}catch(e){}
-    try{ await supa("POST","cycle_logs",next,"on_conflict=uid"); }
+    // No reduced-field fallback: dropping symptom_logs / ovulation_reports /
+    // exceptional_cycles here would silently lose exactly the data the user
+    // just entered. Fail loudly instead — a visible error beats a partial save
+    // discovered months later.
+    try{ await supa("POST","cycle_logs",next,"on_conflict=uid"); setCycleSaveErr(""); }
     catch(e){
-      // New columns may not exist yet — never lose the core dates over that
-      try{ await supa("POST","cycle_logs",{uid:UID,period_start_dates:next.period_start_dates,
-        avg_cycle_length:next.avg_cycle_length,avg_period_length:next.avg_period_length,
-        last_period_start:next.last_period_start},"on_conflict=uid"); }catch(e2){}
+      setCycleSaveErr("Couldn't save to the server — "+String(e.message||e).slice(0,110)+". Your entry is kept on this device; try again when you're back online.");
     }
     return next;
   }
@@ -3901,7 +3909,10 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       setCycleDates(r.merged.map((d,i)=>({id:i,d,ok:true})));
       localStorage.setItem("jcycle_log",JSON.stringify(newLog));
       setDateInput("");
-    } catch(e){ console.error("Cycle save error:",e.message); }
+    } catch(e){
+      console.error("Cycle save error:",e.message);
+      setCycleSaveErr("Couldn't save that date to the server — "+String(e.message||e).slice(0,110)+". Try again in a moment.");
+    }
     setSaving(false);
   }
 
@@ -3993,6 +4004,11 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
 
   return (
     <div>
+      {cycleSaveErr&&(
+        <div style={{background:C.rl,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.red,lineHeight:1.5}}>
+          {cycleSaveErr}
+        </div>
+      )}
       {/* ── ONE-TIME SETUP: regularity shapes the app's language before any
              data exists. Deviation-in-days is deliberately NOT asked — people
              approximate a range far better, and a wrong number looks like data. */}
