@@ -494,7 +494,10 @@ async function saveCycleDates(newDate, avgPeriodLen = 5) {
   } catch (e) {}
   const existingDates = existing?.[0]?.period_start_dates || [];
   const existingPeriodLen = existing?.[0]?.avg_period_length || avgPeriodLen;
-  const merged = [...new Set([...existingDates, newDate])].sort((a, b) => new Date(b) - new Date(a)).slice(0, 6);
+  // Phase 0: store ALL period start dates indefinitely — write-time truncation
+  // was permanently deleting the 7th-oldest date on every save. Any capping
+  // belongs at read time in the calculation, never at write time.
+  const merged = [...new Set([...existingDates, newDate])].sort((a, b) => new Date(b) - new Date(a));
   const cycleLengths = [];
   for (let i = 0; i < merged.length - 1; i++) {
     cycleLengths.push(Math.round((new Date(merged[i]) - new Date(merged[i + 1])) / 864e5));
@@ -7424,7 +7427,7 @@ function TabCycle({
       setDateInput("");
     } catch (e) {
       console.error("Cycle save error:", e.message);
-      const sorted = [dateInput, ...periodDates].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => new Date(b) - new Date(a)).slice(0, 6);
+      const sorted = [dateInput, ...periodDates].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => new Date(b) - new Date(a)); // no write-time cap (Phase 0)
       const newLog = buildLog(sorted, avgPeriodLen);
       setCycleLog(newLog);
       setCycleDates(sorted.map((d, i) => ({
