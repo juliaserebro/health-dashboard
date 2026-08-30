@@ -3043,7 +3043,79 @@ ${logCtx}`;
 // Coach content schema version. Bump whenever generated insights gain fields
 // the renderer depends on — cached content from an older schema is discarded
 // rather than displayed, because the invalidation logic cannot evaluate it.
+// Model tiering (C.1/C.2). MAIN reasons over the full context; FAST handles
+// narrow single-fact tasks whose context is a handful of numbers.
+// NOTE: Haiku 4.5's API id is the dated form - `claude-haiku-4-5` is only an
+// alias. Do not "modernise" it.
+const MODEL_MAIN = "claude-sonnet-5";
+const MODEL_FAST = "claude-haiku-4-5-20251001";
 const COACH_SCHEMA = 3; // 3 = running totals are {placeholders}, not literals
+
+// B.8 - what the coach's content is genuinely a function of. If any of this
+// changed, the time-based cache is stale no matter what the clock says; the
+// old cache could serve morning content over a night of new sleep data.
+// Food is deliberately ABSENT: logging food retires advice at render time and
+// must never trigger a regeneration.
+function dataFingerprint({
+  fitbitData,
+  cycleLog,
+  todayKey
+}) {
+  const fd = fitbitData || {};
+  const sleep = (fd.sleep || []).map(s => s.date).sort().slice(-1)[0] || "";
+  const wk = (fd.workouts || []).filter(w => w.date === todayKey).map(w => w.type + "|" + (w.dur || w.duration || "")).sort().join(",");
+  const cyc = (cycleLog && cycleLog.period_start_dates || [])[0] || "";
+  const ovul = ((cycleLog && cycleLog.ovulation_reports || []).slice(-1)[0] || {}).date || "";
+  return [todayKey, sleep, wk, cyc, ovul].join("~");
+}
+
+// B.4 - every food log gets an immediate, templated acknowledgment. No model
+// call: the numbers are already on the device, and a confirmation that needs a
+// network round-trip is a confirmation that sometimes never arrives.
+function foodAck(entry, dayEntries, protTgt) {
+  const p = Math.round((dayEntries || []).reduce((s, e) => s + (e.p || 0), 0));
+  const left = Math.max(0, Math.round((protTgt || 110) - p));
+  const name = entry && entry.n ? entry.n : "Meal";
+  if (left === 0) return name + " logged ✓ · " + p + "g protein — target hit 🎯";
+  return name + " logged ✓ · " + p + "g protein today, " + left + "g to go";
+}
+
+// -- B.7 FOOD CHECKPOINTS ---------------------------------------------------
+// Her own meal rhythm, not a clock imposed on her: the median hour she actually
+// eats lunch / dinner, over whatever history exists.
+function usualMealHour(allFood, which) {
+  const hrs = [];
+  Object.keys(allFood || {}).sort().slice(-30).forEach(d => (allFood[d] || []).forEach(e => {
+    const t = e.eaten_time || e.time;
+    if (!t) return;
+    const h = parseInt(String(t).slice(0, 2), 10),
+      mi = parseInt(String(t).slice(3, 5), 10) || 0;
+    if (isNaN(h)) return;
+    const dec = h + mi / 60;
+    if (which === "lunch" && h >= 11 && h <= 15) hrs.push(dec);
+    if (which === "dinner" && h >= 17 && h <= 22) hrs.push(dec);
+  }));
+  if (hrs.length < 3) return which === "lunch" ? 13 : 19.5;
+  hrs.sort((a, b) => a - b);
+  return hrs[Math.floor(hrs.length / 2)];
+}
+// The gate is deterministic and free. A checkpoint that fires only to say
+// "you're doing fine" is a notification tax, so it stays silent when nothing
+// is off - and costs nothing when it does.
+function checkpointGate(kind, m, tgt) {
+  if (m.meals_today === 0) return {
+    say: true,
+    reason: "nothing logged yet today"
+  };
+  const pace = kind === "midday" ? 0.40 : 0.65;
+  if (m.protein_today < tgt * pace * 0.8) return {
+    say: true,
+    reason: "protein is behind pace for this time of day (" + Math.round(m.protein_today) + "g of a " + tgt + "g target)"
+  };
+  return {
+    say: false
+  };
+}
 
 // ── LIVE METRICS + INSIGHT INVALIDATION ──────────────────────────────────────
 // Tier 0: running totals are arithmetic, not insight. They are recomputed on
@@ -3206,7 +3278,24 @@ function TabDash({
       profileData
     });
   }
-  async function callCoachAI(userMessage, systemPrompt) {
+
+  // opts: {model, maxTokens, cache}
+  // C.3 - narrow tasks pass their own trimmed system prompt and a small budget
+  //       rather than paying for the full 3k-token coaching context.
+  // C.5 - the full system prompt is the large, stable half of every request and
+  //       is byte-identical across a day's calls, so it is marked cacheable.
+  //       Cache writes cost 1.25x and reads 0.1x, so this only pays off above
+  //       the minimum cacheable size - hence the length gate.
+  async function callCoachAI(userMessage, systemPrompt, opts = {}) {
+    const model = opts.model || MODEL_MAIN;
+    const cacheable = opts.cache !== false && String(systemPrompt || "").length > 5000;
+    const system = cacheable ? [{
+      type: "text",
+      text: systemPrompt,
+      cache_control: {
+        type: "ephemeral"
+      }
+    }] : systemPrompt;
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -3216,9 +3305,9 @@ function TabDash({
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 600,
-        system: systemPrompt,
+        model,
+        max_tokens: opts.maxTokens || 600,
+        system,
         messages: [{
           role: "user",
           content: userMessage
@@ -3227,7 +3316,63 @@ function TabDash({
     });
     const d = await res.json();
     if (d.error) throw new Error(d.error.message);
+    const u = d.usage || {};
+    console.log("Coach call [" + model + "] in=" + (u.input_tokens || 0) + " cache_write=" + (u.cache_creation_input_tokens || 0) + " cache_read=" + (u.cache_read_input_tokens || 0) + " out=" + (u.output_tokens || 0));
     return d.content[0].text.trim();
+  }
+
+  // B.5 - dismissals are per-day and local: a dismissal is a statement about
+  // today, not a standing preference.
+  const _dismissKey = "coach_dismissed_" + new Date().toLocaleDateString("en-CA", {
+    timeZone: getTz()
+  });
+  const [dismissedTypes, setDismissedTypes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(_dismissKey) || "[]");
+    } catch (e) {
+      return [];
+    }
+  });
+  function dismissInsight(type) {
+    setDismissedTypes(prev => {
+      const next = prev.includes(type) ? prev : [...prev, type];
+      try {
+        localStorage.setItem(_dismissKey, JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  }
+  const [regenMsg, setRegenMsg] = useState("");
+  const MANUAL_MAX_PER_DAY = 3,
+    MANUAL_MIN_GAP_MIN = 20;
+  function manualRegenerate() {
+    const dayKey = "coach_manual_" + new Date().toLocaleDateString("en-CA", {
+      timeZone: getTz()
+    });
+    let rec = {
+      n: 0,
+      last: 0
+    };
+    try {
+      rec = JSON.parse(localStorage.getItem(dayKey) || '{"n":0,"last":0}');
+    } catch (e) {}
+    const gapMin = (Date.now() - (rec.last || 0)) / 60000;
+    if (rec.n >= MANUAL_MAX_PER_DAY) {
+      setRegenMsg("Refreshed " + MANUAL_MAX_PER_DAY + " times today — it updates on its own from here.");
+      return;
+    }
+    if (gapMin < MANUAL_MIN_GAP_MIN) {
+      setRegenMsg("Just refreshed — try again in " + Math.ceil(MANUAL_MIN_GAP_MIN - gapMin) + " min.");
+      return;
+    }
+    try {
+      localStorage.setItem(dayKey, JSON.stringify({
+        n: (rec.n || 0) + 1,
+        last: Date.now()
+      }));
+    } catch (e) {}
+    setRegenMsg("");
+    generateAllCoachContent(true, "User asked for a manual refresh.");
   }
   const _retriedPlaceholders = React.useRef(false);
   async function generateAllCoachContent(forceRefresh = false, triggeringEvent = null) {
@@ -3269,7 +3414,16 @@ function TabDash({
           // serving it. Templated/learning cards are exempt: they contain no
           // metric claims, so there is nothing to go stale.
           const schemaOk = (parsed._schema || 1) >= COACH_SCHEMA || parsed.isLearning || parsed.isWeekly;
-          if (isNewFormat && schemaOk && hoursSince < 6) {
+          // B.8 - data-state override: a cache entry generated before new sleep,
+          // a workout, or a cycle event describes a day that no longer exists.
+          const fpNow = dataFingerprint({
+            fitbitData,
+            cycleLog,
+            todayKey
+          });
+          const fpOk = !parsed._fp || parsed._fp === fpNow;
+          if (!fpOk) console.log("Coach: cache bypassed - underlying data changed since generation.");
+          if (isNewFormat && schemaOk && fpOk && hoursSince < 8) {
             setCoachContent(parsed);
             return;
           }
@@ -3529,7 +3683,8 @@ EVENT-RESPONSE RULES:
 - If the triggering event is a completed workout: acknowledge it naturally and update the day's guidance to reflect it. If the previous content suggested this session, close that loop ("Nice — you got that mobility session in").
 - Only change what the new facts change. Observations still true from the previous content (e.g. the sleep trend) may be kept in substance, reworded minimally.
 - Never suggest a session category the user has already completed today unless their weekly target for that category genuinely calls for another.
-- Update today's session counts and weekly adherence math to include any new workout BEFORE reasoning about what to suggest.`;
+- Update today's session counts and weekly adherence math to include any new workout BEFORE reasoning about what to suggest.
+- PARTIAL REGENERATION: this is an update, not a fresh morning. Return the previous insights that the event does not touch UNCHANGED, word for word, and rewrite only the ones the event actually affects. Rewriting a still-true observation makes the card look unstable for no reason. If the event affects nothing, return the previous content unchanged.`;
         }
       } catch (e) {}
       const raw = await callCoachAI(userMsg + "\n\n" + buildLogContext(logEntries) + eventCtx, systemPrompt);
@@ -3554,6 +3709,11 @@ EVENT-RESPONSE RULES:
         }
         content._generatedAt = new Date().toISOString();
         content._schema = COACH_SCHEMA;
+        content._fp = dataFingerprint({
+          fitbitData,
+          cycleLog,
+          todayKey
+        });
         content._foodHash = (allFood[todayKey] || []).map(f => f.dbid || f.eaten_time || f.n).join("|");
         setCoachContent(content);
         localStorage.setItem("coach_content_" + todayKey, JSON.stringify(content));
@@ -3582,67 +3742,104 @@ EVENT-RESPONSE RULES:
     }
     setCoachLoading(false);
   }
-  async function refreshNutritionOnly() {
-    if (IS_DEMO) return;
-    if (!apiKey || !coachContent || coachContent.isLearning || coachContent.isWeekly) return;
-    const now = new Date();
-    const todayKey = now.toLocaleDateString("en-CA", {
+
+  // B.8 - LOGGING FOOD NO LONGER CALLS THE MODEL.
+  // This used to fire a generation on every meal (~5-6/day) to restate what the
+  // card could already work out. The invalidation engine now retires food advice
+  // at render time from live data: instant, free, and it cannot fail offline.
+  // Removal by default; the two daily checkpoints below are the only food-driven
+  // generations left, and each is gated on something actually being off.
+
+  async function runFoodCheckpoint(kind) {
+    if (IS_DEMO || !apiKey) return;
+    const todayKey = new Date().toLocaleDateString("en-CA", {
       timeZone: getTz()
     });
-    const todayFoodEntries = allFood[todayKey] || [];
-    const currentFoodHash = todayFoodEntries.map(f => f.dbid || f.eaten_time || f.n).join("|");
-    // Skip if food hasn't changed since last generation
+    const doneKey = "coach_checkpoint_" + todayKey;
+    let done = {};
     try {
-      const cached = JSON.parse(localStorage.getItem("coach_content_" + todayKey) || "{}");
-      if (cached._foodHash === currentFoodHash) return;
+      done = JSON.parse(localStorage.getItem(doneKey) || "{}");
     } catch (e) {}
-    const prot = Math.round(todayFoodEntries.reduce((s, e) => s + (e.p || 0), 0));
-    const protTgt2 = profileData?.protein_target || 120;
-    const foodSummary2 = todayFoodEntries.map(e => e.n || e.name).filter(Boolean).join(", ") || "nothing logged yet";
-
-    // Food changed (hash check above passed) — always refresh the nutrition insight
-    // so the coach never keeps nagging about food that was just logged.
-    localStorage.setItem("coach_last_protein_" + todayKey, String(prot));
+    if (done[kind]) return;
+    const m = liveMetrics({
+      allFood,
+      fitbitData,
+      profileData,
+      cycleLog
+    });
+    const tgt = m.protein_target;
+    const gate = checkpointGate(kind, m, tgt);
+    // Mark the checkpoint taken either way - one look per day, whether or not
+    // it had anything to say. Otherwise a quiet gate re-evaluates every 5 min.
+    done[kind] = true;
     try {
-      const raw = await callCoachAI(`Generate ONLY a food/nutrition insight for today. One sentence.
-ALREADY EATEN TODAY (forbidden from suggestion): ${foodSummary2}
-Protein so far: ${prot}g of ${protTgt2}g target.
-FOOD SENSITIVITIES & RESTRICTIONS: ${(profileData?.food_sensitivities || []).length > 0 ? profileData.food_sensitivities.join(", ") + " — NEVER suggest foods conflicting with these." : "none specified — do not assume any restriction."}
-Rules: do not suggest any food already eaten; notice qualitative patterns (variety, timing, streaks) not just grams; if protein is close to or at target acknowledge positively; if genuinely nothing new to say return exactly: null`, `You are a warm, precise nutrition coach. Return either one sentence of plain text, or the single word: null`);
+      localStorage.setItem(doneKey, JSON.stringify(done));
+    } catch (e) {}
+    if (!gate.say) {
+      console.log("Coach checkpoint (" + kind + "): on track, staying quiet.");
+      return;
+    }
+    const eaten = (allFood[todayKey] || []).map(e => e.n).filter(Boolean).join(", ") || "nothing logged yet";
+    // C.3 - trimmed context. This task needs six numbers, not her whole profile.
+    const sys = `You are Julia's nutrition coach, checking in during the day. Reply with ONE short sentence, or the single word null if there is genuinely nothing useful to say.
+TONE: tentative and warm, never scolding. She may well have eaten without logging it - never assert that she has not eaten, and never imply she has failed at anything.
+Write her running protein as the placeholder {protein_today} - never a literal number. The app substitutes the live value and adds units.`;
+    const usr = `Time of day: ${kind === "midday" ? "early afternoon" : "late afternoon, a few hours before her usual dinner"}.
+Logged so far (never suggest any of these again): ${eaten}
+Protein logged: ${Math.round(m.protein_today)}g against a ${tgt}g target. Meals logged: ${m.meals_today}.
+Why this check-in opened: ${gate.reason}.
+${(profileData?.food_sensitivities || []).length ? "NEVER suggest anything conflicting with: " + profileData.food_sensitivities.join(", ") + "." : ""}
+Suggest at most one concrete, easy thing she could still eat today.`;
+    try {
+      const raw = await callCoachAI(usr, sys, {
+        model: MODEL_FAST,
+        maxTokens: 120,
+        cache: false
+      });
       const txt = raw.replace(/```/g, "").trim();
-      const newInsight = txt && txt.toLowerCase() !== "null" ? {
+      if (!txt || txt.toLowerCase() === "null") {
+        console.log("Coach checkpoint (" + kind + "): model had nothing to add.");
+        return;
+      }
+      const ins = {
         type: "food_pattern",
         content: txt,
-        claim: txt.slice(0, 80)
-      } : null;
-      // Replace or add food_pattern in domain_insights; update hash either way
-      const existingInsights = (coachContent.domain_insights || []).filter(i => i.type !== "food_pattern" && i.type !== "protein_total");
-      const updatedInsights = newInsight ? [...existingInsights, newInsight] : existingInsights;
-      const updated = {
-        ...coachContent,
-        domain_insights: updatedInsights,
-        _foodHash: currentFoodHash,
-        _generatedAt: new Date().toISOString()
+        claim: txt.slice(0, 80),
+        depends_on: {
+          metric: "protein_today",
+          value: Math.round(m.protein_today),
+          threshold: tgt,
+          direction: "gte",
+          resolved_text: "Protein target hit ✓"
+        }
       };
-      setCoachContent(updated);
-      localStorage.setItem("coach_content_" + todayKey, JSON.stringify(updated));
-      supa("POST", "profiles", {
-        uid: UID,
-        coach_content: updated
-      }, "on_conflict=uid").catch(() => {});
-      if (newInsight) {
+      setCoachContent(prev => {
+        const base = prev || {
+          domain_insights: []
+        };
+        const next = {
+          ...base,
+          domain_insights: [...(base.domain_insights || []).filter(i => i.type !== "food_pattern"), ins],
+          _generatedAt: new Date().toISOString(),
+          _schema: COACH_SCHEMA,
+          _fp: dataFingerprint({
+            fitbitData,
+            cycleLog,
+            todayKey
+          })
+        };
         try {
-          const h = JSON.parse(localStorage.getItem("coach_insight_history") || "{}");
-          h.food_pattern = {
-            last_surfaced: todayKey,
-            last_claim: newInsight.claim,
-            last_surfaced_ms: new Date().toISOString()
-          };
-          localStorage.setItem("coach_insight_history", JSON.stringify(h));
+          localStorage.setItem("coach_content_" + todayKey, JSON.stringify(next));
         } catch (e) {}
-      }
+        supa("POST", "profiles", {
+          uid: UID,
+          coach_content: next
+        }, "on_conflict=uid").catch(() => {});
+        return next;
+      });
+      console.log("Coach checkpoint (" + kind + ") fired: " + gate.reason);
     } catch (e) {
-      console.log("Nutrition refresh error:", e.message);
+      console.log("Checkpoint error:", e.message);
     }
   }
   function shouldShowWeeklyReview() {
@@ -3758,7 +3955,7 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: MODEL_MAIN,
         max_tokens: 400,
         messages: [{
           role: "user",
@@ -4033,9 +4230,28 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     }, 60 * 60000);
     return () => clearInterval(iv);
   }, [apiKey, fitbitReady, profileData?.uid]);
+  // B.7 - two checkpoints a day, anchored to her own meal times. The gate is
+  // evaluated locally every 5 min; a model call happens only if it opens.
   useEffect(() => {
-    if (apiKey && profileData && fitbitReady && todayFoodCount > 0) refreshNutritionOnly();
-  }, [todayFoodCount, allFood]);
+    if (!apiKey || !profileData || !fitbitReady || IS_DEMO) return;
+    const check = () => {
+      const now = new Date();
+      const hNow = parseInt(now.toLocaleString("en-US", {
+        timeZone: getTz(),
+        hour: "numeric",
+        hour12: false
+      }), 10) + parseInt(now.toLocaleString("en-US", {
+        timeZone: getTz(),
+        minute: "numeric"
+      }), 10) / 60;
+      const midday = Math.min(15.5, usualMealHour(allFood, "lunch") + 0.75);
+      const aft = Math.max(midday + 2, usualMealHour(allFood, "dinner") - 2);
+      if (hNow >= midday && hNow < aft) runFoodCheckpoint("midday");else if (hNow >= aft && hNow < 22) runFoodCheckpoint("afternoon");
+    };
+    check();
+    const iv = setInterval(check, 5 * 60000);
+    return () => clearInterval(iv);
+  }, [apiKey, fitbitReady, profileData?.uid, allFood]);
   useEffect(() => {
     if (apiKey && profileData && fitbitReady && shouldShowWeeklyReview()) generateWeeklyReview();
   }, [apiKey, latestSleepDate, profileData?.uid]);
@@ -4713,8 +4929,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       cycleLog
     });
     const _evaluated = (coachContent?.domain_insights || []).map(ins => evaluateInsight(ins, _m));
-    const domainInsights = _evaluated.filter(x => !x.invalid);
-    const resolvedInsights = _evaluated.filter(x => x.invalid);
+    // B.5 - anything she has explicitly dismissed today stays gone, and
+    // does not reappear as a "resolved" chip: dismissing is not resolving.
+    const domainInsights = _evaluated.filter(x => !x.invalid && !dismissedTypes.includes(x.type));
+    const resolvedInsights = _evaluated.filter(x => x.invalid && !dismissedTypes.includes(x.type));
     // B.3 watch: if resolved outnumber active, the card has drifted from
     // coach into checklist — cap what we show so it can't take over.
     const shownResolved = resolvedInsights.slice(0, Math.max(1, domainInsights.length));
@@ -4735,7 +4953,17 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         color: C.t3
       }
     }, "Loading...")) : domainInsights.length > 0 ? domainInsights.map((ins, i) => /*#__PURE__*/React.createElement("div", {
-      key: ins.type + i
+      key: ins.type + i,
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
@@ -4750,7 +4978,20 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         color: C.tx,
         lineHeight: 1.6
       }
-    }, ins.content))) : coachContent?.nothing_new ? /*#__PURE__*/React.createElement("div", {
+    }, ins.content)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => dismissInsight(ins.type),
+      title: "Dismiss this for today",
+      style: {
+        background: "none",
+        border: "none",
+        color: C.t3,
+        fontSize: 15,
+        lineHeight: 1,
+        cursor: "pointer",
+        padding: "2px 2px",
+        flexShrink: 0
+      }
+    }, "\xD7"))) : coachContent?.nothing_new ? /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 13,
         color: C.t2,
@@ -4799,7 +5040,28 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         color: C.tx,
         lineHeight: 1.6
       }
-    }, coachContent.micro_workout)));
+    }, coachContent.micro_workout)), apiKey && !IS_DEMO && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 2
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: manualRegenerate,
+      disabled: coachLoading,
+      style: {
+        background: "none",
+        border: "none",
+        padding: 0,
+        fontSize: 11,
+        color: coachLoading ? C.t3 : C.pu,
+        cursor: coachLoading ? "default" : "pointer"
+      }
+    }, coachLoading ? "Refreshing…" : "↻ Refresh"), regenMsg && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        color: C.t3,
+        marginLeft: 8
+      }
+    }, regenMsg)));
   })()), /*#__PURE__*/React.createElement(SecLabel, null, "What you can still do today"), /*#__PURE__*/React.createElement("div", {
     style: s.mg2
   }, /*#__PURE__*/React.createElement(StepsMetric, {
@@ -6508,7 +6770,7 @@ Item: ${descriptor}${qty ? ` — ${qty}${unit || ""}` : ""}`;
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: MODEL_MAIN,
         max_tokens: 300,
         messages: [{
           role: "user",
@@ -6639,7 +6901,7 @@ Input: ${txt}`;
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -6743,7 +7005,7 @@ Input: ${txtInput}`;
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -6803,15 +7065,18 @@ Input: ${txtInput}`;
           console.log("Minimal save also failed:", e2.message);
         }
       }
+      let _dayAfter = [];
       setAllFood(prev => {
         const updated = {
           ...prev,
           [targetDate]: [...(prev[targetDate] || []), entry]
         };
+        _dayAfter = updated[targetDate];
         localStorage.setItem("jfood_backup", JSON.stringify(updated));
         return updated;
       });
-      setAiMsg(saveErr ? entry.n + " saved locally only — DB error: " + saveErr.slice(0, 60) : entry.n + " logged ✓");
+      // B.4 - the confirmation carries the running total, computed locally.
+      setAiMsg(saveErr ? entry.n + " saved locally only — DB error: " + saveErr.slice(0, 60) : foodAck(entry, _dayAfter, protTgt));
       setTxtInput("");
       setShowTxt(false);
       if (onFoodLogged) onFoodLogged();
@@ -10028,7 +10293,7 @@ function WorkoutView({
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
+          model: MODEL_FAST,
           max_tokens: 150,
           messages: [{
             role: "user",
@@ -10341,7 +10606,7 @@ function TabProfile({
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 2500,
           messages: [{
             role: "user",
@@ -10559,7 +10824,7 @@ Return ONLY the plan, nothing else.`;
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 4000,
           messages: [{
             role: "user",
@@ -10599,7 +10864,7 @@ Return ONLY the plan, nothing else.`;
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 1200,
           messages: [{
             role: "user",
@@ -10677,7 +10942,7 @@ Max 250 words total. No intro, no outro.`
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: MODEL_FAST,
         max_tokens: 2000,
         messages: [{
           role: "user",
@@ -12642,7 +12907,7 @@ function CoachMemoryCard({
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 400,
           messages: [{
             role: "user",
@@ -13513,7 +13778,7 @@ function App() {
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: MODEL_MAIN,
           max_tokens: 400,
           system: "You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n" + buildCtxForChat(),
           messages: apiMsgs
