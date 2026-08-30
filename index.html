@@ -279,6 +279,54 @@ function daysSinceWeekStart(dow) {
   return ACTIVE_WEEK_START === "monday" ? (dow + 6) % 7 : dow;
 }
 
+// ── CALENDAR-DAY HELPERS (date parts, active timezone — never 24h-block math) ──
+function todayKeyTz() {
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: getTz()
+  });
+}
+function dayKeyToNoon(dk) {
+  const [y, m, d] = dk.split("-").map(Number);
+  return new Date(y, m - 1, d, 12);
+}
+// Whole calendar days between a YYYY-MM-DD key and today (0 = today, 1 = yesterday)
+function calDaysAgo(dk) {
+  return Math.round((dayKeyToNoon(todayKeyTz()) - dayKeyToNoon(dk)) / 864e5);
+}
+// Calendar date key (in the active tz) for a full ISO timestamp
+function tsToDayKey(ts) {
+  return new Date(ts).toLocaleDateString("en-CA", {
+    timeZone: getTz()
+  });
+}
+// The uniform temporal label every prompt uses: [2026-08-12 | Wednesday | 18 days ago]
+function tripleLabel(dk) {
+  const n = calDaysAgo(dk);
+  const wd = dayKeyToNoon(dk).toLocaleDateString("en-GB", {
+    weekday: "long"
+  });
+  const rel = n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`;
+  return `[${dk} | ${wd} | ${rel}]`;
+}
+// Recency bucket, honouring the configured week start (Sunday by default)
+function recencyBucket(dk) {
+  const n = calDaysAgo(dk);
+  if (n <= 0) return "TODAY";
+  if (n === 1) return "YESTERDAY";
+  const [y, m, d] = todayKeyTz().split("-").map(Number);
+  const intoWeek = daysSinceWeekStart(new Date(y, m - 1, d).getDay());
+  if (n <= intoWeek) return "EARLIER THIS WEEK";
+  if (n <= intoWeek + 7) return "LAST WEEK";
+  return "OLDER";
+}
+// Day key N calendar days before today — built from date parts (DST-safe),
+// replacing repeated −86,400,000 ms stepping
+function dayKeyNBack(n) {
+  const [y, m, d] = todayKeyTz().split("-").map(Number);
+  const dt = new Date(y, m - 1, d - n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
 // Returns the sleep record that counts as "last night" for a given fitbitData object.
 // Sleep records use the wake-up date. We only accept today's date as current;
 // anything older means last night's data hasn't synced yet.
@@ -2305,6 +2353,14 @@ function buildCoachSystemPrompt(profileData, todayData, detectedPatterns, behavi
   const baselineOk = !!profileData?.behavioral_baseline?.established_at;
   return `You are a personal AI health coach. You are warm, direct, curious, and non-judgmental. You speak like a knowledgeable friend who happens to be an expert in health, fitness, nutrition, sleep, and women's health — not like a medical device or a generic wellness app.
 
+TODAY IS ${todayKeyTz()} (${dayKeyToNoon(todayKeyTz()).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  })}).
+DATE LABEL RULE: dated items in this conversation carry precomputed labels [date | weekday | N days ago]. Use them VERBATIM when referring to timing. NEVER characterise recency yourself — no "last week", "recently", "a few days ago", or "your update from last week" unless it matches the supplied label exactly.
+
 CRITICAL RULES — follow these without exception:
 1. OBSERVE BEFORE CONCLUDING. Never draw a causal conclusion from fewer than 3 data points. Say "we noticed" not "this is because."
 2. TENTATIVE LANGUAGE ALWAYS. Use: "it might be," "in some people," "we've noticed," "this could be connected to." Never use: "you slept badly because," "this is causing."
@@ -2658,15 +2714,26 @@ async function checkMilestones(profileData, last30Days) {
 // serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
 // movement-limiting issues stay active until a newer entry says they resolved.
 function buildLogContext(logEntries) {
-  const now = new Date();
-  const items = (logEntries || []).filter(e => e.dt && (now - new Date(e.dt)) / 864e5 <= 14).slice(0, 25).map(e => {
-    const daysAgo = Math.floor((now - new Date(e.dt)) / 864e5);
-    const when = daysAgo === 0 ? "TODAY" : daysAgo === 1 ? "YESTERDAY" : `${daysAgo} days ago`;
-    return `[${e.tag}|${when}] ${e.txt}`;
+  // Calendar days in the active timezone (an entry from 9pm yesterday is
+  // YESTERDAY this morning — never 24h-block arithmetic), triple-labelled,
+  // pre-bucketed so the model never computes recency itself.
+  const entries = (logEntries || []).filter(e => e.dt).map(e => ({
+    ...e,
+    dk: tsToDayKey(e.dt),
+    ago: calDaysAgo(tsToDayKey(e.dt))
+  })).filter(e => e.ago >= 0 && e.ago <= 14).slice(0, 25);
+  if (!entries.length) return "USER LOGS (last 14 days): none.";
+  const ORDER = ["TODAY", "YESTERDAY", "EARLIER THIS WEEK", "LAST WEEK", "OLDER"];
+  const buckets = {};
+  entries.forEach(e => {
+    const b = recencyBucket(e.dk);
+    (buckets[b] = buckets[b] || []).push(`${tripleLabel(e.dk)} [${e.tag}] ${e.txt}`);
   });
-  if (!items.length) return "USER LOGS (last 14 days): none.";
-  return `USER LOGS (last 14 days, newest first):
-${items.join("\n")}
+  const body = ORDER.filter(b => buckets[b]).map(b => `${b}:\n${buckets[b].join("\n")}`).join("\n\n");
+  return `USER LOGS (last 14 days, newest first, grouped by recency):
+${body}
+
+DATE LABEL RULE — the labels above ([date | weekday | N days ago]) are precomputed and authoritative. Use them VERBATIM when referring to any entry's timing. Never characterise recency yourself ("last week", "recently", "the other day") unless it matches the supplied label exactly.
 
 LOG RELEVANCE RULES — apply judgment to each entry's age and content:
 - Routine/transient entries (muscle soreness, ordinary tiredness, one bad night, daily mood) EXPIRE after 2 days: never reference or act on them once older than 2 days.
@@ -2693,16 +2760,14 @@ function buildCtxFull({
   const todayKey = now.toLocaleDateString("en-CA", {
     timeZone: getTz()
   });
-  const yKey = new Date(now.getTime() - 864e5).toLocaleDateString("en-CA", {
-    timeZone: getTz()
-  });
+  const yKey = dayKeyNBack(1); // date-parts, DST-safe
   const todayFood = allFood[todayKey] || [];
   const liveProt = Math.round(todayFood.reduce((s, e) => s + (e.p || 0), 0));
   const liveKcal = Math.round(todayFood.reduce((s, e) => s + (e.k || 0), 0));
   const liveCarbs = Math.round(todayFood.reduce((s, e) => s + (e.c || 0), 0));
   const liveFat = Math.round(todayFood.reduce((s, e) => s + (e.f || 0), 0));
   const mealNames = todayFood.map(e => e.n).join(", ") || "nothing logged yet";
-  const yAlcohol = logEntries.filter(e => e.dt && e.dt.slice(0, 10) === yKey && e.txt && /wine|alcohol|beer|drink/i.test(e.txt)).map(e => e.txt).join("; ");
+  const yAlcohol = logEntries.filter(e => e.dt && tsToDayKey(e.dt) === yKey && e.txt && /wine|alcohol|beer|drink/i.test(e.txt)).map(e => e.txt).join("; ");
   const conf = cycleDates.filter(x => x.ok).sort((a, b) => new Date(b.d) - new Date(a.d));
   let cycleCtx = "Cycle not tracked";
   if (conf.length) {
@@ -2717,7 +2782,7 @@ function buildCtxFull({
   const sleepLine = lastSleep ? `Last night (${lastSleep.date}): ${Math.floor(lastSleep.total / 60)}h${lastSleep.total % 60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}` : isSleepDataStale(fitbitData, getTz()) ? "Sleep data unavailable or stale — do not reference sleep." : "Sleep: not tracked last night — do NOT mention sleep stats or give sleep guidance.";
   const todayNaps = (fitbitData.naps || []).filter(n => n.date === todayKey);
   const napLine = todayNaps.length ? `Nap today: ${todayNaps.map(n => n.total + "min at " + n.start).join(", ")}.` : "No nap today.";
-  const recentWorkouts = [...(fitbitData.workouts || [])].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5).map(w => w.date + " " + w.type + (w.duration_min ? " " + w.duration_min + "min" : "")).join(", ");
+  const recentWorkouts = [...(fitbitData.workouts || [])].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5).map(w => tripleLabel(w.date) + " " + w.type + (w.duration_min ? " " + w.duration_min + "min" : "")).join(", ");
   const yWorkouts = (fitbitData.workouts || []).filter(w => w.date === yKey);
   const ySteps = (fitbitData.steps || []).find(s => s.date === yKey);
   const yActivity = yWorkouts.length ? yWorkouts.map(w => w.type).join(" + ") : "rest day, no workout logged";
@@ -2861,12 +2926,7 @@ function TabDash({
       const foodSummary = foodNames.length > 0 ? foodNames.join(", ") : "nothing logged yet today";
       const last14Keys = Array.from({
         length: 14
-      }, (_, i) => {
-        const d = new Date(now.getTime() - i * 864e5);
-        return d.toLocaleDateString("en-CA", {
-          timeZone: getTz()
-        });
-      });
+      }, (_, i) => dayKeyNBack(i)); // date-parts, DST-safe
       const trainingDays = (fitbitData.workouts || []).filter(w => last14Keys.includes(w.date)).map(w => w.date).filter((v, i, a) => a.indexOf(v) === i).length;
       const proteinHitDays = last14Keys.filter(dk => (allFood[dk] || []).reduce((s, e) => s + (e.p || 0), 0) >= (profileData?.protein_target || 100) * 0.9).length;
       const stepHitDays = last14Keys.filter(dk => {
@@ -2883,7 +2943,10 @@ function TabDash({
       const sortedWorkouts = [...(fitbitData.workouts || [])].sort((a, b) => b.date.localeCompare(a.date));
       const lastWorkoutDate = sortedWorkouts[0]?.date || null;
       const lastWorkoutType = lastWorkoutDate ? [...new Set(sortedWorkouts.filter(w => w.date === lastWorkoutDate).map(w => getActivityCategory(w.type, profileData?.activity_mapping) || w.type))].join("+") : "none";
-      const daysSinceLastWorkout = lastWorkoutDate ? Math.floor((new Date() - new Date(lastWorkoutDate + "T12:00:00")) / 864e5) : 99;
+      // Calendar days (date parts) — raw-now vs noon-anchor arithmetic made a
+      // workout done yesterday read as "0 days ago" before local noon, so the
+      // coach believed a session had already happened today.
+      const daysSinceLastWorkout = lastWorkoutDate ? calDaysAgo(lastWorkoutDate) : 99;
       const at = profileData?.activity_targets || {};
       const weeklyWorkoutTarget = (at.strength || 0) + (at.mobility || 0) + (at.cardio || 0) || 6;
       const fourteenDayTarget = weeklyWorkoutTarget * 2;
@@ -2970,10 +3033,16 @@ function TabDash({
           return {};
         }
       })();
-      const insightHistoryCtx = Object.entries(insightHistory).map(([t, d]) => `${t}: last mentioned ${d.last_surfaced} — "${d.last_claim}"`).join("\n") || "No history yet";
-      const userMsg = `TRAINING ADHERENCE (last 14 days):
+      const insightHistoryCtx = Object.entries(insightHistory).map(([t, d]) => `${t}: last mentioned ${/^\d{4}-\d{2}-\d{2}$/.test(d.last_surfaced || "") ? tripleLabel(d.last_surfaced) : d.last_surfaced} — "${d.last_claim}"`).join("\n") || "No history yet";
+      const userMsg = `TODAY IS ${todayKey} (${dayKeyToNoon(todayKey).toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "long"
+      })}). Every date below carries a precomputed label [date | weekday | N days ago] — use those labels VERBATIM when referring to timing, and never characterise recency yourself.
+
+TRAINING ADHERENCE (last 14 days):
 Sessions completed: ${trainingDays} of ${fourteenDayTarget} target (${adherencePct}% — ${adherenceLabel})
-Last session: ${lastWorkoutType}, ${daysSinceLastWorkout} day(s) ago
+Last session: ${lastWorkoutType}, ${lastWorkoutDate ? tripleLabel(lastWorkoutDate) : "none on record"}
 Most behind on weekly target: ${mostBehindCategory}
 This week so far — Strength: ${weekStrDone}/${at2.strength || 2}, Mobility: ${weekMobDone}/${at2.mobility || 2}, Cardio: ${weekCarDone}/${at2.cardio || 2}
 
@@ -2981,7 +3050,7 @@ LONGER-WINDOW DATA:
 Sleep trend (last 5 nights): ${sleepTrend}
 Protein streak (consecutive days at 90%+ target): ${proteinStreak} days
 Consistent workout days in last 2 weeks: ${patternDays.length ? patternDays.join(", ") : "none confirmed"}
-Last 14 days food log: ${last14FoodData.filter(d => d.logged).map(d => `${d.date}: ${d.prot}g prot${d.meals.length ? ` (${d.meals.slice(0, 3).join(", ")})` : ""}`).join(" | ") || "nothing logged"}
+Last 14 days food log: ${last14FoodData.filter(d => d.logged).map(d => `${tripleLabel(d.date)} ${d.prot}g prot${d.meals.length ? ` (${d.meals.slice(0, 3).join(", ")})` : ""}`).join(" | ") || "nothing logged"}
 
 INSIGHT HISTORY — do not repeat these unless something materially changed:
 ${insightHistoryCtx}
@@ -3390,10 +3459,8 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const liveCarbs = Math.round(tf.reduce((s, e) => s + (e.c || 0), 0));
     const liveKcal = Math.round(tf.reduce((s, e) => s + (e.k || 0), 0));
     // Yesterday alcohol from log
-    const yKey = new Date(now.getTime() - 864e5).toLocaleDateString("en-CA", {
-      timeZone: getTz()
-    });
-    const yAlc = logEntries.filter(e => e.dt && e.dt.slice(0, 10) === yKey && /wine|alcohol|beer|drink/i.test(e.txt || "")).map(e => e.txt).join("; ");
+    const yKey = dayKeyNBack(1); // date-parts, DST-safe
+    const yAlc = logEntries.filter(e => e.dt && tsToDayKey(e.dt) === yKey && /wine|alcohol|beer|drink/i.test(e.txt || "")).map(e => e.txt).join("; ");
     // Last sleep — use shared function so this matches the sleep card
     const lastSleep = getLastNightSleep(fitbitData, getTz());
     const sleepSummary = lastSleep ? `${Math.floor(lastSleep.total / 60)}h${lastSleep.total % 60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})` : isSleepDataStale(fitbitData, getTz()) ? "stale — skip sleep analysis" : "not tracked last night — skip sleep analysis";
@@ -3401,12 +3468,15 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const todayWorkouts = (fitbitData.workouts || []).filter(w => w.date === todayKey);
     const todayActivity = todayWorkouts.length ? todayWorkouts.filter(w => w.type !== "walk" && w.type !== "walking").map(w => w.type + (w.duration_min ? ` ${w.duration_min}min` : "") || w.type).join(", ") : "no workout yet";
     // Today pain/mood log
-    const todayLog = logEntries.filter(e => e.dt && e.dt.slice(0, 10) === todayFoodKey).map(e => `[${e.tag}] ${e.txt}`).join("; ");
+    const todayLog = logEntries.filter(e => e.dt && tsToDayKey(e.dt) === todayFoodKey).map(e => `[${e.tag}] ${e.txt}`).join("; ");
     // This week food per day + workouts
     const weekFoodLines = [];
     const weekWorkoutLines = [];
     for (let i = 0; i <= dowIL; i++) {
-      const d = new Date(now.getTime() - (dowIL - i) * 864e5);
+      const d = (() => {
+        const [wy, wm, wd] = todayKey.split("-").map(Number);
+        return new Date(wy, wm - 1, wd - (dowIL - i), 12);
+      })();
       const dk = d.toLocaleDateString("en-CA", {
         timeZone: getTz()
       });
