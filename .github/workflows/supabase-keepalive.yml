@@ -1,0 +1,39 @@
+# Supabase keepalive — prevents the free-tier project pausing after 7 days
+# of database inactivity by performing a real read twice a week.
+#
+# KNOWN GOTCHA (verified against GitHub docs, 2026-07): in a PUBLIC repository,
+# GitHub automatically disables scheduled workflows after 60 days without
+# repository activity. If commits stop for two months, this keepalive silently
+# stops with them — re-enable it from the Actions tab (or push any commit).
+#
+# Secrets required (repo Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL      e.g. https://xxxx.supabase.co
+#   SUPABASE_ANON_KEY the anon/public key (already public in the client bundle;
+#                     kept as a secret for tidiness, not security)
+
+name: Supabase keepalive
+
+on:
+  schedule:
+    # Twice weekly; GitHub cron is UTC. Sunday + Wednesday 06:17 UTC
+    # (off-the-hour to avoid the congested :00 scheduling spike).
+    - cron: "17 6 * * 0"
+    - cron: "17 6 * * 3"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one row from profiles
+        run: |
+          status=$(curl -s -o /tmp/body.json -w "%{http_code}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/profiles?select=uid&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          echo "HTTP $status"
+          cat /tmp/body.json
+          if [ "$status" -ne 200 ]; then
+            echo "::error::Supabase keepalive failed with HTTP $status — the project may be paused or the secrets are wrong."
+            exit 1
+          fi

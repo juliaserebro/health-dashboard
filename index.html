@@ -5744,6 +5744,62 @@ function TabFood({
       return [];
     }
   });
+  const [dtEditIdx, setDtEditIdx] = useState(null); // meal-header date/time editor (separate from ingredient editing)
+  const [dtDate, setDtDate] = useState("");
+  const [dtTime, setDtTime] = useState("");
+
+  // Pure metadata edit: change WHEN a meal happened. No re-parsing, no AI call.
+  // Same-day time edits re-sort in place; date edits move the meal to that day.
+  // All date handling is on YYYY-MM-DD strings from the inputs — no Date math.
+  async function saveDateTime(i) {
+    const entry = food[i];
+    const newDate = dtDate,
+      newTime = dtTime || entry.eaten_time || entry.time || "12:00";
+    if (!newDate) {
+      setDtEditIdx(null);
+      return;
+    }
+    const updated = {
+      ...entry,
+      time: newTime,
+      eaten_time: newTime
+    };
+    if (entry.dbid) {
+      try {
+        await supa("PATCH", "food_log", {
+          log_date: newDate,
+          meal_time: newTime,
+          eaten_time: newTime
+        }, "id=eq." + entry.dbid);
+      } catch (e) {
+        try {
+          await supa("PATCH", "food_log", {
+            log_date: newDate
+          }, "id=eq." + entry.dbid);
+        } catch (e2) {}
+      }
+    }
+    setAllFood(prev => {
+      let next;
+      if (newDate === foodDate) {
+        // `food` is a sorted copy but holds the same object references
+        next = {
+          ...prev,
+          [foodDate]: (prev[foodDate] || []).map(x => x === entry ? updated : x)
+        };
+      } else {
+        next = {
+          ...prev,
+          [foodDate]: (prev[foodDate] || []).filter(x => x !== entry),
+          [newDate]: [...(prev[newDate] || []), updated]
+        };
+      }
+      if (!IS_DEMO) localStorage.setItem("jfood_backup", JSON.stringify(next));
+      return next;
+    });
+    setDtEditIdx(null);
+    if (onFoodLogged) onFoodLogged();
+  }
   function togglePin(entry) {
     setPinned(prev => {
       const exists = prev.some(p => p.n === entry.n);
@@ -5835,22 +5891,70 @@ function TabFood({
     setAiMsg(`Copied ${meals.length} meal${meals.length > 1 ? "s" : ""} from yesterday ✓`);
   }
 
-  // Frequent/recent distinct meals (excluding pinned) for the quick-relog strip
+  // ── FREQUENT FOODS: automatic promotion/demotion ──────────────────────────
+  // Promote: logged >=2x in trailing 30 days. Demote: not logged for 14 days
+  // (deliberately generous — batch-cooked food is eaten across a week).
+  // Manual X: takes effect immediately, suppresses re-promotion for 30 days.
+  // Order: frequency, then recency. Cap 12.
+  const [dismissedFoods, setDismissedFoods] = useState(() => {
+    if (profileData?.dismissed_foods) return profileData.dismissed_foods;
+    try {
+      return JSON.parse(localStorage.getItem("dismissed_foods") || "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  // Normalised key: same food at different quantities counts as one item.
+  // Strips parentheticals, quantity+unit pairs, and bare numbers from the name.
+  const normFoodKey = n => (n || "").toLowerCase().trim().replace(/\s*\([^)]*\)\s*/g, " ").replace(/\b\d+([.,]\d+)?\s*(g|gr|grams?|kg|ml|l|oz|pieces?|pcs|slices?|tbsp|tsp|cups?)\b/g, " ").replace(/\b\d+([.,]\d+)?\b/g, " ").replace(/\s+/g, " ").trim();
+  async function dismissFood(key) {
+    const next = {
+      ...dismissedFoods,
+      [key]: new Date().toISOString()
+    };
+    setDismissedFoods(next);
+    try {
+      localStorage.setItem("dismissed_foods", JSON.stringify(next));
+    } catch {}
+    try {
+      await supa("POST", "profiles", {
+        uid: UID,
+        dismissed_foods: next
+      }, "on_conflict=uid");
+    } catch (e) {/* column may not exist yet — localStorage carries it */}
+  }
   const quickChips = (() => {
-    const counts = {},
-      latest = {};
+    const todayK = tkey();
+    const cutoff30 = tkey(new Date(Date.now() - 30 * 864e5));
+    const cutoff14 = tkey(new Date(Date.now() - 14 * 864e5));
+    const stats = {}; // key -> {count,last,entry}
     Object.entries(allFood).forEach(([dk, list]) => {
+      if (dk < cutoff30 || dk > todayK) return;
       (list || []).forEach(e => {
         if (!e.n) return;
-        counts[e.n] = (counts[e.n] || 0) + 1;
-        if (!latest[e.n] || dk > latest[e.n].dk) latest[e.n] = {
-          dk,
-          e
-        };
+        const k = normFoodKey(e.n);
+        if (!k) return;
+        const st = stats[k] || (stats[k] = {
+          count: 0,
+          last: "",
+          entry: null
+        });
+        st.count++;
+        if (dk >= st.last) {
+          st.last = dk;
+          st.entry = e;
+        }
       });
     });
-    const pinnedNames = new Set(pinned.map(p => p.n));
-    return Object.keys(counts).filter(n => !pinnedNames.has(n)).sort((a, b) => counts[b] - counts[a] || latest[b].dk.localeCompare(latest[a].dk)).slice(0, 6).map(n => latest[n].e);
+    const pinnedKeys = new Set(pinned.map(p => normFoodKey(p.n)));
+    return Object.entries(stats).filter(([k, st]) => st.count >= 2 && st.last >= cutoff14 && !pinnedKeys.has(k)).filter(([k]) => {
+      const d = dismissedFoods[k];
+      return !d || Date.now() - new Date(d).getTime() > 30 * 864e5; // 30-day suppression
+    }).sort((a, b) => b[1].count - a[1].count || b[1].last.localeCompare(a[1].last)).slice(0, 12).map(([k, st]) => ({
+      key: k,
+      e: st.entry
+    }));
   })();
 
   // SCOPED re-estimate: ONE ingredient only — never the whole meal.
@@ -6389,17 +6493,45 @@ Input: ${txtInput}`;
       flexShrink: 0,
       color: C.am
     }
-  }, "\u2605 ", p.n)), quickChips.map(e => /*#__PURE__*/React.createElement("button", {
-    key: "chip" + e.n,
+  }, "\u2605 ", p.n)), quickChips.map(({
+    key,
+    e
+  }) => /*#__PURE__*/React.createElement("span", {
+    key: "chip" + key,
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      flexShrink: 0,
+      background: C.sf,
+      border: `.5px solid ${C.bd}`,
+      borderRadius: 8,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
     onClick: () => cloneEntryTo(e, foodDate),
     style: {
-      ...s.btn("s"),
-      ...s.btnSm,
+      background: "none",
+      border: "none",
+      padding: "5px 4px 5px 12px",
       fontSize: 11,
-      whiteSpace: "nowrap",
-      flexShrink: 0
+      color: C.t2,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      whiteSpace: "nowrap"
     }
-  }, e.n))), /*#__PURE__*/React.createElement("button", {
+  }, e.n), /*#__PURE__*/React.createElement("button", {
+    onClick: () => dismissFood(key),
+    title: "Remove from quick-add (30 days)",
+    style: {
+      background: "none",
+      border: "none",
+      padding: "5px 8px 5px 4px",
+      fontSize: 12,
+      color: C.t3,
+      cursor: "pointer",
+      lineHeight: 1
+    }
+  }, "\xD7")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setMealDate(foodDate);
       setEatenTime(new Date().toTimeString().slice(0, 5));
@@ -6473,13 +6605,70 @@ Input: ${txtInput}`;
       color: C.t2,
       marginTop: 1
     }
-  }, e.det), e.time && /*#__PURE__*/React.createElement("div", {
+  }, e.det), dtEditIdx === i ? /*#__PURE__*/React.createElement("div", {
     style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+      marginTop: 4,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: dtDate,
+    onChange: ev => setDtDate(ev.target.value),
+    style: {
+      ...s.input,
+      width: 128,
+      padding: "3px 6px",
+      fontSize: 11
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    value: dtTime,
+    onChange: ev => setDtTime(ev.target.value),
+    style: {
+      ...s.input,
+      width: 84,
+      padding: "3px 6px",
+      fontSize: 11
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => saveDateTime(i),
+    style: {
+      ...s.btn("p"),
+      padding: "3px 9px",
+      fontSize: 11
+    }
+  }, "\u2713"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setDtEditIdx(null),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.t3,
+      cursor: "pointer",
+      fontSize: 13
+    }
+  }, "\xD7")) : /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setDtEditIdx(i);
+      setDtDate(foodDate);
+      setDtTime(e.eaten_time || e.time || "");
+    },
+    title: "Edit date & time",
+    style: {
+      background: "none",
+      border: "none",
+      padding: 0,
+      marginTop: 2,
       fontSize: 10,
       color: C.t3,
-      marginTop: 2
+      cursor: "pointer",
+      fontFamily: "inherit",
+      textDecoration: "underline dotted",
+      textUnderlineOffset: 2
     }
-  }, e.time)), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDD50 ", e.time || "set time")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
