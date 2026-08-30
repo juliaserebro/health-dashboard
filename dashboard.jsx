@@ -381,7 +381,10 @@ function retroPhaseForDate(dk, cycleLog){
 function cyclePromptBlock(state){
   if(!state||state.enabled===false) return "Cycle: not tracked. Do not reference cycle phase.";
   if(!state.cycleDay) return "Cycle: no dates logged. Do not reference cycle phase.";
-  if(state.phase==='unknown') return `Cycle: day ${state.cycleDay} — past the predicted window with no period logged. Current phase is UNKNOWN (real-time). Do NOT reference cycle phase in advice, do NOT speculate why, never suggest the user forgot to log, never imply pregnancy.`;
+  // Past the predicted window the cycle drops out of coach input entirely —
+  // sending a day number with instructions not to use it is weaker than not
+  // sending it (this produced "day 40 of a typical 27-day cycle").
+  if(state.phase==='unknown') return `Cycle: not currently determinable. Make no cycle-based statements. Do not speculate why, never suggest the user forgot to log, never imply pregnancy.`;
   return `Cycle: day ${state.cycleDay}, phase estimate: ${state.phase}${state.boundary?" (near a phase boundary — extra uncertain)":""} — REAL-TIME ESTIMATE. Always use tentative language ("likely", "probably"); never state real-time phase as fact regardless of confidence. Data confidence: ${state.confidence} (median ${state.median}d over ${state.usedGaps} cycle${state.usedGaps!==1?"s":""}). Next period predicted around ${state.medianDate} (window ${state.winStartDate} to ${state.winEndDate}).`;
 }
 
@@ -1629,6 +1632,70 @@ function buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbi
 ${logCtx}`;
 }
 
+// ── LIVE METRICS + INSIGHT INVALIDATION ──────────────────────────────────────
+// Tier 0: running totals are arithmetic, not insight. They are recomputed on
+// every render from live data and substituted into the generated text, so a
+// number can never be frozen at generation time.
+function liveMetrics({allFood, fitbitData, profileData, cycleLog}){
+  const dk=todayKeyTz();
+  const food=allFood[dk]||[];
+  const weekStart=getWeekStartDate();
+  const weekKeys=Array.from({length:7},(_,i)=>{
+    const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  });
+  return {
+    protein_today: Math.round(food.reduce((s,e)=>s+(e.p||0),0)),
+    kcal_today: Math.round(food.reduce((s,e)=>s+(e.k||0),0)),
+    carbs_today: Math.round(food.reduce((s,e)=>s+(e.c||0),0)),
+    meals_today: food.length,
+    steps_today: ((fitbitData.steps||[]).find(x=>x.date===dk)||{}).steps||0,
+    sessions_this_week: (fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date)).length,
+    workouts_today: (fitbitData.workouts||[]).filter(w=>w.date===dk).length,
+    _foodNames: food.map(e=>(e.n||"").toLowerCase()),
+  };
+}
+
+// Replace the generation-time value of a running total with the live one.
+// Handles "66g", "66 g", "66" — unit-agnostic, word-boundary safe.
+function hydrateText(text, oldVal, newVal){
+  if(text==null||oldVal==null||newVal==null||oldVal===newVal) return text;
+  const o=String(Math.round(oldVal));
+  // NOT \b...\b: there is no word boundary between "66" and the "g" in "66g",
+  // so the old pattern silently failed to substitute. Match the number only
+  // when it is not part of a longer one, so 66 never rewrites 660.
+  const re=new RegExp("(?<![0-9.])"+o+"(?![0-9.])","g");
+  return text.replace(re,String(Math.round(newVal)));
+}
+
+// B.2 invalidation — deterministic, no model call.
+// Quantity claims: threshold crossing on the metric the insight declared.
+// Content-aware claims: a suggested food actually appearing in today's log.
+function evaluateInsight(ins, m){
+  const d=ins&&ins.depends_on;
+  let content=ins?ins.content:"";
+  let invalid=false, resolvedText=null;
+  if(d&&d.metric&&Object.prototype.hasOwnProperty.call(m,d.metric)){
+    const live=m[d.metric];
+    // Tier 0 — always substitute the live number, whether or not it invalidates
+    content=hydrateText(content, d.value, live);
+    if(d.threshold!=null){
+      const dir=d.direction||"gte";
+      if(dir==="gte" ? live>=d.threshold : live<=d.threshold){
+        invalid=true;
+        resolvedText=d.resolved_text||"Done ✓";
+      }
+    }
+  }
+  // Content-aware: "try chicken, you already had eggs" dies when chicken is logged
+  const sug=(ins&&ins.suggests_food)||[];
+  if(!invalid && sug.length){
+    const hit=sug.find(f=>(m._foodNames||[]).some(n=>n.includes(String(f).toLowerCase())));
+    if(hit){ invalid=true; resolvedText=`You had the ${hit} ✓`; }
+  }
+  return {...ins, content, invalid, resolvedText};
+}
+
 function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
@@ -1759,7 +1826,18 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
 
       // Insight freshness history
       const insightHistory = (()=>{try{return JSON.parse(localStorage.getItem("coach_insight_history")||"{}");}catch{return {};}})();
-      const insightHistoryCtx = Object.entries(insightHistory).map(([t,d])=>`${t}: last mentioned ${/^\d{4}-\d{2}-\d{2}$/.test(d.last_surfaced||"")?tripleLabel(d.last_surfaced):d.last_surfaced} — "${d.last_claim}"`).join("\n")||"No history yet";
+      // Gate 3: an insight counts as "recently said" only for the period it was
+      // actually live. One retired within a few hours must not suppress its
+      // topic tomorrow, when it may be genuinely relevant again.
+      const insightHistoryCtx = Object.entries(insightHistory).map(([t,d])=>{
+        const when=/^\d{4}-\d{2}-\d{2}$/.test(d.last_surfaced||"")?tripleLabel(d.last_surfaced):d.last_surfaced;
+        let liveNote="";
+        if(d.retired_at&&d.shown_from){
+          const hrs=(new Date(d.retired_at)-new Date(d.shown_from))/3600000;
+          liveNote=hrs<4?" (shown only ~"+Math.max(1,Math.round(hrs))+"h before it was resolved — RAISE IT AGAIN if relevant, this does not count as recently covered)":" (resolved after ~"+Math.round(hrs)+"h)";
+        }
+        return `${t}: last mentioned ${when}${liveNote} — "${d.last_claim}"`;
+      }).join("\n")||"No history yet";
 
       const userMsg = `TODAY IS ${todayKey} (${dayKeyToNoon(todayKey).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}). Every date below carries a precomputed label [date | weekday | N days ago] — use those labels VERBATIM when referring to timing, and never characterise recency yourself.
 
@@ -1815,14 +1893,22 @@ Return ONLY valid JSON:
     {
       "type": "sleep_quality | cycle_phase | protein_total | training_load | step_pattern | food_pattern | bedtime_pattern | recovery_general | weekly_trend | milestone | tonight",
       "content": "1 sentence. Genuinely different from headline. Passes freshness rule.",
-      "claim": "short summary of what was just said — used to check freshness next time"
+      "claim": "short summary of what was just said — used to check freshness next time",
+      "depends_on": {"metric":"protein_today|kcal_today|carbs_today|meals_today|steps_today|sessions_this_week|workouts_today","value":<the metric's CURRENT value as given above>,"threshold":<value at which this advice stops being true>,"direction":"gte|lte","resolved_text":"<short past-tense confirmation, e.g. 'Protein target hit ✓'>"},
+      "suggests_food": ["<food you suggested she eat, lowercase, or omit>"]
     }
   ],
   "nothing_new": false,
   "micro_workout": ${daysSinceLastWorkout>=5 ? `"${daysSinceLastWorkout} days since last session. Include 2-3 bodyweight exercises. Keep tone light. Use actual moves separated by · (middle dot). Never guilt-based."` : 'null'}
 }
 
-Rules: no section repeats another; all language warm and non-guilt; never mention specific muscle groups or body parts.`;
+Rules: no section repeats another; all language warm and non-guilt; never mention specific muscle groups or body parts.
+
+DEPENDENCY RULES (these make the card self-correcting — follow exactly):
+- Include "depends_on" on ANY insight that references a running total (protein, steps, sessions, calories). Set "value" to the CURRENT value you were given, and "threshold" to the point where your advice stops being true (e.g. suggesting more protein at 66g of a 110g target -> threshold 110, direction "gte", resolved_text "Protein target hit ✓").
+- Quote each running total as a bare number so it can be updated live (write "66g", not "sixty-six grams" or "about 66g").
+- Include "suggests_food" when you recommend eating something specific, so the suggestion can retire itself once she logs it.
+- Omit both fields entirely for insights that don't depend on a changing number.`;
       // Event-aware regeneration: give the model the prior content + what changed,
       // so it responds to the event instead of blindly rewriting the morning.
       let eventCtx = "";
@@ -1859,7 +1945,9 @@ EVENT-RESPONSE RULES:
         // Update freshness history
         try{
           const existing = JSON.parse(localStorage.getItem("coach_insight_history")||"{}");
-          (content.domain_insights||[]).forEach(ins=>{if(ins.type&&ins.claim)existing[ins.type]={last_surfaced:todayKey,last_claim:ins.claim};});
+          const nowIso=new Date().toISOString();
+          (content.domain_insights||[]).forEach(ins=>{if(ins.type&&ins.claim)
+            existing[ins.type]={last_surfaced:todayKey,last_claim:ins.claim,shown_from:nowIso,retired_at:null};});
           localStorage.setItem("coach_insight_history",JSON.stringify(existing));
         }catch(e){}
       }
@@ -2108,6 +2196,25 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
   useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if((apiKey||IS_DEMO||profileData?.coach_content) && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
+  // GATE 1: logging a period or an ovulation report materially changes what the
+  // coach should say, and previously could not trigger anything — cycleLog was
+  // absent from every dependency array, so the card kept a pre-period reading.
+  const cycleTriggerKey = JSON.stringify([
+    cycleLog?.last_period_start,
+    (cycleLog?.period_start_dates||[]).length,
+    (cycleLog?.ovulation_reports||[]).length,
+  ]);
+  const _cycleTriggerSeen = React.useRef(null);
+  useEffect(()=>{
+    if(IS_DEMO||!apiKey||!profileData||!fitbitReady) return;
+    if(_cycleTriggerSeen.current===null){ _cycleTriggerSeen.current=cycleTriggerKey; return; } // baseline, no regen
+    if(_cycleTriggerSeen.current===cycleTriggerKey) return;
+    _cycleTriggerSeen.current=cycleTriggerKey;
+    const st=getCycleState(cycleLog);
+    generateAllCoachContent(true, st?.cycleDay===1
+      ? "User just logged the start of a new period — the cycle has reset to day 1."
+      : "User just updated their cycle data (period or ovulation report).");
+  },[cycleTriggerKey, apiKey, fitbitReady, profileData?.uid]);
   // NEW-WORKOUT TRIGGER: when today's workout list gains an entry (sync or any
   // other path updating fitbitData), force one event-aware regeneration.
   // Hash guard mirrors the food/sleep pattern — same list never fires twice.
@@ -2457,7 +2564,14 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               weekly_trend:"📈 This week", milestone:"🏆 Milestone", tonight:"🌙 Tonight"
             };
             if(!coachContent&&!coachLoading&&!apiKey) return <div style={{fontSize:12,color:C.t3}}>{IS_DEMO?"Demo coach content not seeded yet.":"Add your API key in Settings to enable AI coaching."}</div>;
-            const domainInsights = coachContent?.domain_insights||[];
+            // Tier 0 + B.2 evaluated on EVERY render against live data
+            const _m = liveMetrics({allFood, fitbitData, profileData, cycleLog});
+            const _evaluated = (coachContent?.domain_insights||[]).map(ins=>evaluateInsight(ins,_m));
+            const domainInsights = _evaluated.filter(x=>!x.invalid);
+            const resolvedInsights = _evaluated.filter(x=>x.invalid);
+            // B.3 watch: if resolved outnumber active, the card has drifted from
+            // coach into checklist — cap what we show so it can't take over.
+            const shownResolved = resolvedInsights.slice(0, Math.max(1, domainInsights.length));
             return (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 {loading_ ? (
@@ -2472,9 +2586,20 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                   </div>
                 )) : coachContent?.nothing_new ? (
                   <div style={{fontSize:13,color:C.t2,lineHeight:1.6,fontStyle:"italic"}}>All looks steady today — nothing unusual to flag. Keep doing what you're doing.</div>
+                ) : coachContent&&resolvedInsights.length>0 ? (
+                  /* B.6 — everything has been handled. An honest, templated state. */
+                  <div style={{fontSize:13,color:C.t2,lineHeight:1.6}}>Nothing needs your attention right now.</div>
                 ) : coachContent ? (
                   <div style={{fontSize:12,color:C.t3}}>—</div>
                 ) : null}
+                {/* B.3 — invalidated advice resolves VISIBLY rather than vanishing */}
+                {shownResolved.length>0&&(
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:domainInsights.length?4:0}}>
+                    {shownResolved.map((ins,i)=>(
+                      <span key={"res"+i} style={{...s.pill(C.tl,C.teal),fontSize:11,fontWeight:500}}>{ins.resolvedText}</span>
+                    ))}
+                  </div>
+                )}
                 {coachContent?.micro_workout&&(
                   <div>
                     <div style={{fontSize:11,fontWeight:700,letterSpacing:".08em",color:C.t2,marginBottom:3}}>⚡ 5-min move</div>
@@ -3356,8 +3481,10 @@ Input: ${txtInput}`;
       } catch(e) {
         console.log("Full save failed, trying minimal:", e.message);
         try {
+          // Keep the user's chosen time on the fallback path too — dropping it
+          // here silently lost the time whenever the full insert failed.
           const rows2 = await supa("POST","food_log",{
-            user_id:UID, log_date:targetDate,
+            user_id:UID, log_date:targetDate, meal_time:eatenTime, eaten_time:eatenTime,
             name:entry.n, detail:entry.det||null,
             protein:entry.p, carbs:entry.c, fat:entry.f, kcal:entry.k
           });
@@ -3669,19 +3796,19 @@ Input: ${txtInput}`;
 // through custom symptoms. Balanced positive/negative so logging isn't
 // symptom-hunting; nothing clinical-sounding; no duplication of sleep/activity/
 // food, which are tracked elsewhere; no conception-oriented options.
-const SYMPTOMS_MOOD=["Calm","Happy","Energised","Irritable","Anxious","Low","Mood swings","Low energy"];
-const SYMPTOMS_PHYSICAL=["Cramps","Tender breasts","Headache","Bloating","Backache","Fatigue","Acne","Cravings","Brain fog"];
+const SYMPTOMS_MOOD=["😌 Calm","🙂 Happy","⚡ Energised","😠 Irritable","😰 Anxious","😔 Low","🎢 Mood swings","🔋 Low energy"];
+const SYMPTOMS_PHYSICAL=["🤕 Cramps","🎗️ Tender breasts","🤯 Headache","🎈 Bloating","🦴 Backache","😴 Fatigue","🔴 Acne","🍫 Cravings","🌫️ Brain fog"];
 // Gut changes are commonly reported across the cycle — collected, but NO
 // coaching content until the GI evidence review lands. Bloating is shared with
 // Physical and deliberately not duplicated as a chip here.
-const SYMPTOMS_DIGESTION=["Nausea","Constipation","Loose stools"];
+const SYMPTOMS_DIGESTION=["🤢 Nausea","🧱 Constipation","💧 Loose stools"];
 // Discharge is an ovulation SIGNAL, not a symptom — its control lives in the
 // ovulation flow. Infection-indicator options (unusual/clumpy/grey/white) are
 // excluded: they invite an interpretation the app must refuse to give.
-const DISCHARGE_TYPES=["Dry","Sticky","Creamy","Egg-white","Watery"];
+const DISCHARGE_TYPES=["🏜️ Dry","🍯 Sticky","🥛 Creamy","🥚 Egg-white","💦 Watery"];
 // Bleed intensity is SEPARATE from symptoms — it feeds the iron logic, the
 // strongest evidence-backed claim in the system.
-const BLEED_LEVELS=[["spotting","Spotting"],["light","Light"],["medium","Medium"],["heavy","Heavy"]];
+const BLEED_LEVELS=[["spotting","💧 Spotting"],["light","🩸 Light"],["medium","🩸 Medium"],["heavy","🩸 Heavy"]];
 
 function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [dateInput, setDateInput] = useState("");
@@ -3921,7 +4048,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                 </div>
                 {st.pastWindow
                   ? <div style={{fontSize:11.5,color:C.t2,marginTop:5,lineHeight:1.5}}>Was expected around {fmtShort(st.medianDate)}. Log the start when it arrives.</div>
-                  : <div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Expected around {fmtShort(st.medianDate)} <span style={{color:C.t3}}>(likely {fmtShort(st.winStartDate)} – {fmtShort(st.winEndDate)})</span></div>}
+                  : <div style={{fontSize:11.5,color:C.t2,marginTop:5}}>Next period expected around {fmtShort(st.medianDate)} <span style={{color:C.t3}}>(likely {fmtShort(st.winStartDate)} – {fmtShort(st.winEndDate)})</span></div>}
                 {st.usedGaps>0
                   ? <div style={{fontSize:10.5,color:C.t3,marginTop:5}}>median {st.median}d from {st.usedGaps} cycle{st.usedGaps!==1?"s":""}{st.ovAdjusted?" · adjusted to your ovulation report":""}</div>
                   : <div style={{fontSize:10.5,color:C.t3,marginTop:5,lineHeight:1.5}}>Estimate only — no complete cycle recorded yet. It sharpens once you log a second period start.</div>}
@@ -3984,7 +4111,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             )}
           </div>
           <div style={s.mc}>
-            <div style={s.ml}>Expected</div>
+            <div style={s.ml}>Next period</div>
             <div style={{...s.mv,color:C.pi,fontSize:16}}>{fmtShort(st.medianDate)}</div>
             <div style={{...s.ms,color:C.t3}}>{st.usedGaps>1?`${fmtShort(st.winStartDate)}–${fmtShort(st.winEndDate)}`:"estimate"}</div>
           </div>
@@ -4208,7 +4335,9 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         // Hierarchy: headings differ from chips on weight AND size AND case,
         // with generous space above; chips carry a clearly filled unselected
         // state rather than a faint tint. Tokens only — no invented colours.
-        const head={fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t2,marginTop:22,marginBottom:9};
+        // Gate 5 rule 1: t2, 11px/700, uppercase, .1em tracking, generous space
+        const head={fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",
+          color:C.t2,marginTop:26,marginBottom:10,paddingTop:2};
         const chip=(on)=>({fontFamily:"inherit",fontSize:12.5,fontWeight:500,padding:"7px 13px",borderRadius:20,cursor:"pointer",
           background:on?C.pi:C.s2,color:on?"#fff":C.t2,border:`1px solid ${on?C.pi:C.bd}`});
         const row={display:"flex",gap:7,flexWrap:"wrap"};
@@ -4255,9 +4384,20 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
 
               <div style={head}>Digestion</div>
               <Chips list={SYMPTOMS_DIGESTION} sel={symDraft.digestion||[]} onTap={x=>{const n={...symDraft,digestion:toggleIn(symDraft.digestion||[],x)};setSymDraft(n);persistDraft(n);}}/>
+            </>)}
 
-              <div style={{display:"flex",gap:6,marginTop:14}}>
-                <input value={customInput} onChange={e=>setCustomInput(e.target.value)} placeholder="Add your own" style={{...s.input,flex:1,padding:"6px 9px",fontSize:12}}/>
+            {/* Applies to the whole modal, not to any one category (5.3/5.4) */}
+            <div style={head}>Add your own</div>
+            {!good&&(
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
+                <input value={customInput} onChange={e=>setCustomInput(e.target.value)}
+                  onKeyDown={async e=>{if(e.key==="Enter"&&customInput.trim()){e.preventDefault();
+                    const v=customInput.trim();
+                    if([...SYMPTOMS_PHYSICAL,...customSymptoms].includes(v)){setCustomInput("");return;}
+                    const n={...symDraft,symptoms:[...symDraft.symptoms,v]};
+                    setSymDraft(n); setCustomInput("");
+                    await saveCycleLog({custom_symptoms:[...customSymptoms,v],symptom_logs:{...symptomLogs,[symDate]:cleanDraft(n)}});}}}
+                  placeholder="A symptom that isn't listed" style={{...s.input,flex:1,padding:"7px 10px",fontSize:12}}/>
                 <button disabled={!customInput.trim()} onClick={async()=>{
                   const v=customInput.trim();
                   if(!v||[...SYMPTOMS_PHYSICAL,...customSymptoms].includes(v)){setCustomInput("");return;}
@@ -4267,12 +4407,11 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                     symptom_logs:{...symptomLogs,[symDate]:cleanDraft(n)}});
                 }} style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:customInput.trim()?1:.5}}>Add</button>
               </div>
-            </>)}
-
-            <div style={head}>Notes</div>
+            )}
             <textarea value={symDraft.note} onChange={e=>setSymDraft(p=>({...p,note:e.target.value}))}
               onBlur={()=>persistDraft(symDraft)} rows={2}
-              placeholder="Anything that doesn't fit a tag" style={{...s.input,resize:"vertical",fontFamily:"inherit"}}/>
+              placeholder="Anything else that doesn't fit a tag — how you're feeling, what's going on"
+              style={{...s.input,resize:"vertical",fontFamily:"inherit"}}/>
 
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:18}}>
               <button onClick={closeSymptom} style={s.btn("p")}>Done</button>
@@ -4306,7 +4445,7 @@ const displayTag=(tag)=>TAG_LABELS[tag]?tag:(LEGACY_TAG_MAP[tag]||"general_note"
 //   "Travel, Alcohol — flew to Berlin"
 // Excluded as wellness filler / already-tracked: meditation, journaling,
 // breathing exercises, physical activity.
-const CONTEXT_TAGS = ["Travel","High stress","Alcohol","Illness or injury","Medication change"];
+const CONTEXT_TAGS = ["✈️ Travel","😩 High stress","🍷 Alcohol","🤒 Illness or injury","💊 Medication change"];
 const CONTEXT_SEP = " — ";
 // Parse the canonical prefix back out of an entry (machine-checkable)
 function contextTagsOf(entry){
