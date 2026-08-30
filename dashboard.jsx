@@ -1632,7 +1632,7 @@ ${logCtx}`;
 // Coach content schema version. Bump whenever generated insights gain fields
 // the renderer depends on — cached content from an older schema is discarded
 // rather than displayed, because the invalidation logic cannot evaluate it.
-const COACH_SCHEMA = 2; // 2 = insights carry depends_on / suggests_food
+const COACH_SCHEMA = 3; // 3 = running totals are {placeholders}, not literals
 
 // ── LIVE METRICS + INSIGHT INVALIDATION ──────────────────────────────────────
 // Tier 0: running totals are arithmetic, not insight. They are recomputed on
@@ -1654,12 +1654,29 @@ function liveMetrics({allFood, fitbitData, profileData, cycleLog}){
     steps_today: ((fitbitData.steps||[]).find(x=>x.date===dk)||{}).steps||0,
     sessions_this_week: (fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date)).length,
     workouts_today: (fitbitData.workouts||[]).filter(w=>w.date===dk).length,
+    protein_target: profileData?.protein_target||110,
     _foodNames: food.map(e=>(e.n||"").toLowerCase()),
   };
 }
 
-// Replace the generation-time value of a running total with the live one.
-// Handles "66g", "66 g", "66" — unit-agnostic, word-boundary safe.
+// Units for rendering a metric placeholder, so the model never writes them
+const METRIC_UNITS={protein_today:"g",carbs_today:"g",kcal_today:" kcal",steps_today:"",
+  meals_today:"",sessions_this_week:"",workouts_today:"",protein_target:"g"};
+const METRIC_RE=/\{([a-z_]+)\}/g;
+function hasPlaceholder(text){ METRIC_RE.lastIndex=0; return METRIC_RE.test(String(text||"")); }
+// Preferred path: the model emits {protein_today}; we substitute from live data.
+// No parsing, no ambiguity about which number is which.
+function fillPlaceholders(text, m){
+  return String(text||"").replace(METRIC_RE,(full,key)=>{
+    if(!Object.prototype.hasOwnProperty.call(m,key)) return full;
+    const u=METRIC_UNITS[key]!==undefined?METRIC_UNITS[key]:"";
+    const v=m[key];
+    return (typeof v==="number"?Math.round(v).toLocaleString():v)+u;
+  });
+}
+
+// LEGACY ONLY: pre-schema-3 insights embedded literal numbers. Kept so old
+// cached content still updates, but new generations never rely on it.
 function hydrateText(text, oldVal, newVal){
   if(text==null||oldVal==null||newVal==null||oldVal===newVal) return text;
   const o=String(Math.round(oldVal));
@@ -1677,15 +1694,18 @@ function evaluateInsight(ins, m){
   const d=ins&&ins.depends_on;
   let content=ins?ins.content:"";
   let invalid=false, resolvedText=null;
+  // Preferred: placeholders. Applies to any metric the text references.
+  const hadPlaceholder=hasPlaceholder(content);
+  if(hadPlaceholder) content=fillPlaceholders(content, {...m, protein_target:m.protein_target});
   if(d&&d.metric&&Object.prototype.hasOwnProperty.call(m,d.metric)){
     const live=m[d.metric];
-    // Tier 0 — always substitute the live number, whether or not it invalidates
-    content=hydrateText(content, d.value, live);
+    // Legacy fallback only — schema-3 insights carry placeholders instead
+    if(!hadPlaceholder) content=hydrateText(content, d.value, live);
     if(d.threshold!=null){
       const dir=d.direction||"gte";
       if(dir==="gte" ? live>=d.threshold : live<=d.threshold){
         invalid=true;
-        resolvedText=d.resolved_text||"Done ✓";
+        resolvedText=fillPlaceholders(d.resolved_text||"Done ✓", m);
       }
     }
   }
@@ -1728,7 +1748,9 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     return d.content[0].text.trim();
   }
 
+  const _retriedPlaceholders = React.useRef(false);
   async function generateAllCoachContent(forceRefresh=false, triggeringEvent=null) {
+    if(forceRefresh===false) _retriedPlaceholders.current=false;
     // Demo: pre-generated content from the profile row, never any API call
     if(IS_DEMO){
       if(profileData?.coach_content) setCoachContent(profileData.coach_content);
@@ -1919,8 +1941,11 @@ Return ONLY valid JSON:
 Rules: no section repeats another; all language warm and non-guilt; never mention specific muscle groups or body parts.
 
 DEPENDENCY RULES (these make the card self-correcting — follow exactly):
-- Include "depends_on" on ANY insight that references a running total (protein, steps, sessions, calories). Set "value" to the CURRENT value you were given, and "threshold" to the point where your advice stops being true (e.g. suggesting more protein at 66g of a 110g target -> threshold 110, direction "gte", resolved_text "Protein target hit ✓").
-- Quote each running total as a bare number so it can be updated live (write "66g", not "sixty-six grams" or "about 66g").
+- PLACEHOLDERS, NOT NUMBERS. Never write a running total as a literal. Write the placeholder token instead, and the app substitutes the live value at display time:
+    {protein_today} {carbs_today} {kcal_today} {steps_today} {meals_today} {sessions_this_week} {workouts_today} {protein_target}
+  Units are added automatically — write "You've logged {protein_today} of protein", NOT "{protein_today}g" and NOT "66g".
+- Any insight whose text contains a placeholder MUST also carry "depends_on", with "value" set to that metric's CURRENT value and "threshold" set to the point where your advice stops being true (e.g. suggesting more protein against a {protein_target} target -> threshold = the target, direction "gte", resolved_text "Protein target hit ✓").
+- Fixed reference numbers that never change (a target, a past average, a date) stay as literals — only LIVE running totals become placeholders.
 - Include "suggests_food" when you recommend eating something specific, so the suggestion can retire itself once she logs it.
 - Omit both fields entirely for insights that don't depend on a changing number.`;
       // Event-aware regeneration: give the model the prior content + what changed,
@@ -1950,6 +1975,22 @@ EVENT-RESPONSE RULES:
       const m = clean.match(/\{[\s\S]*\}/);
       if(m){
         const content = JSON.parse(m[0]);
+        // Validate the contract HERE, not at render: an insight that declares a
+        // metric dependency but wrote a literal number would otherwise trade a
+        // visible regex failure for an invisible one.
+        const violations=(content.domain_insights||[]).filter(ins=>
+          ins.depends_on&&ins.depends_on.metric&&!hasPlaceholder(ins.content));
+        if(violations.length&&!_retriedPlaceholders.current){
+          _retriedPlaceholders.current=true;
+          console.log("Coach: "+violations.length+" insight(s) used literal numbers instead of placeholders — regenerating once.");
+          setCoachLoading(false);
+          return generateAllCoachContent(true, triggeringEvent);
+        }
+        if(violations.length){
+          // Second attempt still non-compliant: keep them, but strip the stale
+          // dependency so the legacy literal-substitution path handles them.
+          console.log("Coach: placeholder contract still unmet — falling back to literal substitution.");
+        }
         content._generatedAt = new Date().toISOString();
         content._schema = COACH_SCHEMA;
         content._foodHash = (allFood[todayKey]||[]).map(f=>f.dbid||f.eaten_time||f.n).join("|");
