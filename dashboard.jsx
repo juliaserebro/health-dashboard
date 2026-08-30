@@ -1403,12 +1403,44 @@ function buildLogContext(logEntries){
   // Calendar days in the active timezone (an entry from 9pm yesterday is
   // YESTERDAY this morning — never 24h-block arithmetic), triple-labelled,
   // pre-bucketed so the model never computes recency itself.
-  const entries=(logEntries||[])
+  const all=(logEntries||[])
     .filter(e=>e.dt)
     .map(e=>({...e,dk:tsToDayKey(e.dt),ago:calDaysAgo(tsToDayKey(e.dt))}))
     .filter(e=>e.ago>=0&&e.ago<=14)
-    .slice(0,25);
-  if(!entries.length) return "USER LOGS (last 14 days): none.";
+    .sort((a,b)=>a.ago-b.ago||String(b.dt).localeCompare(String(a.dt))); // newest first
+  if(!all.length) return "USER LOGS (last 14 days): none.";
+
+  // SEVERITY-AWARE TRUNCATION. Recency-only truncation treated a Pain entry as
+  // equal to a General Note. Pain/discomfort and post-workout entries are never
+  // dropped inside the window (they drive the rest-vs-train rules and
+  // progression); overflow sheds general notes first, then life context, then
+  // mood/sleep — oldest first within each tier. Legacy tags map onto the same
+  // tiers. The cap is SOFT: protected entries may exceed it rather than be lost.
+  const CAP=25;
+  const TIER={pain_discomfort:0,pain:0,spine:0,post_workout:0,feedback:0,postworkout:0,training:0,
+              sleep_note:1,sleep:1,energy_mood:1,mood:1,energy:1,
+              life_context:2,life:2,medical:2,
+              general_note:3,correction:3,alcohol:3};
+  const tierOf=e=>TIER[e.tag]!==undefined?TIER[e.tag]:2; // unknown tags: mid-priority
+  const OMIT_LABEL={3:"general",2:"life context",1:"mood/sleep"};
+  let entries=all, omitted=[];
+  if(all.length>CAP){
+    const marked=all.map((e,i)=>({e,i,t:tierOf(e)}));
+    const droppable=marked.filter(m=>m.t>0)
+      .sort((a,b)=>b.t-a.t||b.e.ago-a.e.ago); // highest tier first, then oldest
+    const dropIdx=new Set(droppable.slice(0,all.length-CAP).map(m=>m.i));
+    entries=marked.filter(m=>!dropIdx.has(m.i)).map(m=>m.e);
+    omitted=marked.filter(m=>dropIdx.has(m.i));
+  }
+  const omitLine=omitted.length?(()=>{
+    const counts={};
+    omitted.forEach(m=>{const l=OMIT_LABEL[m.t]||"other";counts[l]=(counts[l]||0)+1;});
+    const parts=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([l,n])=>`${n} ${l}`);
+    return `
+
+(+${omitted.length} older ${omitted.length===1?"entry":"entries"} omitted to save space: ${parts.join(", ")}. Nothing pain- or workout-related was omitted — the record above is complete for those.)`;
+  })():"";
+
   const ORDER=["TODAY","YESTERDAY","EARLIER THIS WEEK","LAST WEEK","OLDER"];
   const buckets={};
   entries.forEach(e=>{
@@ -1417,7 +1449,7 @@ function buildLogContext(logEntries){
   });
   const body=ORDER.filter(b=>buckets[b]).map(b=>`${b}:\n${buckets[b].join("\n")}`).join("\n\n");
   return `USER LOGS (last 14 days, newest first, grouped by recency):
-${body}
+${body}${omitLine}
 
 DATE LABEL RULE — the labels above ([date | weekday | N days ago]) are precomputed and authoritative. Use them VERBATIM when referring to any entry's timing. Never characterise recency yourself ("last week", "recently", "the other day") unless it matches the supplied label exactly.
 
