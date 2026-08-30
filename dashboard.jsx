@@ -3696,6 +3696,9 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [customInput, setCustomInput] = useState("");
   const [ovHelp, setOvHelp] = useState(false);
   const [busyAnswer, setBusyAnswer] = useState(false);
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [openPhase, setOpenPhase] = useState(null);
+  const [oneOffHelp, setOneOffHelp] = useState(false);
   const [rangeMin, setRangeMin] = useState("");
   const [rangeMax, setRangeMax] = useState("");
 
@@ -3988,44 +3991,6 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         </div>
       )}
 
-      {/* ── PHASE 5: SYMPTOMS & BLEED ────────────────────────────────────────── */}
-      <Card>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Today</div>
-          <button onClick={()=>openSymptom(tkey())} style={{...s.btn("p"),...s.btnSm,fontSize:11}}><Icon name="plus" size={12} color="#fff"/> Log symptoms</button>
-        </div>
-        {todaySym?(
-          <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
-            {todaySym.feelingGood&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>✓ Feeling good</span>}
-            {todaySym.bleed&&<span style={{...s.pill(C.rl,C.red),fontSize:10}}>🩸 {(BLEED_LEVELS.find(b=>b[0]===todaySym.bleed)||[,todaySym.bleed])[1]}</span>}
-            {(todaySym.mood||[]).map(x=><span key={x} style={{...s.pill(C.al,C.am),fontSize:10}}>{x}</span>)}
-            {(todaySym.symptoms||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
-            {(todaySym.digestion||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
-            {todaySym.note&&<span style={{fontSize:11,color:C.t2}}>· {todaySym.note}</span>}
-            <button onClick={()=>openSymptom(tkey())} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>edit</button>
-          </div>
-        ):(
-          <div style={{fontSize:11.5,color:C.t3}}>Nothing logged today. Bleed intensity, symptoms and mood all help your coach spot your own patterns.</div>
-        )}
-        {Object.keys(symptomLogs).length>0&&(
-          <div style={{marginTop:10,paddingTop:10,borderTop:`.5px solid ${C.bd}`}}>
-            <div style={{fontSize:10,color:C.t3,marginBottom:6}}>Recent</div>
-            {Object.keys(symptomLogs).sort().reverse().slice(0,5).map(dk=>{
-              const e=symptomLogs[dk];
-              return (
-                <div key={dk} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,padding:"4px 0"}}>
-                  <span style={{color:C.t2,flex:"0 0 68px"}}>{fmtShort(dk)}</span>
-                  <span style={{flex:1,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {[e.feelingGood?"✓ feeling good":null,e.bleed?"🩸"+(BLEED_LEVELS.find(b=>b[0]===e.bleed)||[,e.bleed])[1]:null,...(e.mood||[]),...(e.symptoms||[]),...(e.digestion||[])].filter(Boolean).join(", ")||e.note||"—"}
-                  </span>
-                  <button onClick={()=>openSymptom(dk)} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer"}}>edit</button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
       {/* ── PHASE 6: OVULATION (optional, non-nagging) ───────────────────────── */}
       {st.cycleDay&&(
         <Card>
@@ -4071,6 +4036,119 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         </Card>
       )}
 
+      {/* ── UNDERSTAND: phase timeline in true cycle order (D.2) ──────────── */}
+      <SecLabel>What happens across your cycle</SecLabel>
+      <Card>
+        {(()=>{
+          const effMed=st.effectiveMedian||st.median||28;
+          const lutealStart=effMed-LUTEAL_BAND.mid+1;
+          const ovulStart=lutealStart-2;
+          const segs=[
+            {k:"menstrual",from:1,to:Math.min(avgPeriodLen,effMed)},
+            {k:"follicular",from:avgPeriodLen+1,to:Math.max(avgPeriodLen+1,ovulStart-1)},
+            {k:"ovulatory",from:Math.max(avgPeriodLen+2,ovulStart),to:Math.max(ovulStart,lutealStart-1)},
+            {k:"luteal",from:lutealStart,to:effMed},
+          ].filter(sg=>sg.to>=sg.from);
+          const total=segs.reduce((a,sg)=>a+(sg.to-sg.from+1),0)||effMed;
+          const DETAIL={
+            menstrual:"Iron needs are higher while you're bleeding — iron-rich foods with some vitamin C help, and tea, coffee or calcium in the same meal reduce how much you absorb.",
+            follicular:"The variable part of the cycle — its length is what makes cycles differ from each other and from month to month. Energy often builds through it.",
+            ovulatory:"A short window before the luteal phase. Its timing is an estimate unless you tell the app you've noticed signs.",
+            luteal:"Typically 11–15 days before your period. Premenstrual symptoms characteristically appear here and ease within about a week of bleeding starting.",
+          };
+          const pos = st.phase&&st.phase!=="unknown"&&st.cycleDay ? Math.min(st.cycleDay,total)/total : null;
+          return (
+            <>
+              {/* Proportional bar — a long follicular phase looks long */}
+              <div style={{display:"flex",height:14,borderRadius:7,overflow:"hidden",gap:2,marginBottom:6}}>
+                {segs.map(sg=>(
+                  <div key={sg.k} onClick={()=>setOpenPhase(openPhase===sg.k?null:sg.k)}
+                    title={`${PHASES[sg.k].n}: days ${sg.from}–${sg.to}`}
+                    style={{flex:(sg.to-sg.from+1),background:PHASES[sg.k].c,
+                      opacity:st.phase===sg.k?1:0.32,cursor:"pointer"}}/>
+                ))}
+              </div>
+              {/* Position marker — omitted entirely when phase is unknown */}
+              <div style={{position:"relative",height:14,marginBottom:10}}>
+                {pos!==null&&(
+                  <div style={{position:"absolute",left:`calc(${(pos*100).toFixed(1)}% - 5px)`,top:0}}>
+                    <div style={{width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderBottom:`6px solid ${C.t2}`,margin:"0 auto"}}/>
+                    <div style={{fontSize:9,color:C.t2,whiteSpace:"nowrap",transform:"translateX(-42%)",marginTop:1}}>day {st.cycleDay}</div>
+                  </div>
+                )}
+              </div>
+              {st.phase==="unknown"&&(
+                <div style={{fontSize:11,color:C.t2,lineHeight:1.6,marginBottom:10}}>
+                  Your position isn't marked because the app isn't sure where you are in your cycle right now. It'll pick back up as soon as you log your next period start.
+                </div>
+              )}
+              {/* Legend in true order, tap to expand */}
+              {segs.map((sg,idx)=>{
+                const p=PHASES[sg.k], open=openPhase===sg.k, now=st.phase===sg.k;
+                return (
+                  <div key={sg.k} onClick={()=>setOpenPhase(open?null:sg.k)}
+                    style={{padding:"9px 11px",borderRadius:10,marginBottom:6,cursor:"pointer",
+                      background:open||now?p.bg:C.sf,border:`1px solid ${now?p.c:C.bd}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:p.c,flexShrink:0}}/>
+                      <span style={{fontSize:12.5,fontWeight:600,color:p.c}}>{p.n}</span>
+                      <span style={{fontSize:11,color:C.t3}}>days {sg.from}–{sg.to}</span>
+                      {now&&<span style={{...s.pill(p.bg,p.c),fontSize:9,marginLeft:"auto",marginRight:0}}>LIKELY NOW</span>}
+                      {!now&&<span style={{marginLeft:"auto",fontSize:10,color:C.t3}}>{open?"▾":"▸"}</span>}
+                    </div>
+                    {open&&<div style={{fontSize:11,color:C.t2,lineHeight:1.65,marginTop:7}}>{DETAIL[sg.k]}</div>}
+                  </div>
+                );
+              })}
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.6,marginTop:8}}>
+                Then your next period is expected around <strong>{fmtShort(st.medianDate)}</strong>, starting the cycle again.
+              </div>
+              <div style={{fontSize:10,color:C.t3,marginTop:8,lineHeight:1.5}}>Day ranges come from your own cycle length, not textbook numbers, and boundaries are estimates counted back from your predicted period. Training and sleep guidance isn't adjusted by phase — the evidence doesn't support it.</div>
+            </>
+          );
+        })()}
+      </Card>
+
+      <SecLabel>Log how you feel</SecLabel>
+      {/* ── PHASE 5: SYMPTOMS & BLEED ────────────────────────────────────────── */}
+      <Card>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Today</div>
+          <button onClick={()=>openSymptom(tkey())} style={{...s.btn("p"),...s.btnSm,fontSize:11}}><Icon name="plus" size={12} color="#fff"/> Log symptoms</button>
+        </div>
+        {todaySym?(
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+            {todaySym.feelingGood&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>✓ Feeling good</span>}
+            {todaySym.bleed&&<span style={{...s.pill(C.rl,C.red),fontSize:10}}>🩸 {(BLEED_LEVELS.find(b=>b[0]===todaySym.bleed)||[,todaySym.bleed])[1]}</span>}
+            {(todaySym.mood||[]).map(x=><span key={x} style={{...s.pill(C.al,C.am),fontSize:10}}>{x}</span>)}
+            {(todaySym.symptoms||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
+            {(todaySym.digestion||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
+            {todaySym.note&&<span style={{fontSize:11,color:C.t2}}>· {todaySym.note}</span>}
+            <button onClick={()=>openSymptom(tkey())} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>edit</button>
+          </div>
+        ):(
+          <div style={{fontSize:11.5,color:C.t3,lineHeight:1.6}}>Nothing logged today. The more consistently you log, the better your coach gets at spotting patterns that are specific to you — it takes several cycles before there's enough to say anything useful, so this is a slow build rather than an instant payoff.</div>
+        )}
+        {Object.keys(symptomLogs).length>0&&(
+          <div style={{marginTop:10,paddingTop:10,borderTop:`.5px solid ${C.bd}`}}>
+            <div style={{fontSize:10,color:C.t3,marginBottom:6}}>Recent</div>
+            {Object.keys(symptomLogs).sort().reverse().slice(0,5).map(dk=>{
+              const e=symptomLogs[dk];
+              return (
+                <div key={dk} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,padding:"4px 0"}}>
+                  <span style={{color:C.t2,flex:"0 0 68px"}}>{fmtShort(dk)}</span>
+                  <span style={{flex:1,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {[e.feelingGood?"✓ feeling good":null,e.bleed?"🩸"+(BLEED_LEVELS.find(b=>b[0]===e.bleed)||[,e.bleed])[1]:null,...(e.mood||[]),...(e.symptoms||[]),...(e.digestion||[])].filter(Boolean).join(", ")||e.note||"—"}
+                  </span>
+                  <button onClick={()=>openSymptom(dk)} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer"}}>edit</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <SecLabel>Your cycle history</SecLabel>
       {/* ── CYCLE HISTORY ────────────────────────────────────────────────────── */}
       <Card>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Cycle history</div>
@@ -4081,7 +4159,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         </div>
         {periodDates.length===0
           ? <div style={{textAlign:"center",padding:"12px 0",color:C.t3,fontSize:13}}><strong style={{display:"block",color:C.t2}}>No dates added yet</strong>Add your most recent period start date above.</div>
-          : periodDates.map((d,i)=>{
+          : (showAllHistory?periodDates:periodDates.slice(0,3)).map((d,i)=>{
             const nextOlder=periodDates[i+1];
             const len=nextOlder?Math.round((dayKeyToNoon(d)-dayKeyToNoon(nextOlder))/864e5):null;
             const isExc=excSet.has(d);
@@ -4094,36 +4172,35 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     {i===0&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>Most recent</span>}
-                    {len&&<button onClick={()=>toggleExceptional(d)} title={isExc?"Include this cycle again":"Exclude: disrupted by a one-off event"}
-                      style={{background:"none",border:"none",color:isExc?C.am:C.t3,cursor:"pointer",fontSize:11}}>{isExc?"excluded":"exclude"}</button>}
+                    {len&&<button onClick={()=>toggleExceptional(d)}
+                      style={{background:"none",border:"none",color:isExc?C.am:C.t3,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>{isExc?"marked one-off":"Mark as a one-off"}</button>}
                     <button onClick={()=>delDate(d)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>×</button>
                   </div>
                 </div>
-                {isExc&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>Not used for predictions — flagged as a one-off.</div>}
+                {isExc&&<div style={{fontSize:10,color:C.t3,marginTop:2}}>Something happened this cycle that isn't part of your normal pattern. It won't affect future predictions.</div>}
               </div>
             );
           })
         }
-        {periodDates.length>1&&<div style={{fontSize:10,color:C.t3,marginTop:10,lineHeight:1.5}}>Only flag a cycle as one-off if something unrepeatable disrupted it (illness, surgery). Regularly disrupted cycles are part of your real pattern and should stay in.</div>}
-      </Card>
-
-      {/* ── PHASE GUIDE ──────────────────────────────────────────────────────── */}
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Phase guide</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {Object.entries(PHASES).map(([key,p])=>(
-            <div key={key} style={{padding:10,background:p.bg,borderRadius:10,border:st.phase===key?`1.5px solid ${p.c}`:"1.5px solid transparent"}}>
-              <div style={{fontSize:11,fontWeight:600,color:p.c,marginBottom:4}}>{p.n.toUpperCase()}{st.phase===key&&<span style={{marginLeft:6,fontSize:9,fontWeight:700}}>← LIKELY NOW</span>}</div>
-              <div style={{fontSize:11,color:C.t2,lineHeight:1.5}}>
-                {key==="menstrual"?"Iron needs are higher while bleeding — iron-rich foods with vitamin C help; tea, coffee and calcium with the same meal reduce absorption.":
-                 key==="follicular"?"The variable part of the cycle — its length is what makes cycles differ. Energy often builds through it.":
-                 key==="ovulatory"?"A short window before the luteal phase. Timing is an estimate unless you report signs yourself.":
-                 "Typically 11–15 days before your period. Premenstrual symptoms characteristically appear here and ease within a week of bleeding starting."}
+        {periodDates.length>3&&(
+          <button onClick={()=>setShowAllHistory(v=>!v)} style={{background:"none",border:"none",padding:"10px 0 0",fontSize:11.5,color:C.pu,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+            {showAllHistory?"Show fewer":`Show all ${periodDates.length}`}
+          </button>
+        )}
+        {showAllHistory&&periodDates.length>1&&(
+          <div style={{fontSize:10,color:C.t3,marginTop:8,lineHeight:1.5}}>The oldest date has no cycle length and no exclude option — there's nothing before it to measure from. That's expected, not a gap in your data.</div>
+        )}
+        {periodDates.length>1&&(
+          <div style={{marginTop:12,paddingTop:10,borderTop:`.5px solid ${C.bd}`}}>
+            <button onClick={()=>setOneOffHelp(v=>!v)} style={{background:"none",border:"none",padding:0,fontSize:11,color:C.pu,cursor:"pointer",fontWeight:500,fontFamily:"inherit"}}>{oneOffHelp?"▾":"▸"} What counts as a one-off?</button>
+            {oneOffHelp&&(
+              <div style={{fontSize:11,color:C.t2,lineHeight:1.7,marginTop:7,background:C.s2,borderRadius:8,padding:"10px 12px"}}>
+                Things that might throw off a cycle: surgery or a medical procedure, illness, a big life event or a stretch of unusual stress, grief, a major change in training or eating, starting or stopping a medication, or unusual travel.<br/><br/>
+                Only mark this if it's genuinely a one-off. If something happens to you regularly — lots of travel, for example — that's part of your normal pattern, and it's more useful for the app to learn from it than to ignore it.
               </div>
-            </div>
-          ))}
-        </div>
-        <div style={{fontSize:10,color:C.t3,marginTop:10,lineHeight:1.5}}>Phase boundaries are estimates counted back from your predicted period. Training and sleep guidance is not adjusted by phase — the evidence doesn't support it.</div>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* ── SYMPTOM MODAL ────────────────────────────────────────────────────── */}

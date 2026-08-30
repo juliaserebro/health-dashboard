@@ -7555,6 +7555,9 @@ function TabCycle({
   const [customInput, setCustomInput] = useState("");
   const [ovHelp, setOvHelp] = useState(false);
   const [busyAnswer, setBusyAnswer] = useState(false);
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [openPhase, setOpenPhase] = useState(null);
+  const [oneOffHelp, setOneOffHelp] = useState(false);
   const [rangeMin, setRangeMin] = useState("");
   const [rangeMax, setRangeMax] = useState("");
   const periodDates = cycleLog?.period_start_dates?.length ? cycleLog.period_start_dates : cycleDates.filter(x => x.ok).sort((a, b) => new Date(b.d) - new Date(a.d)).map(x => x.d);
@@ -8285,134 +8288,7 @@ function TabCycle({
       ...s.ms,
       color: C.t3
     }
-  }, st.usedGaps > 1 ? `${fmtShort(st.winStartDate)}–${fmtShort(st.winEndDate)}` : "estimate"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      marginBottom: 8
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3
-    }
-  }, "Today"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => openSymptom(tkey()),
-    style: {
-      ...s.btn("p"),
-      ...s.btnSm,
-      fontSize: 11
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "plus",
-    size: 12,
-    color: "#fff"
-  }), " Log symptoms")), todaySym ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      alignItems: "center"
-    }
-  }, todaySym.feelingGood && /*#__PURE__*/React.createElement("span", {
-    style: {
-      ...s.pill(C.tl, C.teal),
-      fontSize: 10
-    }
-  }, "\u2713 Feeling good"), todaySym.bleed && /*#__PURE__*/React.createElement("span", {
-    style: {
-      ...s.pill(C.rl, C.red),
-      fontSize: 10
-    }
-  }, "\uD83E\uDE78 ", (BLEED_LEVELS.find(b => b[0] === todaySym.bleed) || [, todaySym.bleed])[1]), (todaySym.mood || []).map(x => /*#__PURE__*/React.createElement("span", {
-    key: x,
-    style: {
-      ...s.pill(C.al, C.am),
-      fontSize: 10
-    }
-  }, x)), (todaySym.symptoms || []).map(x => /*#__PURE__*/React.createElement("span", {
-    key: x,
-    style: {
-      ...s.pill(C.s2, C.t2),
-      fontSize: 10
-    }
-  }, x)), (todaySym.digestion || []).map(x => /*#__PURE__*/React.createElement("span", {
-    key: x,
-    style: {
-      ...s.pill(C.s2, C.t2),
-      fontSize: 10
-    }
-  }, x)), todaySym.note && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      color: C.t2
-    }
-  }, "\xB7 ", todaySym.note), /*#__PURE__*/React.createElement("button", {
-    onClick: () => openSymptom(tkey()),
-    style: {
-      background: "none",
-      border: "none",
-      color: C.t3,
-      fontSize: 11,
-      cursor: "pointer",
-      textDecoration: "underline"
-    }
-  }, "edit")) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11.5,
-      color: C.t3
-    }
-  }, "Nothing logged today. Bleed intensity, symptoms and mood all help your coach spot your own patterns."), Object.keys(symptomLogs).length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 10,
-      paddingTop: 10,
-      borderTop: `.5px solid ${C.bd}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: C.t3,
-      marginBottom: 6
-    }
-  }, "Recent"), Object.keys(symptomLogs).sort().reverse().slice(0, 5).map(dk => {
-    const e = symptomLogs[dk];
-    return /*#__PURE__*/React.createElement("div", {
-      key: dk,
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        fontSize: 11,
-        padding: "4px 0"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: C.t2,
-        flex: "0 0 68px"
-      }
-    }, fmtShort(dk)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        flex: 1,
-        color: C.t3,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, [e.feelingGood ? "✓ feeling good" : null, e.bleed ? "🩸" + (BLEED_LEVELS.find(b => b[0] === e.bleed) || [, e.bleed])[1] : null, ...(e.mood || []), ...(e.symptoms || []), ...(e.digestion || [])].filter(Boolean).join(", ") || e.note || "—"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => openSymptom(dk),
-      style: {
-        background: "none",
-        border: "none",
-        color: C.t3,
-        fontSize: 11,
-        cursor: "pointer"
-      }
-    }, "edit"));
-  }))), st.cycleDay && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, st.usedGaps > 1 ? `${fmtShort(st.winStartDate)}–${fmtShort(st.winEndDate)}` : "estimate"))), st.cycleDay && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 600,
@@ -8527,7 +8403,295 @@ function TabCycle({
       borderRadius: 8,
       padding: "10px 12px"
     }
-  }, "Commonly reported signs, roughly around the middle of a cycle:", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "Cervical fluid changes"), " \u2014 often becomes clearer, wetter and more stretchy (egg-white-like) in the days approaching ovulation, then dries up afterwards.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "A mild one-sided ache"), " in the lower abdomen, usually lasting hours rather than days.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "Slight breast tenderness"), " or bloating in the days after.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "A small rise in resting temperature"), " that persists \u2014 this shows up ", /*#__PURE__*/React.createElement("em", null, "after"), " ovulation, so it confirms rather than predicts.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "These signs vary a lot between people and between cycles, and perceived ovulation doesn't always match actual ovulation \u2014 so this is treated as a helpful hint, never as fact. This is informational only, not fertility or contraception guidance.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, "Commonly reported signs, roughly around the middle of a cycle:", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "Cervical fluid changes"), " \u2014 often becomes clearer, wetter and more stretchy (egg-white-like) in the days approaching ovulation, then dries up afterwards.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "A mild one-sided ache"), " in the lower abdomen, usually lasting hours rather than days.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "Slight breast tenderness"), " or bloating in the days after.", /*#__PURE__*/React.createElement("br", null), "\u2022 ", /*#__PURE__*/React.createElement("strong", null, "A small rise in resting temperature"), " that persists \u2014 this shows up ", /*#__PURE__*/React.createElement("em", null, "after"), " ovulation, so it confirms rather than predicts.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "These signs vary a lot between people and between cycles, and perceived ovulation doesn't always match actual ovulation \u2014 so this is treated as a helpful hint, never as fact. This is informational only, not fertility or contraception guidance.")), /*#__PURE__*/React.createElement(SecLabel, null, "What happens across your cycle"), /*#__PURE__*/React.createElement(Card, null, (() => {
+    const effMed = st.effectiveMedian || st.median || 28;
+    const lutealStart = effMed - LUTEAL_BAND.mid + 1;
+    const ovulStart = lutealStart - 2;
+    const segs = [{
+      k: "menstrual",
+      from: 1,
+      to: Math.min(avgPeriodLen, effMed)
+    }, {
+      k: "follicular",
+      from: avgPeriodLen + 1,
+      to: Math.max(avgPeriodLen + 1, ovulStart - 1)
+    }, {
+      k: "ovulatory",
+      from: Math.max(avgPeriodLen + 2, ovulStart),
+      to: Math.max(ovulStart, lutealStart - 1)
+    }, {
+      k: "luteal",
+      from: lutealStart,
+      to: effMed
+    }].filter(sg => sg.to >= sg.from);
+    const total = segs.reduce((a, sg) => a + (sg.to - sg.from + 1), 0) || effMed;
+    const DETAIL = {
+      menstrual: "Iron needs are higher while you're bleeding — iron-rich foods with some vitamin C help, and tea, coffee or calcium in the same meal reduce how much you absorb.",
+      follicular: "The variable part of the cycle — its length is what makes cycles differ from each other and from month to month. Energy often builds through it.",
+      ovulatory: "A short window before the luteal phase. Its timing is an estimate unless you tell the app you've noticed signs.",
+      luteal: "Typically 11–15 days before your period. Premenstrual symptoms characteristically appear here and ease within about a week of bleeding starting."
+    };
+    const pos = st.phase && st.phase !== "unknown" && st.cycleDay ? Math.min(st.cycleDay, total) / total : null;
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        height: 14,
+        borderRadius: 7,
+        overflow: "hidden",
+        gap: 2,
+        marginBottom: 6
+      }
+    }, segs.map(sg => /*#__PURE__*/React.createElement("div", {
+      key: sg.k,
+      onClick: () => setOpenPhase(openPhase === sg.k ? null : sg.k),
+      title: `${PHASES[sg.k].n}: days ${sg.from}–${sg.to}`,
+      style: {
+        flex: sg.to - sg.from + 1,
+        background: PHASES[sg.k].c,
+        opacity: st.phase === sg.k ? 1 : 0.32,
+        cursor: "pointer"
+      }
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "relative",
+        height: 14,
+        marginBottom: 10
+      }
+    }, pos !== null && /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        left: `calc(${(pos * 100).toFixed(1)}% - 5px)`,
+        top: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 0,
+        height: 0,
+        borderLeft: "5px solid transparent",
+        borderRight: "5px solid transparent",
+        borderBottom: `6px solid ${C.t2}`,
+        margin: "0 auto"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        color: C.t2,
+        whiteSpace: "nowrap",
+        transform: "translateX(-42%)",
+        marginTop: 1
+      }
+    }, "day ", st.cycleDay))), st.phase === "unknown" && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.t2,
+        lineHeight: 1.6,
+        marginBottom: 10
+      }
+    }, "Your position isn't marked because the app isn't sure where you are in your cycle right now. It'll pick back up as soon as you log your next period start."), segs.map((sg, idx) => {
+      const p = PHASES[sg.k],
+        open = openPhase === sg.k,
+        now = st.phase === sg.k;
+      return /*#__PURE__*/React.createElement("div", {
+        key: sg.k,
+        onClick: () => setOpenPhase(open ? null : sg.k),
+        style: {
+          padding: "9px 11px",
+          borderRadius: 10,
+          marginBottom: 6,
+          cursor: "pointer",
+          background: open || now ? p.bg : C.sf,
+          border: `1px solid ${now ? p.c : C.bd}`
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: p.c,
+          flexShrink: 0
+        }
+      }), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: p.c
+        }
+      }, p.n), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          color: C.t3
+        }
+      }, "days ", sg.from, "\u2013", sg.to), now && /*#__PURE__*/React.createElement("span", {
+        style: {
+          ...s.pill(p.bg, p.c),
+          fontSize: 9,
+          marginLeft: "auto",
+          marginRight: 0
+        }
+      }, "LIKELY NOW"), !now && /*#__PURE__*/React.createElement("span", {
+        style: {
+          marginLeft: "auto",
+          fontSize: 10,
+          color: C.t3
+        }
+      }, open ? "▾" : "▸")), open && /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 11,
+          color: C.t2,
+          lineHeight: 1.65,
+          marginTop: 7
+        }
+      }, DETAIL[sg.k]));
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.t2,
+        lineHeight: 1.6,
+        marginTop: 8
+      }
+    }, "Then your next period is expected around ", /*#__PURE__*/React.createElement("strong", null, fmtShort(st.medianDate)), ", starting the cycle again."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: C.t3,
+        marginTop: 8,
+        lineHeight: 1.5
+      }
+    }, "Day ranges come from your own cycle length, not textbook numbers, and boundaries are estimates counted back from your predicted period. Training and sleep guidance isn't adjusted by phase \u2014 the evidence doesn't support it."));
+  })()), /*#__PURE__*/React.createElement(SecLabel, null, "Log how you feel"), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: ".08em",
+      textTransform: "uppercase",
+      color: C.t3
+    }
+  }, "Today"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => openSymptom(tkey()),
+    style: {
+      ...s.btn("p"),
+      ...s.btnSm,
+      fontSize: 11
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "plus",
+    size: 12,
+    color: "#fff"
+  }), " Log symptoms")), todaySym ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6,
+      alignItems: "center"
+    }
+  }, todaySym.feelingGood && /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...s.pill(C.tl, C.teal),
+      fontSize: 10
+    }
+  }, "\u2713 Feeling good"), todaySym.bleed && /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...s.pill(C.rl, C.red),
+      fontSize: 10
+    }
+  }, "\uD83E\uDE78 ", (BLEED_LEVELS.find(b => b[0] === todaySym.bleed) || [, todaySym.bleed])[1]), (todaySym.mood || []).map(x => /*#__PURE__*/React.createElement("span", {
+    key: x,
+    style: {
+      ...s.pill(C.al, C.am),
+      fontSize: 10
+    }
+  }, x)), (todaySym.symptoms || []).map(x => /*#__PURE__*/React.createElement("span", {
+    key: x,
+    style: {
+      ...s.pill(C.s2, C.t2),
+      fontSize: 10
+    }
+  }, x)), (todaySym.digestion || []).map(x => /*#__PURE__*/React.createElement("span", {
+    key: x,
+    style: {
+      ...s.pill(C.s2, C.t2),
+      fontSize: 10
+    }
+  }, x)), todaySym.note && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.t2
+    }
+  }, "\xB7 ", todaySym.note), /*#__PURE__*/React.createElement("button", {
+    onClick: () => openSymptom(tkey()),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.t3,
+      fontSize: 11,
+      cursor: "pointer",
+      textDecoration: "underline"
+    }
+  }, "edit")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.t3,
+      lineHeight: 1.6
+    }
+  }, "Nothing logged today. The more consistently you log, the better your coach gets at spotting patterns that are specific to you \u2014 it takes several cycles before there's enough to say anything useful, so this is a slow build rather than an instant payoff."), Object.keys(symptomLogs).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10,
+      paddingTop: 10,
+      borderTop: `.5px solid ${C.bd}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.t3,
+      marginBottom: 6
+    }
+  }, "Recent"), Object.keys(symptomLogs).sort().reverse().slice(0, 5).map(dk => {
+    const e = symptomLogs[dk];
+    return /*#__PURE__*/React.createElement("div", {
+      key: dk,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        fontSize: 11,
+        padding: "4px 0"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: C.t2,
+        flex: "0 0 68px"
+      }
+    }, fmtShort(dk)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: 1,
+        color: C.t3,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, [e.feelingGood ? "✓ feeling good" : null, e.bleed ? "🩸" + (BLEED_LEVELS.find(b => b[0] === e.bleed) || [, e.bleed])[1] : null, ...(e.mood || []), ...(e.symptoms || []), ...(e.digestion || [])].filter(Boolean).join(", ") || e.note || "—"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => openSymptom(dk),
+      style: {
+        background: "none",
+        border: "none",
+        color: C.t3,
+        fontSize: 11,
+        cursor: "pointer"
+      }
+    }, "edit"));
+  }))), /*#__PURE__*/React.createElement(SecLabel, null, "Your cycle history"), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 600,
@@ -8575,7 +8739,7 @@ function TabCycle({
       display: "block",
       color: C.t2
     }
-  }, "No dates added yet"), "Add your most recent period start date above.") : periodDates.map((d, i) => {
+  }, "No dates added yet"), "Add your most recent period start date above.") : (showAllHistory ? periodDates : periodDates.slice(0, 3)).map((d, i) => {
     const nextOlder = periodDates[i + 1];
     const len = nextOlder ? Math.round((dayKeyToNoon(d) - dayKeyToNoon(nextOlder)) / 864e5) : null;
     const isExc = excSet.has(d);
@@ -8616,15 +8780,15 @@ function TabCycle({
       }
     }, "Most recent"), len && /*#__PURE__*/React.createElement("button", {
       onClick: () => toggleExceptional(d),
-      title: isExc ? "Include this cycle again" : "Exclude: disrupted by a one-off event",
       style: {
         background: "none",
         border: "none",
         color: isExc ? C.am : C.t3,
         cursor: "pointer",
-        fontSize: 11
+        fontSize: 11,
+        fontFamily: "inherit"
       }
-    }, isExc ? "excluded" : "exclude"), /*#__PURE__*/React.createElement("button", {
+    }, isExc ? "marked one-off" : "Mark as a one-off"), /*#__PURE__*/React.createElement("button", {
       onClick: () => delDate(d),
       style: {
         background: "none",
@@ -8641,64 +8805,55 @@ function TabCycle({
         color: C.t3,
         marginTop: 2
       }
-    }, "Not used for predictions \u2014 flagged as a one-off."));
-  }), periodDates.length > 1 && /*#__PURE__*/React.createElement("div", {
+    }, "Something happened this cycle that isn't part of your normal pattern. It won't affect future predictions."));
+  }), periodDates.length > 3 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAllHistory(v => !v),
+    style: {
+      background: "none",
+      border: "none",
+      padding: "10px 0 0",
+      fontSize: 11.5,
+      color: C.pu,
+      cursor: "pointer",
+      fontWeight: 600,
+      fontFamily: "inherit"
+    }
+  }, showAllHistory ? "Show fewer" : `Show all ${periodDates.length}`), showAllHistory && periodDates.length > 1 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       color: C.t3,
-      marginTop: 10,
+      marginTop: 8,
       lineHeight: 1.5
     }
-  }, "Only flag a cycle as one-off if something unrepeatable disrupted it (illness, surgery). Regularly disrupted cycles are part of your real pattern and should stay in.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, "The oldest date has no cycle length and no exclude option \u2014 there's nothing before it to measure from. That's expected, not a gap in your data."), periodDates.length > 1 && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 12
+      marginTop: 12,
+      paddingTop: 10,
+      borderTop: `.5px solid ${C.bd}`
     }
-  }, "Phase guide"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOneOffHelp(v => !v),
     style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 10
-    }
-  }, Object.entries(PHASES).map(([key, p]) => /*#__PURE__*/React.createElement("div", {
-    key: key,
-    style: {
-      padding: 10,
-      background: p.bg,
-      borderRadius: 10,
-      border: st.phase === key ? `1.5px solid ${p.c}` : "1.5px solid transparent"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
+      background: "none",
+      border: "none",
+      padding: 0,
       fontSize: 11,
-      fontWeight: 600,
-      color: p.c,
-      marginBottom: 4
+      color: C.pu,
+      cursor: "pointer",
+      fontWeight: 500,
+      fontFamily: "inherit"
     }
-  }, p.n.toUpperCase(), st.phase === key && /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: 6,
-      fontSize: 9,
-      fontWeight: 700
-    }
-  }, "\u2190 LIKELY NOW")), /*#__PURE__*/React.createElement("div", {
+  }, oneOffHelp ? "▾" : "▸", " What counts as a one-off?"), oneOffHelp && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.t2,
-      lineHeight: 1.5
+      lineHeight: 1.7,
+      marginTop: 7,
+      background: C.s2,
+      borderRadius: 8,
+      padding: "10px 12px"
     }
-  }, key === "menstrual" ? "Iron needs are higher while bleeding — iron-rich foods with vitamin C help; tea, coffee and calcium with the same meal reduce absorption." : key === "follicular" ? "The variable part of the cycle — its length is what makes cycles differ. Energy often builds through it." : key === "ovulatory" ? "A short window before the luteal phase. Timing is an estimate unless you report signs yourself." : "Typically 11–15 days before your period. Premenstrual symptoms characteristically appear here and ease within a week of bleeding starting.")))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: C.t3,
-      marginTop: 10,
-      lineHeight: 1.5
-    }
-  }, "Phase boundaries are estimates counted back from your predicted period. Training and sleep guidance is not adjusted by phase \u2014 the evidence doesn't support it.")), showSymptom && (() => {
+  }, "Things that might throw off a cycle: surgery or a medical procedure, illness, a big life event or a stretch of unusual stress, grief, a major change in training or eating, starting or stopping a medication, or unusual travel.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "Only mark this if it's genuinely a one-off. If something happens to you regularly \u2014 lots of travel, for example \u2014 that's part of your normal pattern, and it's more useful for the app to learn from it than to ignore it."))), showSymptom && (() => {
     // Hierarchy: headings differ from chips on weight AND size AND case,
     // with generous space above; chips carry a clearly filled unselected
     // state rather than a faint tint. Tokens only — no invented colours.
