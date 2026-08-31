@@ -2907,6 +2907,34 @@ async function checkMilestones(profileData, last30Days) {
 // Shared 14-day log digest with relevance triage. The model does the routine-vs-
 // serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
 // movement-limiting issues stay active until a newer entry says they resolved.
+// ── SENSITIVITY GUARD FOR GENERATED PROSE ───────────────────────────────────
+// Measured: with "NEVER suggest anything conflicting with X" in the prompt,
+// Haiku violated it 3/3 and Sonnet 2/3. Prompt text is not enforcement.
+// generate(extraInstruction) must return the text for one attempt.
+//   explain:true  -> chat. Dropping a reply leaves a dead send, so the second
+//                    failure answers with the constraint instead of silence.
+//   explain:false -> ambient content with no waiting user; silence costs
+//                    nothing, so retry then drop.
+async function withSensitivityGuard(generate, sens, label, opts) {
+  opts = opts || {};
+  let text = await generate("");
+  const list = sens || [];
+  if (!list.length) return text;
+  let bad = violatesSensitivities(text, list);
+  if (!bad.length) return text;
+  console.log(`${label}: named a food sensitivity (${bad.join(", ")}) — retrying once.`);
+  text = await generate(`\n\nYour previous answer named ${bad.join(", ")}, which she cannot eat. Rewrite it completely without any of those. Do not mention the correction.`);
+  bad = violatesSensitivities(text, list);
+  if (!bad.length) return text;
+  console.log(`${label}: still named ${bad.join(", ")} — ${opts.explain ? "answering with the constraint instead." : "dropping it."}`);
+  if (!opts.explain) return null;
+  // Name what SHE declared, not the food word that matched. "your yogurt
+  // sensitivity" is both confusing (she declared dairy) and echoes the very
+  // suggestion we are refusing to make.
+  const declared = list.find(d => violatesSensitivities(text, [d]).length) || bad[0];
+  return `I'd rather not suggest that — it conflicts with your ${declared} restriction. Ask me again and I'll give you options that work around it.`;
+}
+
 // ── API RESPONSE READING ────────────────────────────────────────────────────
 // Every call site used to do `d.content[0].text.trim()`, which assumes the
 // first content block is always a text block. It is not: the reported crash
@@ -3546,9 +3574,15 @@ function stillHasToken(text) {
 }
 // Same guard for the free-text coach fields, which are not insights and so
 // never passed through evaluateInsight at all -- the actual hole behind Bug 2.
-function safeCoachText(text, m) {
+function safeCoachText(text, m, field) {
+  if (text == null || text === "") return text;
   const filled = fillPlaceholders(text, m || {});
-  return stillHasToken(filled) ? null : filled;
+  if (!stillHasToken(filled)) return filled;
+  // A field that vanishes with no explanation is the same class of invisible
+  // failure as the broken regex was. Name the field and the token.
+  const tokens = (String(filled).match(/\{[a-z_]+\}/gi) || []).join(", ");
+  console.log(`Coach: suppressed ${field || "a generated field"} — unresolved placeholder(s): ${tokens}`);
+  return null;
 }
 // Preferred path: the model emits {protein_today}; we substitute from live data.
 // No parsing, no ambiguity about which number is which.
@@ -4409,6 +4443,15 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     }
     setWeeklyReviewLoading(false);
   }
+
+  // Retry-then-drop: ambient content with no waiting user, so silence is free.
+  async function callAIGuarded(prompt, label) {
+    const out = await withSensitivityGuard(extra => callAI(prompt + extra), profileData?.food_sensitivities, label, {
+      explain: false
+    });
+    if (out === null) console.log(`${label}: suppressed rather than naming a food she cannot eat.`);
+    return out;
+  }
   async function callAI(prompt) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -4797,7 +4840,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       fitbitData,
       profileData,
       cycleLog
-    }))), coachContent.why && /*#__PURE__*/React.createElement("div", {
+    }), "headline")), coachContent.why && /*#__PURE__*/React.createElement("div", {
       style: {
         overflow: "hidden",
         maxHeight: showWhy ? "600px" : "0",
@@ -4817,7 +4860,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       fitbitData,
       profileData,
       cycleLog
-    })))), coachContent.why && !coachContent.isLearning && /*#__PURE__*/React.createElement("button", {
+    }), "why"))), coachContent.why && !coachContent.isLearning && /*#__PURE__*/React.createElement("button", {
       onClick: () => setShowWhy(v => !v),
       style: {
         background: "none",
@@ -5242,7 +5285,14 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     const _evaluated = (coachContent?.domain_insights || []).map(ins => evaluateInsight(ins, _m));
     // B.5 - anything she has explicitly dismissed today stays gone, and
     // does not reappear as a "resolved" chip: dismissing is not resolving.
-    const domainInsights = _evaluated.filter(x => !x.invalid && !dismissedTypes.includes(x.type) && !stillHasToken(x.content));
+    const domainInsights = _evaluated.filter(x => {
+      if (x.invalid || dismissedTypes.includes(x.type)) return false;
+      if (stillHasToken(x.content)) {
+        console.log(`Coach: suppressed insight "${x.type}" — unresolved placeholder(s): ${(String(x.content).match(/\{[a-z_]+\}/gi) || []).join(", ")}`);
+        return false;
+      }
+      return true;
+    });
     const resolvedInsights = _evaluated.filter(x => x.invalid && !dismissedTypes.includes(x.type));
     // B.3 watch: if resolved outnumber active, the card has drifted from
     // coach into checklist — cap what we show so it can't take over.
@@ -5356,7 +5406,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       fitbitData,
       profileData,
       cycleLog
-    })))), apiKey && !IS_DEMO && /*#__PURE__*/React.createElement("div", {
+    }), "micro_workout"))), apiKey && !IS_DEMO && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 2
       }
@@ -5678,7 +5728,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       color: C.t3
     }
   }, /*#__PURE__*/React.createElement(Spinner, null), "Writing your weekly review...") : weeklyReview?.text ? /*#__PURE__*/React.createElement(BulletView, {
-    text: weeklyReview.text
+    text: safeCoachText(weeklyReview.text, liveMetrics({
+      allFood,
+      fitbitData,
+      profileData,
+      cycleLog
+    }), "weekly review") || ""
   }) : /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
@@ -11380,6 +11435,15 @@ Max 250 words total. No intro, no outro.`
       setProcessingNotes(false);
     }
   }
+
+  // Retry then drop. Dropping here means keeping the user's own text rather
+  // than an AI-organised version that names something she cannot eat.
+  async function analysePlanGuarded(raw, notes) {
+    const out = await withSensitivityGuard(extra => analysePlan(raw, (notes || "") + extra), profileData?.food_sensitivities, "Plan organise", {
+      explain: false
+    });
+    return out === null ? raw : out;
+  }
   async function analysePlan(raw, notes) {
     if (!apiKey || !raw.trim()) return raw;
     setProcessingPlan(true);
@@ -12346,7 +12410,7 @@ Max 250 words total. No intro, no outro.`
         localStorage.removeItem("plan_assessment");
       } catch {}
       if (workoutPlan.trim() && apiKey) {
-        const rc = await analysePlan(workoutPlan, healthNotes);
+        const rc = await analysePlanGuarded(workoutPlan, healthNotes);
         if (rc && rc.trim()) {
           setWorkoutPlan(rc);
           await persist({
@@ -12448,7 +12512,7 @@ Max 250 words total. No intro, no outro.`
   }, /*#__PURE__*/React.createElement("button", {
     disabled: processingPlan || !workoutPlan.trim(),
     onClick: async () => {
-      const structured = await analysePlan(workoutPlan, healthNotes);
+      const structured = await analysePlanGuarded(workoutPlan, healthNotes);
       await persistPlan(structured);
       setSavedPlan("Saved ✓");
       setEditPlan(false);
@@ -13715,6 +13779,31 @@ function CoachMemoryCard({
     }
   });
   const [loading, setLoading] = React.useState(false);
+
+  // One attempt, so withSensitivityGuard can retry it with the term named.
+  async function _memoryOnce(prompt, extra) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: MODEL_FAST,
+        thinking: {
+          type: "disabled"
+        },
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: prompt + extra
+        }]
+      })
+    });
+    return extractText(await res.json(), "the coach memory summary");
+  }
   async function generate() {
     if (IS_DEMO || !apiKey || loading) return;
     setLoading(true);
@@ -13723,28 +13812,9 @@ function CoachMemoryCard({
     const goals = (profileData?.goals || []).map(g => g.label).join(', ') || 'general fitness';
     const prompt = `You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name || 'Julia'}, ${profileData?.gender || 'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours || '?'}h, bedtime ${bl.typical_bedtime || '?'}, avg deep sleep ${bl.avg_deep_sleep_pct || '?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes || 'none'}\n\nReturn 4–5 bullets, each a distinct thing you've learned about them, grouped by topic. Reference their actual baseline and strongest patterns; include one thing that makes them unique. Warm, direct, first person, so they feel genuinely seen.\n\nFORMAT — return ONLY these lines, each: topic emoji + short CAPS label + colon + one sentence. No intro or outro. Example shape:\n😴 YOUR SLEEP: <one sentence>\n💪 IN TRAINING: <one sentence>\n🥗 WITH FOOD: <one sentence>\n🌙 YOUR CYCLE: <one sentence>\n✨ WHAT STANDS OUT: <one sentence>`;
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: MODEL_MAIN,
-          thinking: {
-            type: "disabled"
-          },
-          max_tokens: 400,
-          messages: [{
-            role: "user",
-            content: prompt
-          }]
-        })
-      });
-      const d = await res.json();
-      const txt = d.content?.[0]?.text?.trim() || "";
+      const txt = (await withSensitivityGuard(extra => _memoryOnce(prompt, extra), profileData?.food_sensitivities, "Coach memory", {
+        explain: false
+      })) || "";
       if (txt) {
         setMemory(txt);
         try {
@@ -14568,6 +14638,29 @@ function App() {
     } catch (e) {}
     return ctx;
   }
+
+  // One attempt, so the guard can retry it with the violating term named.
+  async function _chatOnce(apiMsgs, extra) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: MODEL_MAIN,
+        thinking: {
+          type: "disabled"
+        },
+        max_tokens: 400,
+        system: "You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n" + buildCtxForChat() + extra,
+        messages: apiMsgs
+      })
+    });
+    return extractText(await res.json(), "the chat reply");
+  }
   async function sendChat() {
     if (!chatInput.trim()) return;
     if (IS_DEMO) {
@@ -14598,26 +14691,9 @@ function App() {
         content: m.txt
       }));
       while (apiMsgs.length && apiMsgs[0].role === "assistant") apiMsgs.shift(); // API requires first message to be user
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: MODEL_MAIN,
-          thinking: {
-            type: "disabled"
-          },
-          max_tokens: 400,
-          system: "You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n" + buildCtxForChat(),
-          messages: apiMsgs
-        })
+      const reply = await withSensitivityGuard(extra => _chatOnce(apiMsgs, extra), profileData?.food_sensitivities, "Chat", {
+        explain: true
       });
-      const d = await res.json();
-      const reply = d.content?.[0]?.text || "Error";
       setChatMsgs(p => [...p, {
         role: "ai",
         txt: reply
@@ -15366,7 +15442,11 @@ root.render( /*#__PURE__*/React.createElement(App, null));
 </script>
 <script>
 // PWA: register the service worker (relative path -> scope = this directory).
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+// localhost is EXCLUDED deliberately. A cached shell made local verification
+// untrustworthy: the browser reported shipped changes as absent more than once
+// during this project, because the SW was serving a previous build. Production
+// still gets offline support; local development always sees the real file.
+if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'localhost') {
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('sw.js').catch(function(e){ console.log('SW register failed:', e.message); });
   });

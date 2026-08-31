@@ -104,7 +104,11 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: #f5f4f0;
 """ + script_block + """
 <script>
 // PWA: register the service worker (relative path -> scope = this directory).
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+// localhost is EXCLUDED deliberately. A cached shell made local verification
+// untrustworthy: the browser reported shipped changes as absent more than once
+// during this project, because the SW was serving a previous build. Production
+// still gets offline support; local development always sees the real file.
+if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'localhost') {
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('sw.js').catch(function(e){ console.log('SW register failed:', e.message); });
   });

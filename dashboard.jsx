@@ -1534,6 +1534,34 @@ async function checkMilestones(profileData, last30Days) {
 // Shared 14-day log digest with relevance triage. The model does the routine-vs-
 // serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
 // movement-limiting issues stay active until a newer entry says they resolved.
+// ── SENSITIVITY GUARD FOR GENERATED PROSE ───────────────────────────────────
+// Measured: with "NEVER suggest anything conflicting with X" in the prompt,
+// Haiku violated it 3/3 and Sonnet 2/3. Prompt text is not enforcement.
+// generate(extraInstruction) must return the text for one attempt.
+//   explain:true  -> chat. Dropping a reply leaves a dead send, so the second
+//                    failure answers with the constraint instead of silence.
+//   explain:false -> ambient content with no waiting user; silence costs
+//                    nothing, so retry then drop.
+async function withSensitivityGuard(generate, sens, label, opts){
+  opts = opts || {};
+  let text = await generate("");
+  const list = sens || [];
+  if(!list.length) return text;
+  let bad = violatesSensitivities(text, list);
+  if(!bad.length) return text;
+  console.log(`${label}: named a food sensitivity (${bad.join(", ")}) — retrying once.`);
+  text = await generate(`\n\nYour previous answer named ${bad.join(", ")}, which she cannot eat. Rewrite it completely without any of those. Do not mention the correction.`);
+  bad = violatesSensitivities(text, list);
+  if(!bad.length) return text;
+  console.log(`${label}: still named ${bad.join(", ")} — ${opts.explain?"answering with the constraint instead.":"dropping it."}`);
+  if(!opts.explain) return null;
+  // Name what SHE declared, not the food word that matched. "your yogurt
+  // sensitivity" is both confusing (she declared dairy) and echoes the very
+  // suggestion we are refusing to make.
+  const declared = list.find(d => violatesSensitivities(text, [d]).length) || bad[0];
+  return `I'd rather not suggest that — it conflicts with your ${declared} restriction. Ask me again and I'll give you options that work around it.`;
+}
+
 // ── API RESPONSE READING ────────────────────────────────────────────────────
 // Every call site used to do `d.content[0].text.trim()`, which assumes the
 // first content block is always a text block. It is not: the reported crash
@@ -2025,9 +2053,15 @@ const ANY_TOKEN_RE=/\{[a-z_]+\}/i;
 function stillHasToken(text){ return ANY_TOKEN_RE.test(String(text||"")); }
 // Same guard for the free-text coach fields, which are not insights and so
 // never passed through evaluateInsight at all -- the actual hole behind Bug 2.
-function safeCoachText(text, m){
+function safeCoachText(text, m, field){
+  if(text==null||text==="") return text;
   const filled = fillPlaceholders(text, m||{});
-  return stillHasToken(filled) ? null : filled;
+  if(!stillHasToken(filled)) return filled;
+  // A field that vanishes with no explanation is the same class of invisible
+  // failure as the broken regex was. Name the field and the token.
+  const tokens=(String(filled).match(/\{[a-z_]+\}/gi)||[]).join(", ");
+  console.log(`Coach: suppressed ${field||"a generated field"} — unresolved placeholder(s): ${tokens}`);
+  return null;
 }
 // Preferred path: the model emits {protein_today}; we substitute from live data.
 // No parsing, no ambiguity about which number is which.
@@ -2605,6 +2639,13 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     setWeeklyReviewLoading(false);
   }
 
+  // Retry-then-drop: ambient content with no waiting user, so silence is free.
+  async function callAIGuarded(prompt, label){
+    const out = await withSensitivityGuard(
+      (extra)=>callAI(prompt+extra), profileData?.food_sensitivities, label, {explain:false});
+    if(out===null) console.log(`${label}: suppressed rather than naming a food she cannot eat.`);
+    return out;
+  }
   async function callAI(prompt) {
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
@@ -2836,10 +2877,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                   <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
                   {coachContent._generatedAt&&<div style={{fontSize:10,color:C.t3}}>{"Updated "+new Date(coachContent._generatedAt).toLocaleTimeString("en-GB",{timeZone:getTz(),hour:"2-digit",minute:"2-digit"})}</div>}
                 </div>
-                <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{safeCoachText(coachContent.headline, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
+                <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{safeCoachText(coachContent.headline, liveMetrics({allFood, fitbitData, profileData, cycleLog}), "headline")}</div>
                 {coachContent.why&&(
                   <div style={{overflow:"hidden",maxHeight:showWhy?"600px":"0",transition:"max-height .4s ease",marginTop:showWhy?6:0}}>
-                    <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{safeCoachText(coachContent.why, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
+                    <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{safeCoachText(coachContent.why, liveMetrics({allFood, fitbitData, profileData, cycleLog}), "why")}</div>
                   </div>
                 )}
                 {coachContent.why&&!coachContent.isLearning&&(
@@ -3075,7 +3116,14 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             const _evaluated = (coachContent?.domain_insights||[]).map(ins=>evaluateInsight(ins,_m));
             // B.5 - anything she has explicitly dismissed today stays gone, and
             // does not reappear as a "resolved" chip: dismissing is not resolving.
-            const domainInsights = _evaluated.filter(x=>!x.invalid && !dismissedTypes.includes(x.type) && !stillHasToken(x.content));
+            const domainInsights = _evaluated.filter(x=>{
+              if(x.invalid || dismissedTypes.includes(x.type)) return false;
+              if(stillHasToken(x.content)){
+                console.log(`Coach: suppressed insight "${x.type}" — unresolved placeholder(s): ${(String(x.content).match(/\{[a-z_]+\}/gi)||[]).join(", ")}`);
+                return false;
+              }
+              return true;
+            });
             const resolvedInsights = _evaluated.filter(x=>x.invalid && !dismissedTypes.includes(x.type));
             // B.3 watch: if resolved outnumber active, the card has drifted from
             // coach into checklist — cap what we show so it can't take over.
@@ -3115,7 +3163,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 {coachContent?.micro_workout&&(
                   <div>
                     <div style={{fontSize:11,fontWeight:700,letterSpacing:".08em",color:C.t2,marginBottom:3}}>⚡ 5-min move</div>
-                    <div style={{fontSize:13,color:C.tx,lineHeight:1.6}}>{safeCoachText(coachContent.micro_workout, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
+                    <div style={{fontSize:13,color:C.tx,lineHeight:1.6}}>{safeCoachText(coachContent.micro_workout, liveMetrics({allFood, fitbitData, profileData, cycleLog}), "micro_workout")}</div>
                   </div>
                 )}
                 {/* B.5 - manual refresh. Rate limited because each press costs a
@@ -3250,7 +3298,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           {weeklyReviewLoading&&!weeklyReview?.text
             ? <div style={{fontSize:12,color:C.t3}}><Spinner/>Writing your weekly review...</div>
             : weeklyReview?.text
-              ? <BulletView text={weeklyReview.text}/>
+              ? <BulletView text={safeCoachText(weeklyReview.text, liveMetrics({allFood, fitbitData, profileData, cycleLog}), "weekly review")||""}/>
               : <div style={{fontSize:12,color:C.t3}}>—</div>}
           {weeklyReview?.text&&!weeklyReviewLoading&&(
             <button onClick={()=>generateWeeklyReview(true)} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:8}}>Refresh</button>
@@ -5692,6 +5740,14 @@ Max 250 words total. No intro, no outro.`}]})});
     finally{setProcessingNotes(false);}
   }
 
+  // Retry then drop. Dropping here means keeping the user's own text rather
+  // than an AI-organised version that names something she cannot eat.
+  async function analysePlanGuarded(raw, notes){
+    const out = await withSensitivityGuard(
+      (extra)=>analysePlan(raw, (notes||"")+extra), profileData?.food_sensitivities,
+      "Plan organise", {explain:false});
+    return out===null ? raw : out;
+  }
   async function analysePlan(raw, notes) {
     if(!apiKey||!raw.trim()) return raw;
     setProcessingPlan(true);
@@ -6053,7 +6109,7 @@ Max 250 words total. No intro, no outro.`}]})});
                 }
               }} style={{...s.btn("p"),opacity:processingNotes?0.6:1}}>{processingNotes?"Analysing...":"Analyse & Save"}</button>
               {healthNotes&&!processingNotes&&<button onClick={async()=>{await persist({health_notes:healthNotes},setSavedNotes);setEditNotes(false);setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
-                if(workoutPlan.trim()&&apiKey){const rc=await analysePlan(workoutPlan,healthNotes);if(rc&&rc.trim()){setWorkoutPlan(rc);await persist({workout_plan:rc});}setSavedNotes("Saved ✓ — plan re-checked against new notes");}
+                if(workoutPlan.trim()&&apiKey){const rc=await analysePlanGuarded(workoutPlan,healthNotes);if(rc&&rc.trim()){setWorkoutPlan(rc);await persist({workout_plan:rc});}setSavedNotes("Saved ✓ — plan re-checked against new notes");}
               }} style={{...s.btn("s"),...s.btnSm}}>Save as-is</button>}
               {healthNotes&&<button onClick={()=>setEditNotes(false)} style={{...s.btn("s"),...s.btnSm}}>Cancel</button>}
               {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
@@ -6091,7 +6147,7 @@ Max 250 words total. No intro, no outro.`}]})});
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
               <button disabled={processingPlan||!workoutPlan.trim()} onClick={async()=>{
-                const structured=await analysePlan(workoutPlan,healthNotes);
+                const structured=await analysePlanGuarded(workoutPlan,healthNotes);
                 await persistPlan(structured);
                 setSavedPlan("Saved ✓");
                 setEditPlan(false);
@@ -6590,6 +6646,13 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
   });
   const [loading, setLoading] = React.useState(false);
 
+  // One attempt, so withSensitivityGuard can retry it with the term named.
+  async function _memoryOnce(prompt, extra){
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:MODEL_FAST,thinking:{type:"disabled"},max_tokens:2000,messages:[{role:"user",content:prompt+extra}]})});
+    return extractText(await res.json(), "the coach memory summary");
+  }
   async function generate() {
     if(IS_DEMO||!apiKey||loading) return;
     setLoading(true);
@@ -6598,9 +6661,9 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
     const goals=(profileData?.goals||[]).map(g=>g.label).join(', ')||'general fitness';
     const prompt=`You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name||'Julia'}, ${profileData?.gender||'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours||'?'}h, bedtime ${bl.typical_bedtime||'?'}, avg deep sleep ${bl.avg_deep_sleep_pct||'?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes||'none'}\n\nReturn 4–5 bullets, each a distinct thing you've learned about them, grouped by topic. Reference their actual baseline and strongest patterns; include one thing that makes them unique. Warm, direct, first person, so they feel genuinely seen.\n\nFORMAT — return ONLY these lines, each: topic emoji + short CAPS label + colon + one sentence. No intro or outro. Example shape:\n😴 YOUR SLEEP: <one sentence>\n💪 IN TRAINING: <one sentence>\n🥗 WITH FOOD: <one sentence>\n🌙 YOUR CYCLE: <one sentence>\n✨ WHAT STANDS OUT: <one sentence>`;
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:400,messages:[{role:"user",content:prompt}]})});
-      const d=await res.json();
-      const txt=d.content?.[0]?.text?.trim()||"";
+      const txt=await withSensitivityGuard(
+        (extra)=>_memoryOnce(prompt, extra),
+        profileData?.food_sensitivities, "Coach memory", {explain:false}) || "";
       if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{} supa("POST","profiles",{uid:UID,coach_memory:txt},"on_conflict=uid").catch(()=>{});}
     }catch(e){console.log("Memory card error:",e.message);}
     setLoading(false);
@@ -7118,6 +7181,17 @@ export default function App() {
     return ctx;
   }
 
+  // One attempt, so the guard can retry it with the violating term named.
+  async function _chatOnce(apiMsgs, extra){
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"},max_tokens:400,
+        system:"You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n"+buildCtxForChat()+extra,
+        messages:apiMsgs})
+    });
+    return extractText(await res.json(), "the chat reply");
+  }
   async function sendChat(){
     if(!chatInput.trim()) return;
     if(IS_DEMO){
@@ -7133,13 +7207,9 @@ export default function App() {
       // Send conversation history (last 12 turns) so follow-up questions have context
       let apiMsgs = history.slice(-12).map(m=>({role:m.role==="ai"?"assistant":"user",content:m.txt}));
       while(apiMsgs.length&&apiMsgs[0].role==="assistant") apiMsgs.shift(); // API requires first message to be user
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:400,system:"You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n"+buildCtxForChat(),messages:apiMsgs})
-      });
-      const d=await res.json();
-      const reply=d.content?.[0]?.text||"Error";
+      const reply=await withSensitivityGuard(
+        (extra)=>_chatOnce(apiMsgs, extra),
+        profileData?.food_sensitivities, "Chat", {explain:true});
       setChatMsgs(p=>[...p,{role:"ai",txt:reply}]);
     }catch(e){setChatMsgs(p=>[...p,{role:"ai",txt:"Error: "+e.message}]);}
     setChatLoading(false);
