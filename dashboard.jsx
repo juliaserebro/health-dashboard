@@ -3113,6 +3113,20 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           active, so an ordinary day shows nothing at all. */}
       <ActiveConditionsLine conditions={profileData?.conditions} onResolve={onResolveCondition} onExtend={onExtendCondition} onLapse={onLapseCondition}/>
 
+      {/* ── WHAT THE COACH KNOWS ──────────────────────────────────
+          Grouped with the conditions line because both answer the same
+          question: what does the coach currently know about me? It is also
+          what makes logging feel worthwhile -- you can see your input used.
+          (It was buried inside the Workout plan section, where Phase 8 would
+          have deleted it along with plan generation.) */}
+      {(()=>{
+        const firstSleep=(fitbitData.sleep||[]).map(x=>x.date).sort()[0];
+        if(!firstSleep) return null;
+        const daysInApp=Math.round((new Date()-new Date(firstSleep+"T12:00:00"))/864e5);
+        if(daysInApp<28) return null;
+        return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
+      })()}
+
       {/* ── WHAT YOU CAN STILL DO TODAY: changeable today ── */}
       <SecLabel>What you can still do today</SecLabel>
 
@@ -3307,57 +3321,6 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             </div>;
           });
         })()}
-      </Card>
-
-      <hr style={s.hr}/>
-      <SecLabel>Month — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</SecLabel>
-
-      <div style={s.mg}>
-        <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
-      </div>
-
-      {/* HEATMAP */}
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</div>
-        <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Strength</span>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Mobility</span>
-          <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
-          <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
-          <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
-          <span><span style={{fontWeight:700,color:C.am,fontSize:9}}>P✓</span> protein goal hit</span>
-        </div>
-        <button onClick={()=>{
-          const now3=new Date();
-          const monthKey=now3.toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7);
-          const stepTarget=profileData?.step_target||8000;
-          const mSteps=(fitbitData.steps||[]).filter(x=>x.date.startsWith(monthKey));
-          const mWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(monthKey));
-          const activeDates=new Set([...mSteps.filter(x=>x.steps>=stepTarget).map(x=>x.date),...mWorkouts.map(w=>w.date)]);
-          const cat=(c)=>mWorkouts.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)===c).length;
-          const totalSteps=mSteps.reduce((s,x)=>s+x.steps,0);
-          const protDays=Object.entries(allFood).filter(([d,meals])=>d.startsWith(monthKey)&&meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
-          const name=(profileData?.name||"My").split(" ")[0];
-          const todayIL3=now3.toLocaleDateString("en-CA",{timeZone:getTz()});
-          const dayNum=parseInt(todayIL3.slice(8),10);
-          const lastDay=new Date(parseInt(todayIL3.slice(0,4)),parseInt(todayIL3.slice(5,7)),0).getDate();
-          const monthLabel=now3.toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()});
-          const monthShort=now3.toLocaleDateString("en-GB",{month:"short",timeZone:getTz()});
-          const monthPeriod=dayNum>=lastDay?`Full month · ${monthLabel}`:`${monthLabel} · 1–${dayNum} ${monthShort} so far`;
-          shareStatsCard({
-            heading:`${name==="My"?"My":name+"'s"} month`,
-            subheading:monthPeriod,
-            rows:[
-              {label:"Active days",value:String(activeDates.size),color:"#0f7b5f"},
-              {label:"Total steps",value:totalSteps.toLocaleString(),color:"#0f7b5f"},
-              {label:"Strength sessions",value:String(cat("strength")),color:"#4a42b0"},
-              {label:"Mobility · Cardio",value:`${cat("mobility")} · ${cat("cardio")}`,color:"#b35a1f"},
-              ...(protDays?[{label:"Protein goal hit",value:`${protDays} days`,color:"#a05f0a"}]:[]),
-            ],
-            footer:`shared ${now3.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
-          });
-        }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}><Icon name="share" size={13}/> Share my month</button>
       </Card>
 
       {/* WEEK BY WEEK */}
@@ -6232,14 +6195,6 @@ Max 250 words total. No intro, no outro.`}]})});
         );
       })()}
 
-      {/* ── COACH MEMORY SUMMARY (after 28 days) ─────────────── */}
-      {(()=>{
-        const firstSleep=(fitbitData.sleep||[]).map(s=>s.date).sort()[0];
-        if(!firstSleep) return null;
-        const daysInApp=Math.round((new Date()-new Date(firstSleep+"T12:00:00"))/864e5);
-        if(daysInApp<28) return null;
-        return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
-      })()}
 
       {/* ── QUICK PLAN UPDATE: surgical free-text tweaks, no logging ritual ── */}
       {showTweak&&(
@@ -6491,6 +6446,69 @@ function WeekPanel({fitbitData, allFood, protTgt, profileData}){
   );
 }
 
+// ── MONTH PANEL (Bug 3/4) ───────────────────────────────────────────────────
+// Moved off Today as ONE UNIT: the section label, the s.mg grid wrapper, the
+// monthly stat tiles, the consistency heatmap and the share control. The
+// previous pass migrated a hand-written "Over time" line instead of this block,
+// which lost the heatmap entirely and dropped the grid wrapper -- so the tiles
+// stretched full width. Moving the real markup avoids re-deriving it.
+function MonthPanel({fitbitData, allFood, protTgt, profileData}){
+  return (
+    <>
+        <SecLabel>Month — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</SecLabel>
+
+        <div style={s.mg}>
+          <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+        </div>
+
+        {/* HEATMAP */}
+        <Card>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Consistency — {new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()})}</div>
+          <HeatmapGrid allFood={allFood} protTgt={protTgt} fitbitData={fitbitData} profileData={profileData}/>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:C.t3,marginTop:8}}>
+            <span><span style={{display:"inline-block",width:10,height:10,background:C.pl,border:`.5px solid ${C.pu}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Strength</span>
+            <span><span style={{display:"inline-block",width:10,height:10,background:C.orl,border:`.5px solid ${C.or}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Mobility</span>
+            <span><span style={{display:"inline-block",width:10,height:10,background:C.tl,border:`.5px solid ${C.teal}`,borderRadius:2,marginRight:3,verticalAlign:"middle"}}/>Cardio</span>
+            <span><span style={{fontWeight:700,color:C.teal}}>10k</span> steps</span>
+            <span><span style={{display:"inline-block",width:11,height:11,border:`2px solid ${C.tm}`,borderRadius:2,marginRight:2,verticalAlign:"middle"}}/>active day</span>
+            <span><span style={{fontWeight:700,color:C.am,fontSize:9}}>P✓</span> protein goal hit</span>
+          </div>
+          <button onClick={()=>{
+            const now3=new Date();
+            const monthKey=now3.toLocaleDateString("en-CA",{timeZone:getTz()}).slice(0,7);
+            const stepTarget=profileData?.step_target||8000;
+            const mSteps=(fitbitData.steps||[]).filter(x=>x.date.startsWith(monthKey));
+            const mWorkouts=(fitbitData.workouts||[]).filter(w=>w.date.startsWith(monthKey));
+            const activeDates=new Set([...mSteps.filter(x=>x.steps>=stepTarget).map(x=>x.date),...mWorkouts.map(w=>w.date)]);
+            const cat=(c)=>mWorkouts.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)===c).length;
+            const totalSteps=mSteps.reduce((s,x)=>s+x.steps,0);
+            const protDays=Object.entries(allFood).filter(([d,meals])=>d.startsWith(monthKey)&&meals.reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
+            const name=(profileData?.name||"My").split(" ")[0];
+            const todayIL3=now3.toLocaleDateString("en-CA",{timeZone:getTz()});
+            const dayNum=parseInt(todayIL3.slice(8),10);
+            const lastDay=new Date(parseInt(todayIL3.slice(0,4)),parseInt(todayIL3.slice(5,7)),0).getDate();
+            const monthLabel=now3.toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:getTz()});
+            const monthShort=now3.toLocaleDateString("en-GB",{month:"short",timeZone:getTz()});
+            const monthPeriod=dayNum>=lastDay?`Full month · ${monthLabel}`:`${monthLabel} · 1–${dayNum} ${monthShort} so far`;
+            shareStatsCard({
+              heading:`${name==="My"?"My":name+"'s"} month`,
+              subheading:monthPeriod,
+              rows:[
+                {label:"Active days",value:String(activeDates.size),color:"#0f7b5f"},
+                {label:"Total steps",value:totalSteps.toLocaleString(),color:"#0f7b5f"},
+                {label:"Strength sessions",value:String(cat("strength")),color:"#4a42b0"},
+                {label:"Mobility · Cardio",value:`${cat("mobility")} · ${cat("cardio")}`,color:"#b35a1f"},
+                ...(protDays?[{label:"Protein goal hit",value:`${protDays} days`,color:"#a05f0a"}]:[]),
+              ],
+              footer:`shared ${now3.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
+            });
+          }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}><Icon name="share" size={13}/> Share my month</button>
+        </Card>
+
+    </>
+  );
+}
+
 // ── PROGRESS TAB (Phase 6) ──────────────────────────────────────────────────
 // "How am I doing against what I said I wanted?"
 // Upper section is what is MOVING; lower section is what is SET, collapsed,
@@ -6501,8 +6519,7 @@ function TabProgress({suppState, setSupp, profileData, setProfileData, fitbitDat
     <div>
       <WeekPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
 
-      <SecLabel>Over time</SecLabel>
-      <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+      <MonthPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
 
       {/* What is SET — below the tracking it informs, collapsed by default */}
       <SecLabel>What you&rsquo;ve set</SecLabel>

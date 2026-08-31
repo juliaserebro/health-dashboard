@@ -5351,7 +5351,17 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     onResolve: onResolveCondition,
     onExtend: onExtendCondition,
     onLapse: onLapseCondition
-  }), /*#__PURE__*/React.createElement(SecLabel, null, "What you can still do today"), /*#__PURE__*/React.createElement("div", {
+  }), (() => {
+    const firstSleep = (fitbitData.sleep || []).map(x => x.date).sort()[0];
+    if (!firstSleep) return null;
+    const daysInApp = Math.round((new Date() - new Date(firstSleep + "T12:00:00")) / 864e5);
+    if (daysInApp < 28) return null;
+    return /*#__PURE__*/React.createElement(CoachMemoryCard, {
+      profileData: profileData,
+      fitbitData: fitbitData,
+      apiKey: apiKey
+    });
+  })(), /*#__PURE__*/React.createElement(SecLabel, null, "What you can still do today"), /*#__PURE__*/React.createElement("div", {
     style: s.mg2
   }, /*#__PURE__*/React.createElement(StepsMetric, {
     fitbitData: fitbitData,
@@ -5909,171 +5919,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         }
       }, detail));
     });
-  })()), /*#__PURE__*/React.createElement("hr", {
-    style: s.hr
-  }), /*#__PURE__*/React.createElement(SecLabel, null, "Month \u2014 ", new Date().toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-    timeZone: getTz()
-  })), /*#__PURE__*/React.createElement("div", {
-    style: s.mg
-  }, /*#__PURE__*/React.createElement(MonthlyMetrics, {
-    fitbitData: fitbitData,
-    allFood: allFood,
-    protTgt: protTgt,
-    profileData: profileData
-  })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 12
-    }
-  }, "Consistency \u2014 ", new Date().toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-    timeZone: getTz()
-  })), /*#__PURE__*/React.createElement(HeatmapGrid, {
-    allFood: allFood,
-    protTgt: protTgt,
-    fitbitData: fitbitData,
-    profileData: profileData
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 10,
-      flexWrap: "wrap",
-      fontSize: 10,
-      color: C.t3,
-      marginTop: 8
-    }
-  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      background: C.pl,
-      border: `.5px solid ${C.pu}`,
-      borderRadius: 2,
-      marginRight: 3,
-      verticalAlign: "middle"
-    }
-  }), "Strength"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      background: C.orl,
-      border: `.5px solid ${C.or}`,
-      borderRadius: 2,
-      marginRight: 3,
-      verticalAlign: "middle"
-    }
-  }), "Mobility"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      background: C.tl,
-      border: `.5px solid ${C.teal}`,
-      borderRadius: 2,
-      marginRight: 3,
-      verticalAlign: "middle"
-    }
-  }), "Cardio"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: 700,
-      color: C.teal
-    }
-  }, "10k"), " steps"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: "inline-block",
-      width: 11,
-      height: 11,
-      border: `2px solid ${C.tm}`,
-      borderRadius: 2,
-      marginRight: 2,
-      verticalAlign: "middle"
-    }
-  }), "active day"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: 700,
-      color: C.am,
-      fontSize: 9
-    }
-  }, "P\u2713"), " protein goal hit")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const now3 = new Date();
-      const monthKey = now3.toLocaleDateString("en-CA", {
-        timeZone: getTz()
-      }).slice(0, 7);
-      const stepTarget = profileData?.step_target || 8000;
-      const mSteps = (fitbitData.steps || []).filter(x => x.date.startsWith(monthKey));
-      const mWorkouts = (fitbitData.workouts || []).filter(w => w.date.startsWith(monthKey));
-      const activeDates = new Set([...mSteps.filter(x => x.steps >= stepTarget).map(x => x.date), ...mWorkouts.map(w => w.date)]);
-      const cat = c => mWorkouts.filter(w => getActivityCategory(w.type, profileData?.activity_mapping) === c).length;
-      const totalSteps = mSteps.reduce((s, x) => s + x.steps, 0);
-      const protDays = Object.entries(allFood).filter(([d, meals]) => d.startsWith(monthKey) && meals.reduce((s, e) => s + (e.p || 0), 0) >= protTgt).length;
-      const name = (profileData?.name || "My").split(" ")[0];
-      const todayIL3 = now3.toLocaleDateString("en-CA", {
-        timeZone: getTz()
-      });
-      const dayNum = parseInt(todayIL3.slice(8), 10);
-      const lastDay = new Date(parseInt(todayIL3.slice(0, 4)), parseInt(todayIL3.slice(5, 7)), 0).getDate();
-      const monthLabel = now3.toLocaleDateString("en-GB", {
-        month: "long",
-        year: "numeric",
-        timeZone: getTz()
-      });
-      const monthShort = now3.toLocaleDateString("en-GB", {
-        month: "short",
-        timeZone: getTz()
-      });
-      const monthPeriod = dayNum >= lastDay ? `Full month · ${monthLabel}` : `${monthLabel} · 1–${dayNum} ${monthShort} so far`;
-      shareStatsCard({
-        heading: `${name === "My" ? "My" : name + "'s"} month`,
-        subheading: monthPeriod,
-        rows: [{
-          label: "Active days",
-          value: String(activeDates.size),
-          color: "#0f7b5f"
-        }, {
-          label: "Total steps",
-          value: totalSteps.toLocaleString(),
-          color: "#0f7b5f"
-        }, {
-          label: "Strength sessions",
-          value: String(cat("strength")),
-          color: "#4a42b0"
-        }, {
-          label: "Mobility · Cardio",
-          value: `${cat("mobility")} · ${cat("cardio")}`,
-          color: "#b35a1f"
-        }, ...(protDays ? [{
-          label: "Protein goal hit",
-          value: `${protDays} days`,
-          color: "#a05f0a"
-        }] : [])],
-        footer: `shared ${now3.toLocaleDateString("en-GB", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          timeZone: getTz()
-        })}`
-      });
-    },
-    style: {
-      ...s.btn("s"),
-      ...s.btnSm,
-      fontSize: 11,
-      marginTop: 10
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "share",
-    size: 13
-  }), " Share my month")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  })()), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 600,
@@ -13009,16 +12855,6 @@ Max 250 words total. No intro, no outro.`
         color: C.t3
       }
     }, "reset")))));
-  })(), (() => {
-    const firstSleep = (fitbitData.sleep || []).map(s => s.date).sort()[0];
-    if (!firstSleep) return null;
-    const daysInApp = Math.round((new Date() - new Date(firstSleep + "T12:00:00")) / 864e5);
-    if (daysInApp < 28) return null;
-    return /*#__PURE__*/React.createElement(CoachMemoryCard, {
-      profileData: profileData,
-      fitbitData: fitbitData,
-      apiKey: apiKey
-    });
   })(), showTweak && /*#__PURE__*/React.createElement("div", {
     style: s.mo,
     onClick: e => {
@@ -13664,6 +13500,183 @@ function WeekPanel({
   })());
 }
 
+// ── MONTH PANEL (Bug 3/4) ───────────────────────────────────────────────────
+// Moved off Today as ONE UNIT: the section label, the s.mg grid wrapper, the
+// monthly stat tiles, the consistency heatmap and the share control. The
+// previous pass migrated a hand-written "Over time" line instead of this block,
+// which lost the heatmap entirely and dropped the grid wrapper -- so the tiles
+// stretched full width. Moving the real markup avoids re-deriving it.
+function MonthPanel({
+  fitbitData,
+  allFood,
+  protTgt,
+  profileData
+}) {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(SecLabel, null, "Month \u2014 ", new Date().toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: getTz()
+  })), /*#__PURE__*/React.createElement("div", {
+    style: s.mg
+  }, /*#__PURE__*/React.createElement(MonthlyMetrics, {
+    fitbitData: fitbitData,
+    allFood: allFood,
+    protTgt: protTgt,
+    profileData: profileData
+  })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: ".08em",
+      textTransform: "uppercase",
+      color: C.t3,
+      marginBottom: 12
+    }
+  }, "Consistency \u2014 ", new Date().toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: getTz()
+  })), /*#__PURE__*/React.createElement(HeatmapGrid, {
+    allFood: allFood,
+    protTgt: protTgt,
+    fitbitData: fitbitData,
+    profileData: profileData
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      fontSize: 10,
+      color: C.t3,
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      background: C.pl,
+      border: `.5px solid ${C.pu}`,
+      borderRadius: 2,
+      marginRight: 3,
+      verticalAlign: "middle"
+    }
+  }), "Strength"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      background: C.orl,
+      border: `.5px solid ${C.or}`,
+      borderRadius: 2,
+      marginRight: 3,
+      verticalAlign: "middle"
+    }
+  }), "Mobility"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      background: C.tl,
+      border: `.5px solid ${C.teal}`,
+      borderRadius: 2,
+      marginRight: 3,
+      verticalAlign: "middle"
+    }
+  }), "Cardio"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: C.teal
+    }
+  }, "10k"), " steps"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      width: 11,
+      height: 11,
+      border: `2px solid ${C.tm}`,
+      borderRadius: 2,
+      marginRight: 2,
+      verticalAlign: "middle"
+    }
+  }), "active day"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: C.am,
+      fontSize: 9
+    }
+  }, "P\u2713"), " protein goal hit")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      const now3 = new Date();
+      const monthKey = now3.toLocaleDateString("en-CA", {
+        timeZone: getTz()
+      }).slice(0, 7);
+      const stepTarget = profileData?.step_target || 8000;
+      const mSteps = (fitbitData.steps || []).filter(x => x.date.startsWith(monthKey));
+      const mWorkouts = (fitbitData.workouts || []).filter(w => w.date.startsWith(monthKey));
+      const activeDates = new Set([...mSteps.filter(x => x.steps >= stepTarget).map(x => x.date), ...mWorkouts.map(w => w.date)]);
+      const cat = c => mWorkouts.filter(w => getActivityCategory(w.type, profileData?.activity_mapping) === c).length;
+      const totalSteps = mSteps.reduce((s, x) => s + x.steps, 0);
+      const protDays = Object.entries(allFood).filter(([d, meals]) => d.startsWith(monthKey) && meals.reduce((s, e) => s + (e.p || 0), 0) >= protTgt).length;
+      const name = (profileData?.name || "My").split(" ")[0];
+      const todayIL3 = now3.toLocaleDateString("en-CA", {
+        timeZone: getTz()
+      });
+      const dayNum = parseInt(todayIL3.slice(8), 10);
+      const lastDay = new Date(parseInt(todayIL3.slice(0, 4)), parseInt(todayIL3.slice(5, 7)), 0).getDate();
+      const monthLabel = now3.toLocaleDateString("en-GB", {
+        month: "long",
+        year: "numeric",
+        timeZone: getTz()
+      });
+      const monthShort = now3.toLocaleDateString("en-GB", {
+        month: "short",
+        timeZone: getTz()
+      });
+      const monthPeriod = dayNum >= lastDay ? `Full month · ${monthLabel}` : `${monthLabel} · 1–${dayNum} ${monthShort} so far`;
+      shareStatsCard({
+        heading: `${name === "My" ? "My" : name + "'s"} month`,
+        subheading: monthPeriod,
+        rows: [{
+          label: "Active days",
+          value: String(activeDates.size),
+          color: "#0f7b5f"
+        }, {
+          label: "Total steps",
+          value: totalSteps.toLocaleString(),
+          color: "#0f7b5f"
+        }, {
+          label: "Strength sessions",
+          value: String(cat("strength")),
+          color: "#4a42b0"
+        }, {
+          label: "Mobility · Cardio",
+          value: `${cat("mobility")} · ${cat("cardio")}`,
+          color: "#b35a1f"
+        }, ...(protDays ? [{
+          label: "Protein goal hit",
+          value: `${protDays} days`,
+          color: "#a05f0a"
+        }] : [])],
+        footer: `shared ${now3.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          timeZone: getTz()
+        })}`
+      });
+    },
+    style: {
+      ...s.btn("s"),
+      ...s.btnSm,
+      fontSize: 11,
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "share",
+    size: 13
+  }), " Share my month")));
+}
+
 // ── PROGRESS TAB (Phase 6) ──────────────────────────────────────────────────
 // "How am I doing against what I said I wanted?"
 // Upper section is what is MOVING; lower section is what is SET, collapsed,
@@ -13684,7 +13697,7 @@ function TabProgress({
     allFood: allFood,
     protTgt: protTgt,
     profileData: profileData
-  }), /*#__PURE__*/React.createElement(SecLabel, null, "Over time"), /*#__PURE__*/React.createElement(MonthlyMetrics, {
+  }), /*#__PURE__*/React.createElement(MonthPanel, {
     fitbitData: fitbitData,
     allFood: allFood,
     protTgt: protTgt,
