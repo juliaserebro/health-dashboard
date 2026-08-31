@@ -96,6 +96,8 @@ create table if not exists profiles (
   activity_targets jsonb,
   step_target integer,
   protein_target integer,
+  calorie_target integer,    -- optional (Phase 3.2). If missing:
+                             -- alter table profiles add column calorie_target integer;
   active_days_target integer,
   height_cm numeric,
   weight_kg numeric,
@@ -105,6 +107,8 @@ create table if not exists profiles (
   health_notes text,
   workout_plan text,
   cycle_tracking boolean,
+  conditions jsonb,          -- durable conditions (Phase 5.3). If missing:
+                             -- alter table profiles add column conditions jsonb;
   timezone text,
   fitbit_connected boolean,
   onboarding_complete boolean
@@ -1530,19 +1534,6 @@ async function checkMilestones(profileData, last30Days) {
 // Shared 14-day log digest with relevance triage. The model does the routine-vs-
 // serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
 // movement-limiting issues stay active until a newer entry says they resolved.
-function buildLogContext(logEntries){
-  // Calendar days in the active timezone (an entry from 9pm yesterday is
-  // YESTERDAY this morning — never 24h-block arithmetic), triple-labelled,
-  // pre-bucketed so the model never computes recency itself.
-  const all=(logEntries||[])
-    .filter(e=>e.dt)
-    .map(e=>({...e,dk:tsToDayKey(e.dt),ago:calDaysAgo(tsToDayKey(e.dt))}))
-    .filter(e=>e.ago>=0&&e.ago<=14)
-    .sort((a,b)=>a.ago-b.ago||String(b.dt).localeCompare(String(a.dt))); // newest first
-  if(!all.length) return "USER LOGS (last 14 days): none.";
-
-  // SEVERITY-AWARE TRUNCATION. Recency-only truncation treated a Pain entry as
-
 // ── DURABLE CONDITIONS (Phase 5.3 / 5.4 / 5.5) ──────────────────────────────
 // A circumstance is not a point-in-time note. Surgery is not a note dated
 // 18 August; it is a condition still true in September.
@@ -1568,11 +1559,6 @@ const DURATION_LABEL = (k)=>(DURATIONS.find(d=>d[0]===k)||[,"Just today"])[1];
 // How long the "recently ended" prompt lingers on Today before lapsing.
 const GRACE_DAYS = 2;
 
-function addDaysKey(dayKey, n){
-  const [y,m,d] = String(dayKey).split("-").map(Number);
-  const dt = new Date(y, m-1, d+n, 12);
-  return dt.toLocaleDateString("en-CA");
-}
 function expectedEndOf(cond){
   if(!cond || !cond.start_date) return null;
   if(cond.expected_end !== undefined && cond.expected_end !== null) return cond.expected_end;
@@ -1635,9 +1621,9 @@ function lapseCondition(cond){
 // ── ACTIVE CONDITIONS LINE (Phase 2.4) ──────────────────────────────────────
 // "The coach knows: recovering from surgery, day 14". Renders nothing at all
 // when nothing is active, so an ordinary day is not decorated with an empty box.
-function ActiveConditionsLine({logEntries, onResolve, onExtend, onLapse}){
+function ActiveConditionsLine({conditions, onResolve, onExtend, onLapse}){
   const todayKey = todayKeyTz();
-  const conds = (logEntries||[]).filter(e=>e && e.condition).map(e=>e.condition);
+  const conds = conditions||[];
   const active = conditionsOn(conds, todayKey);
   const ended  = conds.filter(c=>recentlyEnded(c, todayKey));
   if(!active.length && !ended.length) return null;
@@ -1713,6 +1699,20 @@ function isPainEntry(entry){
 function painEntriesOn(logEntries, dayKey){
   return (logEntries||[]).filter(e=>e && e.dt && tsToDayKey(e.dt)===dayKey && isPainEntry(e));
 }
+
+function buildLogContext(logEntries){
+  // Calendar days in the active timezone (an entry from 9pm yesterday is
+  // YESTERDAY this morning — never 24h-block arithmetic), triple-labelled,
+  // pre-bucketed so the model never computes recency itself.
+  const all=(logEntries||[])
+    .filter(e=>e.dt)
+    .map(e=>({...e,dk:tsToDayKey(e.dt),ago:calDaysAgo(tsToDayKey(e.dt))}))
+    .filter(e=>e.ago>=0&&e.ago<=14)
+    .sort((a,b)=>a.ago-b.ago||String(b.dt).localeCompare(String(a.dt))); // newest first
+  if(!all.length) return "USER LOGS (last 14 days): none.";
+
+  // SEVERITY-AWARE TRUNCATION. Recency-only truncation treated a Pain entry as
+
   // equal to a General Note. Pain/discomfort and post-workout entries are never
   // dropped inside the window (they drive the rest-vs-train rules and
   // progression); overflow sheds general notes first, then life context, then
@@ -1795,7 +1795,15 @@ function buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbi
   const suppsCtx = (profileData?.supplements||[]).filter(s=>s.name).length>0 ? '\nSUPPLEMENTS: '+(profileData.supplements.filter(s=>s.name).map(s=>`${s.name} ${s.dose||''} ${s.timing?'('+s.timing+')':''}`).join(', ')) : '';
   const sensCtx = (profileData?.food_sensitivities||[]).length>0 ? `\nFOOD SENSITIVITIES & RESTRICTIONS: ${profileData.food_sensitivities.join(', ')}. NEVER suggest foods that conflict with these.` : '';
   // STRENGTH SESSION RULE applied here: goals described without body-part framing
-  return goalsCtx + actTargCtx + suppsCtx + sensCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a recent pain/discomfort log entry (per the LOG RELEVANCE RULES below) or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}.
+  // Phase 5.3 — active conditions reach the coach every day they are active,
+  // which is the point: a fortnight of disruption used to reach it once.
+  const _activeConds = conditionsOn(profileData?.conditions, todayKeyTz());
+  const condCtx = _activeConds.length
+    ? `\nACTIVE CIRCUMSTANCES (still true today, carried forward from when they were logged): `
+      + _activeConds.map(c=>`${c.text} (day ${daysElapsed(c, todayKeyTz())+1})`).join("; ")
+      + `. Take these into account; do not treat them as new news each day.`
+    : '';
+  return goalsCtx + actTargCtx + suppsCtx + sensCtx + condCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a recent pain/discomfort log entry (per the LOG RELEVANCE RULES below) or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}.
 
 ${logCtx}`;
 }
@@ -2030,7 +2038,17 @@ function evaluateInsight(ins, m){
   return {...ins, content, invalid, resolvedText};
 }
 
-function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null}) {
+function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, aiRefreshTick=0, fitbitData={sleep:[],steps:[],workouts:[]}, profileData=null, setProfileData}) {
+  // Condition actions live here because the "recently ended" prompt is on Today.
+  // Every one of them is user-initiated: nothing resolves by inference (5.4).
+  const _saveConds = async (next)=>{
+    setProfileData&&setProfileData(p=>({...p, conditions:next}));
+    try{ await supa("POST","profiles",{uid:UID,conditions:next},"on_conflict=uid"); }catch(e){ console.log("Condition save failed:", e.message); }
+  };
+  const _mapCond = (c, fn)=>_saveConds((profileData?.conditions||[]).map(x=>x.id===c.id?fn(x):x));
+  const onResolveCondition = (c)=>_mapCond(c, x=>resolveCondition(x, todayKeyTz()));
+  const onExtendCondition  = (c)=>_mapCond(c, x=>extendCondition(x));
+  const onLapseCondition   = (c)=>_mapCond(c, x=>lapseCondition(x));
   const [aiToday, setAiToday] = useState(null);
   const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
@@ -3065,7 +3083,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
       {/* ── ACTIVE CONDITIONS (Phase 5.3) ────────────────────────
           What the coach is currently carrying. Renders only when something is
           active, so an ordinary day shows nothing at all. */}
-      <ActiveConditionsLine logEntries={logEntries}/>
+      <ActiveConditionsLine conditions={profileData?.conditions} onResolve={onResolveCondition} onExtend={onExtendCondition} onLapse={onLapseCondition}/>
 
       {/* ── WHAT YOU CAN STILL DO TODAY: changeable today ── */}
       <SecLabel>What you can still do today</SecLabel>
@@ -3593,7 +3611,7 @@ function FoodSensitivities({profileData, onSave}) {
 }
 
 // ── FOOD TAB ──────────────────────────────────────────────────────────────
-function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData, onSaveSupps, onSaveSensitivities}) {
+function TabFood({allFood, setAllFood, protTgt, apiKey, onFoodLogged, suppState={}, setSupp, profileData, onSaveSupps, onSaveSensitivities, onSaveCalorieTarget}) {
   const [foodDate, setFoodDate] = useState(tkey());
   const [showTxt, setShowTxt] = useState(false);
   const [txtInput, setTxtInput] = useState("");
@@ -3846,6 +3864,26 @@ Input: ${txt}`;
   const tc=food.reduce((s,e)=>s+(e.c||0),0);
   const tf=food.reduce((s,e)=>s+(e.f||0),0);
   const tk=food.reduce((s,e)=>s+(e.k||0),0);
+  // Optional by design (3.2): calories with no target are data, not a decision
+  // — but a target nobody asked for is a diet the app imposed.
+  const kcalTgt = profileData?.calorie_target || 0;
+  const [editKcal, setEditKcal] = useState(false);
+  const [kcalDraft, setKcalDraft] = useState(String(profileData?.calorie_target||""));
+  const [kcalErr, setKcalErr] = useState("");
+  async function saveKcalTarget(val){
+    const n = val===""?null:parseInt(val,10);
+    if(n!==null && (isNaN(n)||n<800||n>6000)){ setKcalErr("Enter a number between 800 and 6000, or clear it."); return; }
+    setKcalErr("");
+    try{
+      await supa("POST","profiles",{uid:UID,calorie_target:n},"on_conflict=uid");
+      if(onSaveCalorieTarget) onSaveCalorieTarget(n);
+      setEditKcal(false);
+    }catch(e){
+      setKcalErr(/column/i.test(String(e.message||e))
+        ? "Couldn't save — the database is missing the 'calorie_target' column. Run: alter table profiles add column calorie_target integer;"
+        : "Couldn't save — "+String(e.message||e).slice(0,90));
+    }
+  }
   const pct=Math.min(100,Math.round(tp/protTgt*100));
 
   const isToday = foodDate===tkey();
@@ -3974,7 +4012,8 @@ Input: ${txtInput}`;
     else msgs.push(`${Math.round(protTgt-tp)}g protein to go`);
     if(tc>250) msgs.push("carbs above range");
     if(tf>80) msgs.push("fat above range");
-    if(tk>2200) msgs.push("calories above range");
+    // Only speak about calories when she has told us what "too many" means.
+    if(kcalTgt && tk>kcalTgt*1.1) msgs.push("calories above target");
     return msgs.join(" · ");
   };
 
@@ -3987,13 +4026,46 @@ Input: ${txtInput}`;
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
-        {[["kcal",Math.round(tk),""],["protein",Math.round(tp)+"g",C.am],["carbs",Math.round(tc)+"g",C.or],["fat",Math.round(tf)+"g",C.t2]].map(([l,v,col])=>(
+        {[["kcal",Math.round(tk),"",kcalTgt?`of ${kcalTgt}`:null],["protein",Math.round(tp)+"g",C.am,`of ${protTgt}g`],["carbs",Math.round(tc)+"g",C.or,null],["fat",Math.round(tf)+"g",C.t2,null]].map(([l,v,col,sub])=>(
           <div key={l} style={{background:C.sf,borderRadius:8,border:`.5px solid ${C.bd}`,padding:"10px 12px",textAlign:"center"}}>
             <div style={{fontSize:18,fontWeight:600,color:col||C.tx}}>{v}</div>
-            <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l}</div>
+            <div style={{fontSize:10,color:C.t3,marginTop:2}}>{l}{sub?<span style={{opacity:.75}}> {sub}</span>:null}</div>
           </div>
         ))}
       </div>
+
+      {(editKcal||kcalTgt>0)&&(
+        <Card style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:kcalTgt?4:0,fontSize:13}}>
+            <span style={{fontWeight:500}}>Daily calorie target</span>
+            {!editKcal&&<button onClick={()=>{setKcalDraft(String(kcalTgt||""));setEditKcal(true);}} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>edit</button>}
+          </div>
+          {editKcal ? (
+            <div>
+              <div style={{display:"flex",gap:7,alignItems:"center",marginTop:8}}>
+                <input type="number" value={kcalDraft} onChange={e=>setKcalDraft(e.target.value)} placeholder="e.g. 2000" style={{...s.input,width:110,padding:"5px 9px",fontSize:12}}/>
+                <span style={{fontSize:12,color:C.t3}}>kcal</span>
+                <button onClick={()=>saveKcalTarget(kcalDraft)} style={{...s.btn("p"),...s.btnSm,fontSize:11}}>Save</button>
+                <button onClick={()=>{setEditKcal(false);setKcalErr("");}} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Cancel</button>
+                {kcalTgt>0&&<button onClick={()=>saveKcalTarget("")} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>remove</button>}
+              </div>
+              {kcalErr&&<div style={{fontSize:11,color:C.red,marginTop:7,lineHeight:1.5}}>{kcalErr}</div>}
+            </div>
+          ) : (
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+                <span style={{color:C.t2}}>{Math.round(tk)} kcal logged</span>
+                <span style={{color:C.t2}}>{kcalTgt} kcal</span>
+              </div>
+              <div style={s.pb}><div style={s.pf(Math.min(100,Math.round(tk/kcalTgt*100)),C.or)}/></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
+                <span>{Math.min(100,Math.round(tk/kcalTgt*100))}%</span>
+                <span>{Math.max(0,Math.round(kcalTgt-tk))} kcal remaining</span>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
 
       <Card>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
@@ -4264,6 +4336,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [openPhase, setOpenPhase] = useState(null);
   const [oneOffHelp, setOneOffHelp] = useState(false);
+  const [symStep, setSymStep] = useState("symptoms");
   const [cycleSaveErr, setCycleSaveErr] = useState("");
   const [rangeMin, setRangeMin] = useState("");
   const [rangeMax, setRangeMax] = useState("");
@@ -4375,8 +4448,11 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   }
   const ovForThisCycle=(cycleLog?.ovulation_reports||[]).find(r=>r.cycle_start===st.lastStart);
 
-  function openSymptom(dk){
+  // One sheet, two doors (4.4). Only the opening step differs: same code, same
+  // draft, same persistence — so there is no second place for anything to live.
+  function openSymptom(dk, step){
     const ex=symptomLogs[dk]||{};
+    setSymStep(step||"symptoms");
     setSymDate(dk);
     setSymDraft({bleed:ex.bleed||null,symptoms:ex.symptoms||[],
       mood:ex.mood||[],digestion:ex.digestion||[],discharge:ex.discharge||null,note:ex.note||""});
@@ -4578,7 +4654,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
           ):(
             <>
               <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6,marginBottom:8}}>Optional. If you notice signs of ovulation, telling the app roughly when helps it read the rest of your cycle more accurately.</div>
-              <button onClick={reportOvulation} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>I think I'm ovulating around now</button>
+              <button onClick={()=>openSymptom(tkey(),"ovulation")} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>I think I'm ovulating around now</button>
             </>
           )}
           {/* Discharge lives here, not in symptoms — it is how most people
@@ -4689,7 +4765,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
       <Card>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3}}>Today</div>
-          <button onClick={()=>openSymptom(tkey())} style={{...s.btn("p"),...s.btnSm,fontSize:11}}><Icon name="plus" size={12} color="#fff"/> Log symptoms</button>
+          <button onClick={()=>openSymptom(tkey(),"symptoms")} style={{...s.btn("p"),...s.btnSm,fontSize:11}}><Icon name="plus" size={12} color="#fff"/> Log symptoms</button>
         </div>
         {todaySym?(
           <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
@@ -4800,6 +4876,16 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label>
             <input type="date" value={symDate} onChange={e=>setSymDate(e.target.value)} style={{...s.input,marginBottom:16}}/>
 
+            {symStep==="ovulation"&&(
+              <div style={{background:C.al,border:`1px solid ${C.am}33`,borderRadius:10,padding:"12px 14px",marginBottom:6}}>
+                <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>Recording ovulation for this cycle</div>
+                <div style={{fontSize:11.5,color:C.t2,lineHeight:1.6,marginBottom:10}}>Roughly when is fine — it helps the app read the rest of your cycle. You can add cervical fluid and symptoms below in the same go.</div>
+                {ovForThisCycle
+                  ? <div style={{fontSize:12,color:C.am}}>Already recorded on {ovForThisCycle.date}.</div>
+                  : <button onClick={reportOvulation} style={{...s.btn("p"),...s.btnSm,fontSize:11.5}}>Yes, around today</button>}
+              </div>
+            )}
+
             <div style={head}>Bleeding</div>
             <div style={row}>
               {BLEED_LEVELS.map(([v,l])=>(
@@ -4808,14 +4894,19 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
               ))}
             </div>
 
-            <div style={head}>Mood</div>
-            <Chips list={SYMPTOMS_MOOD} sel={symDraft.mood} onTap={x=>{const n={...symDraft,mood:toggleIn(symDraft.mood,x)};setSymDraft(n);persistDraft(n);}}/>
+            {/* Mood moved to Log (Rule 2). Filing "happy" under Cycle would
+                assert the cause by the act of choosing where to log it, which
+                is exactly what the confounder layer exists to avoid. Stored
+                mood on existing entries is preserved and still displayed. */}
 
             <div style={head}>Physical</div>
             <Chips list={[...SYMPTOMS_PHYSICAL,...customSymptoms]} sel={symDraft.symptoms} onTap={x=>{const n={...symDraft,symptoms:toggleIn(symDraft.symptoms,x)};setSymDraft(n);persistDraft(n);}}/>
 
-            <div style={head}>Digestion</div>
-            <Chips list={SYMPTOMS_DIGESTION} sel={symDraft.digestion||[]} onTap={x=>{const n={...symDraft,digestion:toggleIn(symDraft.digestion||[],x)};setSymDraft(n);persistDraft(n);}}/>
+            {/* Digestion hidden, NOT removed. The coach is barred from making
+                any digestion-cycle claim pending evidence review, so the data
+                cannot currently be used and the taps were friction for nothing.
+                cleanDraft still round-trips d.digestion, the column is
+                untouched, and previously logged values still display. */}
 
             {/* Applies to the whole modal, not to any one category (5.3/5.4) */}
             <div style={head}>Add your own</div>
@@ -4894,22 +4985,46 @@ const LOG_CONFIRMATION_MESSAGES = {
   general_note: "Saved — noted for your coach.",
 };
 
-function TabLog({logEntries, setLogEntries}) {
-  const [selTag, setSelTag] = useState("post_workout");
+function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
+  // No category picker. The user writes or taps; the app derives the tag, and
+  // the only question asked back is how long it applies (Phase 5.1/5.3).
   const [txt, setTxt] = useState("");
-  const [confirmMsg, setConfirmMsg] = useState("");
+  const [moods, setMoods] = useState([]);
   const [ctxTags, setCtxTags] = useState([]);
+  const [painTxt, setPainTxt] = useState("");
+  const [noteTxt, setNoteTxt] = useState("");
+  const [duration, setDuration] = useState(null);   // null until they've entered something
+  const [confirmMsg, setConfirmMsg] = useState("");
+  const [saveErr, setSaveErr] = useState("");
 
-  async function addEntry(){
-    // Life Context can be logged from taps alone — no free text required
-    const isCtx = selTag==="life_context";
-    if(!txt.trim() && !(isCtx && ctxTags.length)) return;
-    const body = isCtx && ctxTags.length
-      ? ctxTags.join(", ") + (txt.trim() ? CONTEXT_SEP + txt.trim() : "")
-      : txt.trim();
-    const newEntry={id:Date.now(),dt:new Date().toISOString(),tag:selTag,txt:body};
-    try {
-      const rows=await supa("POST","journal_entries",{user_id:UID,tag:selTag,txt:body});
+  const conditions = profileData?.conditions || [];
+  const todayKey = todayKeyTz();
+
+  // Circumstances default to "a few days", feelings to "just today".
+  // Overriding should be rare, so the default is pre-selected rather than blank.
+  const suggestedDuration = ctxTags.length ? "days" : "today";
+  const effDuration = duration || suggestedDuration;
+  const hasEntry = !!(txt.trim() || moods.length || ctxTags.length);
+
+  async function persistConditions(next){
+    setProfileData(p=>({...p, conditions:next}));
+    try{
+      await supa("POST","profiles",{uid:UID,conditions:next},"on_conflict=uid");
+      setSaveErr("");
+    }catch(e){
+      // Never silent: this is user-entered data. If the column is missing the
+      // message says exactly what to do about it.
+      setSaveErr(/column/i.test(String(e.message||e))
+        ? "Couldn't save how long this applies — the database is missing the 'conditions' column. Run: alter table profiles add column conditions jsonb;"
+        : "Couldn't save to the server — "+String(e.message||e).slice(0,110)+". Kept on this device.");
+    }
+  }
+
+  async function saveEntry({body, tag, withDuration}){
+    if(!body.trim()) return;
+    const newEntry={id:Date.now(),dt:new Date().toISOString(),tag,txt:body.trim()};
+    try{
+      const rows=await supa("POST","journal_entries",{user_id:UID,tag,txt:body.trim()});
       if(rows&&rows[0]){newEntry.id=rows[0].id;newEntry.dt=rows[0].created_at;}
     }catch(e){}
     setLogEntries(prev=>{
@@ -4917,51 +5032,131 @@ function TabLog({logEntries, setLogEntries}) {
       if(!IS_DEMO) localStorage.setItem("jlog_backup",JSON.stringify(updated));
       return updated;
     });
-    setTxt(""); setCtxTags([]);
-    setConfirmMsg(LOG_CONFIRMATION_MESSAGES[selTag]||"Saved.");
-    setTimeout(()=>setConfirmMsg(""),2000);
+    if(withDuration){
+      const cond={id:newEntry.id, text:body.trim(), start_date:todayKey,
+                  duration_est:withDuration, expected_end:null, extensions:[], resolved_at:null};
+      cond.expected_end = expectedEndOf(cond);
+      await persistConditions([...conditions, cond]);
+    }
+    setConfirmMsg(withDuration&&withDuration!=="today"
+      ? "Saved — your coach will carry this until "+DURATION_LABEL(withDuration).toLowerCase()+" is up."
+      : "Saved. Your coach will keep this in mind.");
+    setTimeout(()=>setConfirmMsg(""),2600);
+  }
+
+  async function addMain(){
+    if(!hasEntry) return;
+    const parts=[...moods, ...ctxTags];
+    const body = parts.length ? parts.join(", ") + (txt.trim()?CONTEXT_SEP+txt.trim():"") : txt.trim();
+    // Derived, not chosen: the app classifies so the user doesn't have to.
+    const tag = ctxTags.length ? "life_context" : moods.length ? "energy_mood" : "general_note";
+    await saveEntry({body, tag, withDuration:effDuration});
+    setTxt(""); setMoods([]); setCtxTags([]); setDuration(null);
   }
 
   async function delEntry(id){
     setLogEntries(prev=>prev.filter(e=>e.id!==id));
+    if((profileData?.conditions||[]).some(c=>c.id===id))
+      await persistConditions((profileData.conditions||[]).filter(c=>c.id!==id));
     try{await supa("DELETE","journal_entries",null,"id=eq."+id);}catch(e){}
   }
 
+  const chip=(on)=>({fontFamily:"inherit",fontSize:12.5,fontWeight:500,padding:"7px 13px",borderRadius:20,
+    cursor:"pointer",background:on?C.pu:C.s2,color:on?"#fff":C.t2,border:`1px solid ${on?C.pu:C.bd}`});
+  const head={fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t2,margin:"14px 0 9px"};
+
   return (
     <div>
-      <div style={s.aiCard}>
-        <div style={s.aiLbl}><div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>How the AI coach uses this log</div>
-        <div style={{fontSize:12,color:C.tx,lineHeight:1.65}}>Every entry is read before generating recommendations. Log how workouts felt, pain or discomfort, sleep notes, energy and mood, or life context. The coach adjusts based on what you log here.</div>
-      </div>
+      {saveErr&&(
+        <div style={{background:C.rl,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.red,lineHeight:1.5}}>{saveErr}</div>
+      )}
 
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Add entry</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-          {LOG_ENTRY_TYPES.map(t=>{
-            const [bg,col]=TAG_STYLE[t.id]||[C.s2,C.t2];
-            const active=selTag===t.id;
-            return <button key={t.id} onClick={()=>setSelTag(t.id)} style={{fontSize:11,fontWeight:500,padding:"4px 10px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",background:bg,color:col,border:`1.5px solid ${active?col:"transparent"}`,opacity:active?1:.55}}>{t.icon} {t.label}</button>;
-          })}
-        </div>
-        {selTag==="life_context"&&(
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.t2,marginBottom:9}}>What's going on</div>
-            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-              {CONTEXT_TAGS.map(x=>{
-                const on=ctxTags.includes(x);
-                return <button key={x} onClick={()=>setCtxTags(p=>on?p.filter(y=>y!==x):[...p,x])}
-                  style={{fontFamily:"inherit",fontSize:12.5,fontWeight:500,padding:"7px 13px",borderRadius:20,cursor:"pointer",
-                    background:on?C.pu:C.s2,color:on?"#fff":C.t2,border:`1px solid ${on?C.pu:C.bd}`}}>{x}</button>;
-              })}
+      {/* Active conditions are surfaced on Today; here they are managed. */}
+      {conditionsOn(conditions, todayKey).length>0&&(
+        <>
+          <SecLabel>Still going</SecLabel>
+          <Card style={{marginBottom:14}}>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              {conditionsOn(conditions, todayKey).map(c=>(
+                <div key={c.id} style={{display:"flex",alignItems:"center",gap:9,fontSize:13}}>
+                  <span style={{flex:1,minWidth:0}}>{c.text}
+                    <span style={{color:C.t3,fontSize:11}}> · day {daysElapsed(c,todayKey)+1} · {DURATION_LABEL(c.duration_est).toLowerCase()}</span>
+                  </span>
+                  <button onClick={()=>persistConditions(conditions.map(x=>x.id===c.id?extendCondition(x):x))}
+                    style={{...s.btn("s"),...s.btnSm,fontSize:10.5}}>Extend</button>
+                  <button onClick={()=>persistConditions(conditions.map(x=>x.id===c.id?resolveCondition(x,todayKey):x))}
+                    style={{...s.btn("s"),...s.btnSm,fontSize:10.5}}>Resolve</button>
+                </div>
+              ))}
             </div>
-            <div style={{fontSize:10.5,color:C.t3,marginTop:7,lineHeight:1.5}}>These help your coach tell a rough week apart from a pattern — tap what applies, notes are optional.</div>
+          </Card>
+        </>
+      )}
+
+      <SecLabel>What&rsquo;s going on</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{...head,marginTop:0}}>How I&rsquo;m feeling</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {SYMPTOMS_MOOD.map(x=>(
+            <button key={x} onClick={()=>setMoods(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x])} style={chip(moods.includes(x))}>{x}</button>
+          ))}
+        </div>
+
+        <div style={head}>What&rsquo;s happening</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {CONTEXT_TAGS.map(x=>(
+            <button key={x} onClick={()=>setCtxTags(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x])} style={chip(ctxTags.includes(x))}>{x}</button>
+          ))}
+        </div>
+
+        <textarea value={txt} onChange={e=>setTxt(e.target.value)} rows={2}
+          placeholder="Anything else &mdash; how you&rsquo;re doing, what&rsquo;s going on"
+          style={{...s.input,resize:"vertical",fontFamily:"inherit",marginTop:14}}/>
+
+        {hasEntry&&(
+          <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${C.bd}`}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:3}}>How long do you think this will apply?</div>
+            <div style={{fontSize:11,color:C.t3,marginBottom:9}}>A rough guess is fine &mdash; you can change it later.</div>
+            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+              {DURATIONS.map(([k,label])=>(
+                <button key={k} onClick={()=>setDuration(k)} style={chip(effDuration===k)}>{label}</button>
+              ))}
+            </div>
           </div>
         )}
-        <textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder={selTag==="life_context"?"Optional detail":"Be specific — e.g. felt strong on push-ups today, energy dipped mid-afternoon."} style={{...s.input,resize:"vertical",minHeight:72,marginBottom:10}}/>
-        <button onClick={addEntry} disabled={!txt.trim()&&!(selTag==="life_context"&&ctxTags.length)}
-          style={{...s.btn("p"),opacity:(txt.trim()||(selTag==="life_context"&&ctxTags.length))?1:.5}}>Save entry</button>
+
+        <button onClick={addMain} disabled={!hasEntry}
+          style={{...s.btn("p"),opacity:hasEntry?1:.5,marginTop:14}}>Save</button>
         {confirmMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginTop:10}}>{confirmMsg}</div>}
       </Card>
+
+      {/* Pain gets its own section (Gate 2): it is neither a transient feeling
+          nor a circumstance, it is safety-relevant, and being filed here is
+          what makes the workout-safety gate structural rather than keyword-based. */}
+      <SecLabel>Pain or discomfort</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontSize:11.5,color:C.t3,marginBottom:9,lineHeight:1.5}}>Anything logged here stops your coach recommending training today.</div>
+        <textarea value={painTxt} onChange={e=>setPainTxt(e.target.value)} rows={2}
+          placeholder="Where, and what it feels like"
+          style={{...s.input,resize:"vertical",fontFamily:"inherit",marginBottom:10}}/>
+        <button onClick={async()=>{await saveEntry({body:painTxt,tag:"pain_discomfort",withDuration:null});setPainTxt("");}}
+          disabled={!painTxt.trim()} style={{...s.btn("p"),opacity:painTxt.trim()?1:.5}}>Log it</button>
+      </Card>
+
+      {/* 5.2 — some entries are neither state nor circumstance. Without a home
+          they get filed wrongly; the demo data already has "skipped workout —
+          long workday" under Post-Workout because nothing held "didn't happen". */}
+      <SecLabel>Just a note</SecLabel>
+      <Card style={{marginBottom:14}}>
+        <textarea value={noteTxt} onChange={e=>setNoteTxt(e.target.value)} rows={2}
+          placeholder="Anything that doesn&rsquo;t fit anywhere else"
+          style={{...s.input,resize:"vertical",fontFamily:"inherit",marginBottom:10}}/>
+        <button onClick={async()=>{await saveEntry({body:noteTxt,tag:"general_note",withDuration:null});setNoteTxt("");}}
+          disabled={!noteTxt.trim()} style={{...s.btn("s"),opacity:noteTxt.trim()?1:.5}}>Save note</button>
+      </Card>
+
+      {/* Health notes: permanent history, no duration asked. Moved from Profile. */}
+      <ProfileSections sections={["notes"]} profileData={profileData} setProfileData={setProfileData}/>
 
       <SecLabel>All entries</SecLabel>
       {logEntries.length===0
@@ -4971,14 +5166,16 @@ function TabLog({logEntries, setLogEntries}) {
           const [bg,col]=TAG_STYLE[dTag]||[C.s2,C.t2];
           const d=new Date(e.dt);
           const ds=d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+          const cond=(profileData?.conditions||[]).find(c=>c.id===e.id);
           return (
             <div key={e.id} style={{...s.card,marginBottom:8,padding:"12px 14px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                   <span style={{...s.pill(bg,col),fontSize:10}}>{TAG_LABELS[dTag]}</span>
                   <span style={{fontSize:10,color:C.t3}}>{ds}</span>
+                  {cond&&<span style={{...s.pill(C.pl,C.pu),fontSize:10}}>{cond.resolved_at?"ended":DURATION_LABEL(cond.duration_est)}</span>}
                 </div>
-                <button onClick={()=>delEntry(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14,padding:2}}>×</button>
+                <button onClick={()=>delEntry(e.id)} style={{background:"none",border:"none",color:C.t3,cursor:"pointer",fontSize:14,padding:2}}>&times;</button>
               </div>
               <div style={{fontSize:12,lineHeight:1.6}}>{e.txt}</div>
             </div>
@@ -6986,8 +7183,8 @@ export default function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
-      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
-      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities}/>}
+      {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData} setProfileData={setProfileData}/>}
+      {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities} onSaveCalorieTarget={(n)=>setProfileData(p=>({...p,calorie_target:n}))}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData}/>}
       {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt}/>}
