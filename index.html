@@ -3050,6 +3050,59 @@ const MODEL_MAIN = "claude-sonnet-5";
 const MODEL_FAST = "claude-haiku-4-5-20251001";
 const COACH_SCHEMA = 3; // 3 = running totals are {placeholders}, not literals
 
+// ── FOOD SENSITIVITY ENFORCEMENT ────────────────────────────────────────────
+// Measured, not assumed: with "NEVER suggest anything conflicting with: dairy,
+// eggs, whey" in the prompt, Haiku violated it 3/3 and Sonnet 2/3 - one reply
+// named a whey shake outright. A constraint that can be enforced in code must
+// never be left to the prompt. The prompt still states the rule (it improves
+// the odds); this filter is what actually guarantees it.
+const SENSITIVITY_TERMS = {
+  dairy: ["dairy", "milk", "cheese", "yoghurt", "yogurt", "cottage cheese", "cream", "butter", "kefir", "whey", "casein", "labneh", "ricotta", "mozzarella", "feta", "paneer", "skyr", "quark"],
+  lactose: ["dairy", "milk", "cheese", "yoghurt", "yogurt", "cream", "butter", "kefir", "ice cream"],
+  egg: ["egg", "eggs", "omelette", "omelet", "frittata", "shakshuka", "mayonnaise", "meringue", "quiche"],
+  whey: ["whey", "protein shake", "protein powder", "protein smoothie"],
+  gluten: ["gluten", "bread", "pasta", "wheat", "couscous", "cracker", "crackers", "pita", "bagel", "barley", "rye", "seitan", "tortilla", "wrap", "noodles"],
+  wheat: ["wheat", "bread", "pasta", "couscous", "cracker", "crackers", "pita", "bagel", "tortilla", "wrap"],
+  nut: ["nut", "nuts", "almond", "almonds", "walnut", "walnuts", "cashew", "cashews", "pistachio", "pistachios", "pecan", "pecans", "hazelnut", "hazelnuts", "peanut", "peanuts", "nut butter", "almond butter", "peanut butter"],
+  peanut: ["peanut", "peanuts", "peanut butter"],
+  soy: ["soy", "soya", "tofu", "edamame", "tempeh", "miso", "soy sauce"],
+  fish: ["fish", "salmon", "tuna", "cod", "sardine", "sardines", "anchovy", "anchovies", "mackerel", "trout", "herring"],
+  shellfish: ["shellfish", "shrimp", "prawn", "prawns", "crab", "lobster", "mussel", "mussels", "oyster", "oysters", "calamari", "squid"],
+  pork: ["pork", "bacon", "ham", "prosciutto", "chorizo", "salami", "pancetta"],
+  "red meat": ["beef", "steak", "lamb", "mince", "burger", "veal"],
+  meat: ["beef", "steak", "lamb", "chicken", "turkey", "pork", "mince", "burger", "bacon", "ham"],
+  caffeine: ["coffee", "espresso", "caffeine", "black tea", "green tea", "matcha", "cola"],
+  alcohol: ["wine", "beer", "alcohol", "spirits", "whisky", "vodka", "gin"],
+  sesame: ["sesame", "tahini", "halva", "hummus"],
+  legume: ["lentil", "lentils", "chickpea", "chickpeas", "bean", "beans", "hummus", "legume", "legumes"],
+  nightshade: ["tomato", "tomatoes", "pepper", "peppers", "aubergine", "eggplant", "potato", "potatoes"],
+  onion: ["onion", "onions", "shallot", "leek"],
+  garlic: ["garlic"],
+  vegetarian: ["beef", "steak", "lamb", "chicken", "turkey", "pork", "fish", "salmon", "tuna", "bacon", "ham", "meat"],
+  vegan: ["beef", "steak", "lamb", "chicken", "turkey", "pork", "fish", "salmon", "tuna", "bacon", "ham", "meat", "dairy", "milk", "cheese", "yoghurt", "yogurt", "egg", "eggs", "butter", "whey", "honey"]
+};
+// Everything she typed counts literally, plus anything a known category implies.
+function sensitivityTerms(list) {
+  const out = new Set();
+  (list || []).forEach(raw => {
+    const s = String(raw || "").toLowerCase().trim();
+    if (!s) return;
+    s.split(/[,/]|\bor\b|\band\b/).map(x => x.trim()).filter(Boolean).forEach(x => out.add(x));
+    Object.keys(SENSITIVITY_TERMS).forEach(k => {
+      if (s.includes(k)) SENSITIVITY_TERMS[k].forEach(t => out.add(t));
+    });
+  });
+  return [...out];
+}
+// Whole-word matching, so "nutrition" is not a nut and "creamy" is not cream.
+function violatesSensitivities(text, list) {
+  const t = " " + String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  return sensitivityTerms(list).filter(term => {
+    const tt = " " + String(term).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+    return tt.trim() && t.includes(tt);
+  });
+}
+
 // B.8 - what the coach's content is genuinely a function of. If any of this
 // changed, the time-based cache is stale no matter what the clock says; the
 // old cache could serve morning content over a night of new sleep data.
@@ -3098,14 +3151,38 @@ function usualMealHour(allFood, which) {
   hrs.sort((a, b) => a - b);
   return hrs[Math.floor(hrs.length / 2)];
 }
-// The gate is deterministic and free. A checkpoint that fires only to say
-// "you're doing fine" is a notification tax, so it stays silent when nothing
-// is off - and costs nothing when it does.
-function checkpointGate(kind, m, tgt) {
-  if (m.meals_today === 0) return {
-    say: true,
-    reason: "nothing logged yet today"
-  };
+// Has she normally logged something by this hour? Distinguishes "a gap in an
+// ordinary day" from "this is simply when she eats". Without it, someone who
+// habitually skips lunch gets nudged about it every single day.
+function typicallyEatenBy(allFood, hourDec) {
+  const days = Object.keys(allFood || {}).sort().slice(-14).filter(d => (allFood[d] || []).length > 0);
+  if (days.length < 5) return true; // too little history to justify silence
+  const hits = days.filter(d => (allFood[d] || []).some(e => {
+    const t = e.eaten_time || e.time;
+    if (!t) return false;
+    const h = parseInt(String(t).slice(0, 2), 10),
+      mi = parseInt(String(t).slice(3, 5), 10) || 0;
+    return !isNaN(h) && h + mi / 60 < hourDec;
+  })).length;
+  return hits / days.length >= 0.5;
+}
+// The gate is deterministic, free, and now the SOLE arbiter of silence: the
+// prompt's "reply null if there's nothing to say" escape hatch was measured at
+// 0/36 across both models, so it was decorative and has been removed. Every
+// decision to stay quiet is made here, in code, before anything is spent.
+function checkpointGate(kind, m, tgt, ctx) {
+  ctx = ctx || {};
+  if (m.meals_today === 0) {
+    // Nothing logged is only informative if she normally HAS logged by now.
+    if (ctx.typicalByNow === false) return {
+      say: false,
+      reason: "nothing logged, but that is her usual rhythm at this hour"
+    };
+    return {
+      say: true,
+      reason: "nothing logged yet today"
+    };
+  }
   const pace = kind === "midday" ? 0.40 : 0.65;
   if (m.protein_today < tgt * pace * 0.8) return {
     say: true,
@@ -3159,15 +3236,24 @@ const METRIC_UNITS = {
   workouts_today: "",
   protein_target: "g"
 };
-const METRIC_RE = /\{([a-z_]+)\}/g;
+// The trailing-unit group is deliberate: if the model writes "{protein_today}g"
+// the renderer would otherwise append its own unit and produce "121gg".
+// Caught at generation too - both, because one of them will eventually miss.
+const METRIC_RE = /\{([a-z_]+)\}(\s*(?:g|kcal|cal|grams|kilocalories|steps))?\b/g;
 function hasPlaceholder(text) {
   METRIC_RE.lastIndex = 0;
   return METRIC_RE.test(String(text || ""));
 }
+// "{protein_today}g" - the renderer appends the unit itself, so this would show
+// as "121gg". Measured once in 18 Sonnet replies, so it is rare, not absent.
+const DOUBLE_UNIT_RE = /\{[a-z_]+\}\s*(?:g|kcal|cal|grams|kilocalories|steps)\b/;
+function hasDoubleUnit(text) {
+  return DOUBLE_UNIT_RE.test(String(text || ""));
+}
 // Preferred path: the model emits {protein_today}; we substitute from live data.
 // No parsing, no ambiguity about which number is which.
 function fillPlaceholders(text, m) {
-  return String(text || "").replace(METRIC_RE, (full, key) => {
+  return String(text || "").replace(METRIC_RE, (full, key, trailingUnit) => {
     if (!Object.prototype.hasOwnProperty.call(m, key)) return full;
     const u = METRIC_UNITS[key] !== undefined ? METRIC_UNITS[key] : "";
     const v = m[key];
@@ -3694,7 +3780,9 @@ EVENT-RESPONSE RULES:
         // Validate the contract HERE, not at render: an insight that declares a
         // metric dependency but wrote a literal number would otherwise trade a
         // visible regex failure for an invisible one.
-        const violations = (content.domain_insights || []).filter(ins => ins.depends_on && ins.depends_on.metric && !hasPlaceholder(ins.content));
+        // A placeholder that is missing, OR one with a unit stuck to it, both
+        // break rendering. Catch each at generation, not on screen.
+        const violations = (content.domain_insights || []).filter(ins => ins.depends_on && ins.depends_on.metric && !hasPlaceholder(ins.content) || hasDoubleUnit(ins.content));
         if (violations.length && !_retriedPlaceholders.current) {
           _retriedPlaceholders.current = true;
           console.log("Coach: " + violations.length + " insight(s) used literal numbers instead of placeholders — regenerating once.");
@@ -3705,6 +3793,21 @@ EVENT-RESPONSE RULES:
           // Second attempt still non-compliant: keep them, but strip the stale
           // dependency so the legacy literal-substitution path handles them.
           console.log("Coach: placeholder contract still unmet — falling back to literal substitution.");
+        }
+        // Sensitivity enforcement on the main card too - the model is no more
+        // reliable here than it was at the checkpoint. Drop, do not display.
+        const _sens = profileData?.food_sensitivities || [];
+        if (_sens.length) {
+          const before = (content.domain_insights || []).length;
+          content.domain_insights = (content.domain_insights || []).filter(ins => {
+            const bad = violatesSensitivities(ins.content, _sens);
+            if (bad.length) console.log("Coach: dropped an insight naming a food sensitivity (" + bad.join(", ") + "): " + String(ins.content).slice(0, 80));
+            return bad.length === 0;
+          });
+          (content.domain_insights || []).forEach(ins => {
+            if (ins.suggests_food) ins.suggests_food = ins.suggests_food.filter(f => violatesSensitivities(f, _sens).length === 0);
+          });
+          if (before !== content.domain_insights.length) content._sensFiltered = true;
         }
         content._generatedAt = new Date().toISOString();
         content._schema = COACH_SCHEMA;
@@ -3767,7 +3870,10 @@ EVENT-RESPONSE RULES:
       cycleLog
     });
     const tgt = m.protein_target;
-    const gate = checkpointGate(kind, m, tgt);
+    const _cpHour = kind === "midday" ? Math.min(15.5, usualMealHour(allFood, "lunch") + 0.75) : Math.max(Math.min(15.5, usualMealHour(allFood, "lunch") + 0.75) + 2, usualMealHour(allFood, "dinner") - 2);
+    const gate = checkpointGate(kind, m, tgt, {
+      typicalByNow: typicallyEatenBy(allFood, _cpHour)
+    });
     // Mark the checkpoint taken either way - one look per day, whether or not
     // it had anything to say. Otherwise a quiet gate re-evaluates every 5 min.
     done[kind] = true;
@@ -3780,25 +3886,44 @@ EVENT-RESPONSE RULES:
     }
     const eaten = (allFood[todayKey] || []).map(e => e.n).filter(Boolean).join(", ") || "nothing logged yet";
     // C.3 - trimmed context. This task needs six numbers, not her whole profile.
-    const sys = `You are Julia's nutrition coach, checking in during the day. Reply with ONE short sentence, or the single word null if there is genuinely nothing useful to say.
+    // No "reply null" escape hatch: measured at 0/36 across both models, it was
+    // decorative. The gate above has already decided this is worth saying.
+    const sys = `You are Julia's nutrition coach, checking in during the day. Reply with ONE short sentence.
 TONE: tentative and warm, never scolding. She may well have eaten without logging it - never assert that she has not eaten, and never imply she has failed at anything.
-Write her running protein as the placeholder {protein_today} - never a literal number. The app substitutes the live value and adds units.`;
+Write her running protein as the placeholder {protein_today} - never a literal number, and never followed by a unit. The app substitutes the live value and adds the unit itself, so "{protein_today}g" renders wrongly. Write "{protein_today}", not "{protein_today}g".`;
     const usr = `Time of day: ${kind === "midday" ? "early afternoon" : "late afternoon, a few hours before her usual dinner"}.
 Logged so far (never suggest any of these again): ${eaten}
 Protein logged: ${Math.round(m.protein_today)}g against a ${tgt}g target. Meals logged: ${m.meals_today}.
 Why this check-in opened: ${gate.reason}.
 ${(profileData?.food_sensitivities || []).length ? "NEVER suggest anything conflicting with: " + profileData.food_sensitivities.join(", ") + "." : ""}
 Suggest at most one concrete, easy thing she could still eat today.`;
+    const _sens = profileData?.food_sensitivities || [];
+    let txt = "";
     try {
-      const raw = await callCoachAI(usr, sys, {
-        model: MODEL_FAST,
-        maxTokens: 120,
-        cache: false
-      });
-      const txt = raw.replace(/```/g, "").trim();
-      if (!txt || txt.toLowerCase() === "null") {
-        console.log("Coach checkpoint (" + kind + "): model had nothing to add.");
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const extra = attempt === 0 ? "" : "\n\nYour previous reply named something she cannot eat. Suggest something else entirely.";
+        const raw = await callCoachAI(usr + extra, sys, {
+          model: MODEL_FAST,
+          maxTokens: 120,
+          cache: false
+        });
+        const cand = raw.replace(/```/g, "").trim();
+        const bad = violatesSensitivities(cand, _sens);
+        if (!bad.length) {
+          txt = cand;
+          break;
+        }
+        console.log("Coach checkpoint (" + kind + "): reply named a sensitivity (" + bad.join(", ") + ") - " + (attempt === 0 ? "retrying once." : "dropping it."));
+      }
+      // Saying nothing is always safe. Saying something she cannot eat is not.
+      if (!txt) {
         return;
+      }
+      if (hasDoubleUnit(txt)) {
+        // Cheaper to repair than to regenerate, and the render guard would catch
+        // it anyway; strip the stray unit so both layers agree.
+        txt = txt.replace(/(\{[a-z_]+\})\s*(?:g|kcal|cal|grams|kilocalories|steps)\b/g, "$1");
+        console.log("Coach checkpoint (" + kind + "): stripped a unit stuck to a placeholder.");
       }
       const ins = {
         type: "food_pattern",
