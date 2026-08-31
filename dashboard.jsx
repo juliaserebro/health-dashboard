@@ -1314,7 +1314,6 @@ TIER 2 (must hedge; prefer the user's own logged data over population claims): a
 TIER 3 (never say): phase-based training prescription (evidence is trivial/premature); sleep-architecture-by-phase claims (wearable studies found no phase effect — a symptom-disrupted night is symptom-driven, not architecture); supplement cycling.
 WELLBEING GUARDRAIL: if low mood, anxiety or mood swings appear repeatedly across cycles, do NOT present it as a pattern insight, do NOT quantify it back to her ("you logged low 6 times"), and never name a condition. If it seems persistent, the only appropriate response is a gentle, non-clinical note that it might be worth talking to someone she trusts or a clinician.
 DIGESTION: gut symptoms are collected but the cycle-phase evidence has not been reviewed — never assert a link between digestion and cycle phase.
-SYMPTOM-FREE DAYS: "feeling good" entries are real data (confirmed absence of symptoms), not missing data — you may acknowledge them positively.
 HARD BOUNDARIES: no diagnosis ever (not PMS, PMDD, iron deficiency, anovulation, or pregnancy — if logged mood suggests severe cyclical distress, suggest a conversation with a clinician without naming a condition). A bleed does not prove ovulation occurred — never assert ovulation happened. Real-time phase estimates are ALWAYS hedged regardless of confidence; only retrospectively-confirmed patterns anchored to logged bleeds may be stated plainly. When the cycle block above says phase is UNKNOWN or not tracked, make no cycle-based statements at all.
 
 BEHAVIORAL BASELINE (inferred from 14+ days of actual behaviour):
@@ -4037,7 +4036,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   const [editingPeriodLen, setEditingPeriodLen] = useState(false);
   const [showSymptom, setShowSymptom] = useState(false);
   const [symDate, setSymDate] = useState(tkey());
-  const [symDraft, setSymDraft] = useState({bleed:null,feelingGood:false,symptoms:[],mood:[],digestion:[],discharge:null,note:""});
+  const [symDraft, setSymDraft] = useState({bleed:null,symptoms:[],mood:[],digestion:[],discharge:null,note:""});
   const symTimer = React.useRef(null);
   const [customInput, setCustomInput] = useState("");
   const [ovHelp, setOvHelp] = useState(false);
@@ -4159,13 +4158,13 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
   function openSymptom(dk){
     const ex=symptomLogs[dk]||{};
     setSymDate(dk);
-    setSymDraft({bleed:ex.bleed||null,feelingGood:!!ex.feelingGood,symptoms:ex.symptoms||[],
+    setSymDraft({bleed:ex.bleed||null,symptoms:ex.symptoms||[],
       mood:ex.mood||[],digestion:ex.digestion||[],discharge:ex.discharge||null,note:ex.note||""});
     setShowSymptom(true);
   }
-  const cleanDraft=(d)=>({bleed:d.bleed||null,feelingGood:!!d.feelingGood,symptoms:d.symptoms||[],
+  const cleanDraft=(d)=>({bleed:d.bleed||null,symptoms:d.symptoms||[],
     mood:d.mood||[],digestion:d.digestion||[],discharge:d.discharge||null,note:(d.note||"").trim()});
-  const draftEmpty=(d)=>!d.bleed&&!d.feelingGood&&!d.discharge&&!(d.note||"").trim()
+  const draftEmpty=(d)=>!d.bleed&&!d.discharge&&!(d.note||"").trim()
     &&!(d.symptoms||[]).length&&!(d.mood||[]).length&&!(d.digestion||[]).length;
   // Every tap persists (debounced) so one symptom is two taps and done —
   // the Done button just dismisses.
@@ -4474,7 +4473,6 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
         </div>
         {todaySym?(
           <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
-            {todaySym.feelingGood&&<span style={{...s.pill(C.tl,C.teal),fontSize:10}}>✓ Feeling good</span>}
             {todaySym.bleed&&<span style={{...s.pill(C.rl,C.red),fontSize:10}}>🩸 {(BLEED_LEVELS.find(b=>b[0]===todaySym.bleed)||[,todaySym.bleed])[1]}</span>}
             {(todaySym.mood||[]).map(x=><span key={x} style={{...s.pill(C.al,C.am),fontSize:10}}>{x}</span>)}
             {(todaySym.symptoms||[]).map(x=><span key={x} style={{...s.pill(C.s2,C.t2),fontSize:10}}>{x}</span>)}
@@ -4494,7 +4492,7 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                 <div key={dk} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,padding:"4px 0"}}>
                   <span style={{color:C.t2,flex:"0 0 68px"}}>{fmtShort(dk)}</span>
                   <span style={{flex:1,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {[e.feelingGood?"✓ feeling good":null,e.bleed?"🩸"+(BLEED_LEVELS.find(b=>b[0]===e.bleed)||[,e.bleed])[1]:null,...(e.mood||[]),...(e.symptoms||[]),...(e.digestion||[])].filter(Boolean).join(", ")||e.note||"—"}
+                    {[e.bleed?"🩸"+(BLEED_LEVELS.find(b=>b[0]===e.bleed)||[,e.bleed])[1]:null,...(e.mood||[]),...(e.symptoms||[]),...(e.digestion||[])].filter(Boolean).join(", ")||e.note||"—"}
                   </span>
                   <button onClick={()=>openSymptom(dk)} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer"}}>edit</button>
                 </div>
@@ -4575,7 +4573,6 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             <button key={x} onClick={()=>onTap(x)} style={chip(sel.includes(x))}>{x}</button>
           ))}</div>
         );
-        const good=!!symDraft.feelingGood;
         return (
         <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)closeSymptom();}}>
           <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
@@ -4583,42 +4580,26 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
             <label style={{fontSize:11,color:C.t2,display:"block",marginBottom:3}}>Date</label>
             <input type="date" value={symDate} onChange={e=>setSymDate(e.target.value)} style={{...s.input,marginBottom:16}}/>
 
-            {/* Confirmed absence of symptoms is DATA — distinct from not logging */}
-            <button onClick={()=>{
-              const next=good?{...symDraft,feelingGood:false}
-                :{...symDraft,feelingGood:true,symptoms:[],mood:[],digestion:[]};
-              setSymDraft(next); persistDraft(next);
-            }} style={{width:"100%",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontFamily:"inherit",
-              fontSize:14,fontWeight:600,textAlign:"left",
-              background:good?C.tl:C.s2,color:good?C.teal:C.t2,
-              border:`1.5px solid ${good?C.tm:C.bd}`}}>
-              {good?"✓ ":""}Feeling good today
-            </button>
-            {good&&<div style={{fontSize:11,color:C.t3,marginTop:7,lineHeight:1.5}}>Noted as a symptom-free day — that's useful information, not just an empty one.</div>}
+            <div style={head}>Bleeding</div>
+            <div style={row}>
+              {BLEED_LEVELS.map(([v,l])=>(
+                <button key={v} onClick={()=>{const n={...symDraft,bleed:symDraft.bleed===v?null:v};setSymDraft(n);persistDraft(n);}}
+                  style={chip(symDraft.bleed===v)}>{l}</button>
+              ))}
+            </div>
 
-            {!good&&(<>
-              <div style={head}>Bleeding</div>
-              <div style={row}>
-                {BLEED_LEVELS.map(([v,l])=>(
-                  <button key={v} onClick={()=>{const n={...symDraft,bleed:symDraft.bleed===v?null:v};setSymDraft(n);persistDraft(n);}}
-                    style={chip(symDraft.bleed===v)}>{l}</button>
-                ))}
-              </div>
+            <div style={head}>Mood</div>
+            <Chips list={SYMPTOMS_MOOD} sel={symDraft.mood} onTap={x=>{const n={...symDraft,mood:toggleIn(symDraft.mood,x)};setSymDraft(n);persistDraft(n);}}/>
 
-              <div style={head}>Mood</div>
-              <Chips list={SYMPTOMS_MOOD} sel={symDraft.mood} onTap={x=>{const n={...symDraft,mood:toggleIn(symDraft.mood,x)};setSymDraft(n);persistDraft(n);}}/>
+            <div style={head}>Physical</div>
+            <Chips list={[...SYMPTOMS_PHYSICAL,...customSymptoms]} sel={symDraft.symptoms} onTap={x=>{const n={...symDraft,symptoms:toggleIn(symDraft.symptoms,x)};setSymDraft(n);persistDraft(n);}}/>
 
-              <div style={head}>Physical</div>
-              <Chips list={[...SYMPTOMS_PHYSICAL,...customSymptoms]} sel={symDraft.symptoms} onTap={x=>{const n={...symDraft,symptoms:toggleIn(symDraft.symptoms,x)};setSymDraft(n);persistDraft(n);}}/>
-
-              <div style={head}>Digestion</div>
-              <Chips list={SYMPTOMS_DIGESTION} sel={symDraft.digestion||[]} onTap={x=>{const n={...symDraft,digestion:toggleIn(symDraft.digestion||[],x)};setSymDraft(n);persistDraft(n);}}/>
-            </>)}
+            <div style={head}>Digestion</div>
+            <Chips list={SYMPTOMS_DIGESTION} sel={symDraft.digestion||[]} onTap={x=>{const n={...symDraft,digestion:toggleIn(symDraft.digestion||[],x)};setSymDraft(n);persistDraft(n);}}/>
 
             {/* Applies to the whole modal, not to any one category (5.3/5.4) */}
             <div style={head}>Add your own</div>
-            {!good&&(
-              <div style={{display:"flex",gap:6,marginBottom:10}}>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
                 <input value={customInput} onChange={e=>setCustomInput(e.target.value)}
                   onKeyDown={async e=>{if(e.key==="Enter"&&customInput.trim()){e.preventDefault();
                     const v=customInput.trim();
@@ -4634,9 +4615,8 @@ function TabCycle({cycleDates, setCycleDates, cycleLog, setCycleLog}) {
                   setSymDraft(n); setCustomInput("");
                   await saveCycleLog({custom_symptoms:[...customSymptoms,v],
                     symptom_logs:{...symptomLogs,[symDate]:cleanDraft(n)}});
-                }} style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:customInput.trim()?1:.5}}>Add</button>
-              </div>
-            )}
+              }} style={{...s.btn("s"),...s.btnSm,fontSize:11,opacity:customInput.trim()?1:.5}}>Add</button>
+            </div>
             <textarea value={symDraft.note} onChange={e=>setSymDraft(p=>({...p,note:e.target.value}))}
               onBlur={()=>persistDraft(symDraft)} rows={2}
               placeholder="Anything else that doesn't fit a tag — how you're feeling, what's going on"
