@@ -2133,7 +2133,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model, max_tokens:opts.maxTokens||600, system, messages:[{role:"user",content:userMessage}]})
+      body:JSON.stringify({model, thinking:{type:"disabled"}, max_tokens:opts.maxTokens||600, system, messages:[{role:"user",content:userMessage}]})
     });
     const d = await res.json();
     const _txt = extractText(d, "the coach response");
@@ -2609,7 +2609,7 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:MODEL_MAIN,max_tokens:400,messages:[{role:"user",content:buildCtx()+"\n\n"+prompt}]})
+      body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:400,messages:[{role:"user",content:buildCtx()+"\n\n"+prompt}]})
     });
     const d = await res.json();
     return extractText(d, "the weekly review");
@@ -3746,7 +3746,7 @@ Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
     const res=await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:MODEL_MAIN,max_tokens:700,messages:[{role:"user",content:prompt}]})
+      body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:700,messages:[{role:"user",content:prompt}]})
     });
     const d=await res.json();
     return JSON.parse(extractText(d, "the ingredient estimate").replace(/```json|```/g,"").trim());
@@ -3818,7 +3818,7 @@ Input: ${txt}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,max_tokens:2000,messages:[{role:"user",content:prompt}]})
+        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:2000,messages:[{role:"user",content:prompt}]})
       });
       const d = await res.json();
       const raw = extractText(d, "the meal estimate").replace(/```json|```/g,"").trim();
@@ -3904,7 +3904,7 @@ Input: ${txtInput}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: JSON.stringify({model:MODEL_MAIN,max_tokens:2000,messages:[{role:"user",content:prompt}]})
+        body: JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:2000,messages:[{role:"user",content:prompt}]})
       });
       const d = await res.json();
       const raw = extractText(d, "the meal estimate").replace(/```json|```/g,"").trim();
@@ -5309,7 +5309,7 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_FAST,max_tokens:150,messages:[{role:"user",content:
+        body:JSON.stringify({model:MODEL_FAST,thinking:{type:"disabled"}, max_tokens:150,messages:[{role:"user",content:
           `Workout plan:\n${text}\n\nHealth restrictions: ${healthNotes||"none"}\n\n"${ex.name}" is flagged: ${reason}\n\nSuggest ONE safe replacement that targets similar muscles. Reply with just the exercise line in this exact format (copy the weight/sets/rest style from the rest of the plan): Exercise name — weight · sets×reps · rest\nNo explanation.`
         }]})
       });
@@ -5464,7 +5464,7 @@ function ProfileSections({suppState, setSupp, profileData, setProfileData, fitbi
     setTweaking(true); setTweakErr("");
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,max_tokens:2500,messages:[{role:"user",content:
+        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:2500,messages:[{role:"user",content:
 `You are the client's personal trainer. The client tells you, in passing, an update about their workout plan. Apply it to the plan SURGICALLY.
 
 CLIENT SAYS: "${txt}"
@@ -5602,7 +5602,7 @@ FORMAT (exactly):
 - PLAIN TEXT ONLY: no markdown at all — no #, no **bold**, no ---, no bullet dashes. Headers are bare ALL-CAPS lines.
 Return ONLY the plan, nothing else.`;
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,max_tokens:4000,messages:[{role:"user",content:prompt}]})});
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:4000,messages:[{role:"user",content:prompt}]})});
       const d=await res.json();
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       const plan=d.content?.[0]?.text?.trim()||"";
@@ -5625,7 +5625,7 @@ Return ONLY the plan, nothing else.`;
     setAssessing(true);
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,max_tokens:1200,messages:[{role:"user",content:
+        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:1200,messages:[{role:"user",content:
 `You are an experienced, evidence-based personal trainer reviewing a client's current workout plan. Be honest and specific — this is a professional assessment, not encouragement.
 
 ${trainerContext()}
@@ -5674,7 +5674,7 @@ Max 250 words total. No intro, no outro.`}]})});
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:MODEL_FAST,max_tokens:2000,messages:[{role:"user",content:prompt}]})
+      body:JSON.stringify({model:MODEL_FAST,thinking:{type:"disabled"}, max_tokens:2000,messages:[{role:"user",content:prompt}]})
     });
     const d=await res.json();
     return d.content?.[0]?.text||"";
@@ -6598,7 +6598,7 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
     const goals=(profileData?.goals||[]).map(g=>g.label).join(', ')||'general fitness';
     const prompt=`You are a personal AI health coach. Write a "what I know about you" summary for this user.\n\nProfile: ${profileData?.name||'Julia'}, ${profileData?.gender||'female'}, goals: ${goals}\nBehavioral baseline: typical sleep ${bl.typical_sleep_hours||'?'}h, bedtime ${bl.typical_bedtime||'?'}, avg deep sleep ${bl.avg_deep_sleep_pct||'?'}%\nDetected patterns:\n${patterns}\nHealth notes: ${profileData?.health_notes||'none'}\n\nReturn 4–5 bullets, each a distinct thing you've learned about them, grouped by topic. Reference their actual baseline and strongest patterns; include one thing that makes them unique. Warm, direct, first person, so they feel genuinely seen.\n\nFORMAT — return ONLY these lines, each: topic emoji + short CAPS label + colon + one sentence. No intro or outro. Example shape:\n😴 YOUR SLEEP: <one sentence>\n💪 IN TRAINING: <one sentence>\n🥗 WITH FOOD: <one sentence>\n🌙 YOUR CYCLE: <one sentence>\n✨ WHAT STANDS OUT: <one sentence>`;
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,max_tokens:400,messages:[{role:"user",content:prompt}]})});
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:400,messages:[{role:"user",content:prompt}]})});
       const d=await res.json();
       const txt=d.content?.[0]?.text?.trim()||"";
       if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{} supa("POST","profiles",{uid:UID,coach_memory:txt},"on_conflict=uid").catch(()=>{});}
@@ -7136,7 +7136,7 @@ export default function App() {
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,max_tokens:400,system:"You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n"+buildCtxForChat(),messages:apiMsgs})
+        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:400,system:"You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n"+buildCtxForChat(),messages:apiMsgs})
       });
       const d=await res.json();
       const reply=d.content?.[0]?.text||"Error";

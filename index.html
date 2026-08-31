@@ -3717,6 +3717,9 @@ function TabDash({
       },
       body: JSON.stringify({
         model,
+        thinking: {
+          type: "disabled"
+        },
         max_tokens: opts.maxTokens || 600,
         system,
         messages: [{
@@ -4417,6 +4420,9 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
       },
       body: JSON.stringify({
         model: MODEL_MAIN,
+        thinking: {
+          type: "disabled"
+        },
         max_tokens: 400,
         messages: [{
           role: "user",
@@ -6861,6 +6867,9 @@ Item: ${descriptor}${qty ? ` — ${qty}${unit || ""}` : ""}`;
       },
       body: JSON.stringify({
         model: MODEL_MAIN,
+        thinking: {
+          type: "disabled"
+        },
         max_tokens: 700,
         messages: [{
           role: "user",
@@ -6991,6 +7000,9 @@ Input: ${txt}`;
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 2000,
           messages: [{
             role: "user",
@@ -7118,6 +7130,9 @@ Input: ${txtInput}`;
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 2000,
           messages: [{
             role: "user",
@@ -10670,6 +10685,9 @@ function WorkoutView({
         },
         body: JSON.stringify({
           model: MODEL_FAST,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 150,
           messages: [{
             role: "user",
@@ -10992,6 +11010,9 @@ function ProfileSections({
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 2500,
           messages: [{
             role: "user",
@@ -11210,6 +11231,9 @@ Return ONLY the plan, nothing else.`;
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 4000,
           messages: [{
             role: "user",
@@ -11250,6 +11274,9 @@ Return ONLY the plan, nothing else.`;
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 1200,
           messages: [{
             role: "user",
@@ -11328,6 +11355,9 @@ Max 250 words total. No intro, no outro.`
       },
       body: JSON.stringify({
         model: MODEL_FAST,
+        thinking: {
+          type: "disabled"
+        },
         max_tokens: 2000,
         messages: [{
           role: "user",
@@ -13703,6 +13733,9 @@ function CoachMemoryCard({
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 400,
           messages: [{
             role: "user",
@@ -14575,6 +14608,9 @@ function App() {
         },
         body: JSON.stringify({
           model: MODEL_MAIN,
+          thinking: {
+            type: "disabled"
+          },
           max_tokens: 400,
           system: "You are Julia's AI health coach inside her health dashboard app. Answer as the same coach that wrote today's in-app insights.\n\n" + buildCtxForChat(),
           messages: apiMsgs
