@@ -3323,46 +3323,6 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         })()}
       </Card>
 
-      {/* WEEK BY WEEK */}
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week</div>
-        {(()=>{
-            const now2=new Date();
-            const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:getTz()});
-            const [y2,m2,d2]=todayStr2.split("-").map(Number);
-            const dow2=new Date(y2,m2-1,d2).getDay();
-            // Current week Sunday (Israeli week starts Sunday)
-            const currSun=new Date(y2,m2-1,d2-daysSinceWeekStart(dow2));
-            // First tracked week: Sunday 7 Jun 2026 (June 1–6 was a partial pre-start week)
-            const firstSun=new Date(2026,5,7);
-            const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
-            const fmtRange=(sun)=>{const sat=new Date(sun);sat.setDate(sun.getDate()+6);return `${fmt(sun)} – ${fmt(sat)}`;};
-            const weeks=[];
-            const sun=new Date(firstSun);
-            while(sun<=currSun){
-              const sat=new Date(sun);sat.setDate(sun.getDate()+6);
-              const sunStr=sun.toLocaleDateString("en-CA",{timeZone:getTz()});
-              const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
-              const isCurr=sun.getTime()===currSun.getTime();
-              const wWorkouts=(fitbitData.workouts||[]).filter(wo=>wo.date>=sunStr&&wo.date<=satStr);
-              const wSteps=(fitbitData.steps||[]).filter(s=>s.date>=sunStr&&s.date<=satStr);
-              const totalSteps=wSteps.reduce((s,d)=>s+d.steps,0);
-              const woTypes=[...new Set(wWorkouts.map(wo=>wo.type))];
-              let detail="";
-              if(totalSteps>0||wWorkouts.length>0){
-                detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
-              }
-              weeks.push({label:`Week${isCurr?" ← current":""}`,range:fmtRange(new Date(sun)),detail,current:isCurr});
-              sun.setDate(sun.getDate()+7);
-            }
-            return weeks;
-        })().map((w,i,arr)=>(
-          <div key={i} style={{...s.wi,borderBottom:i<arr.length-1?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
-            <div><strong style={{fontSize:12,color:w.current?C.teal:C.tx}}>{w.label}</strong><span style={{fontSize:12,color:w.current?C.teal:C.t2,marginLeft:8}}>{w.range}</span></div>
-            <div style={{fontSize:12,color:w.current?C.teal:C.t2}}>{w.detail}</div>
-          </div>
-        ))}
-      </Card>
     </div>
   );
 }
@@ -6090,18 +6050,11 @@ Max 250 words total. No intro, no outro.`}]})});
       <Card style={{marginBottom:14}}>
         {editPlan ? (
           <>
-            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. AI will organise it and flag anything that conflicts with your health notes. Or let the AI trainer design the whole plan from your goals, targets and health notes.</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-              <span style={{fontSize:11,color:C.t2,whiteSpace:"nowrap"}}>Training setting:</span>
-              <select value={equip} onChange={e=>{const v=e.target.value;setEquip(v);persist({activity_targets:{...(profileData?.activity_targets||{}),equipment:v}});}} style={{...s.input,flex:1}}>
-                <option value="gym">Full gym</option>
-                <option value="home">Home — dumbbells & bands</option>
-                <option value="bodyweight">Bodyweight only</option>
-              </select>
-            </div>
-            {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("p"),marginBottom:10,width:"100%",justifyContent:"center"}}>
-              {processingPlan?<><Spinner/>Designing your plan...</>:<><Icon name="dumbbell" size={14} color="#fff"/> {workoutPlan.trim()?"Design a new plan (replaces current)":"Design a plan for me"}</>}
-            </button>}
+            {/* PHASE 8 — the app records training; it does not prescribe it.
+                Plan GENERATION is gone (the equipment picker and the intake
+                that fed it). Writing down what you actually do, and having it
+                organised and safety-checked against your health notes, stays. */}
+            <div style={{fontSize:11,color:C.t2,marginBottom:8,lineHeight:1.6}}>Write your exercises any way you like — weights, reps, whatever you know. It will be organised and anything that conflicts with your health notes flagged.</div>
             {planErr&&<div style={{fontSize:11.5,color:C.red,background:C.rl,borderRadius:8,padding:"8px 10px",marginBottom:10,lineHeight:1.5}}>{planErr}</div>}
             <textarea value={workoutPlan} onChange={e=>setWorkoutPlan(e.target.value)} placeholder="e.g. leg press 35kg 3x12, lat pulldown 20kg 3x12, plank 3x45s... or use Build a plan above" style={{...s.input,resize:"vertical",minHeight:110,marginBottom:8}}/>
             <div style={saveRow}>
@@ -6121,10 +6074,7 @@ Max 250 words total. No intro, no outro.`}]})});
           <>
             <WorkoutView text={workoutPlan} healthNotes={healthNotes} apiKey={apiKey} onUpdatePlan={async(newPlan)=>{setWorkoutPlan(newPlan);await persist({workout_plan:newPlan});}} onClearFlag={clearFlaggedExercise}/>
             <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-              {apiKey&&<button disabled={tweaking} onClick={()=>{setShowTweak(true);setTweakErr("");}} style={{...s.btn("p"),...s.btnSm}}>{tweaking?<><Spinner/>Updating...</>:<><Icon name="repeat" size={13} color="#fff"/> Update my plan</>}</button>}
               <button onClick={()=>setEditPlan(true)} style={{...s.btn("s"),...s.btnSm}}>Edit</button>
-              {apiKey&&<button disabled={assessing} onClick={assessPlan} style={{...s.btn("s"),...s.btnSm,opacity:assessing?.6:1}}>{assessing?<><Spinner/>Assessing...</>:<><Icon name="target" size={13}/> Assess my plan</>}</button>}
-              {apiKey&&<button disabled={processingPlan} onClick={()=>setShowIntake(true)} style={{...s.btn("s"),...s.btnSm,opacity:processingPlan?.6:1}}>{processingPlan?<><Spinner/>Designing...</>:<><Icon name="dumbbell" size={13}/> Design a new plan</>}</button>}
             </div>
             {planErr&&<div style={{fontSize:11.5,color:C.red,background:C.rl,borderRadius:8,padding:"8px 10px",marginTop:10,lineHeight:1.5}}>{planErr}</div>}
             {savedPlan&&<div style={{fontSize:12,color:C.teal,marginTop:10}}>{savedPlan}</div>}
@@ -6195,80 +6145,13 @@ Max 250 words total. No intro, no outro.`}]})});
         );
       })()}
 
-
-      {/* ── QUICK PLAN UPDATE: surgical free-text tweaks, no logging ritual ── */}
-      {showTweak&&(
-        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowTweak(false);}}>
-          <div style={s.modal}>
-            <h3 style={{fontSize:16,fontWeight:600,marginBottom:4}}>Update my plan</h3>
-            <p style={{fontSize:12,color:C.t2,marginBottom:6}}>Tell your coach what changed and it'll update just that part — the rest of your plan stays exactly as is.</p>
-            <div style={{fontSize:10.5,color:C.t3,marginBottom:8,lineHeight:1.5}}>e.g. "swapped leg press for hack squat" · "moved up to 40kg on rows, felt good" · "drop the plank, add dead bug" · "the shoulder press hurts, replace it"</div>
-            <textarea value={tweakText} onChange={e=>{setTweakText(e.target.value);setTweakErr("");}} rows={3} autoFocus
-              placeholder="What did you change or want to change?"
-              style={{...s.input,resize:"vertical",marginBottom:tweakErr?4:12,fontFamily:"inherit"}}/>
-            {tweakErr&&<div style={{fontSize:11,color:C.red,marginBottom:10}}>{tweakErr}</div>}
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-              <button onClick={()=>setShowTweak(false)} style={s.btn("s")}>Cancel</button>
-              <button disabled={!tweakText.trim()||tweaking} onClick={tweakPlan} style={{...s.btn("p"),opacity:tweakText.trim()&&!tweaking?1:.5}}>{tweaking?<><Spinner/>Applying...</>:"Apply update"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Quick plan update removed with generation (Phase 8): AI-driven
+          plan modification is prescription. The saved plan is still
+          editable by hand, and nothing in the database changed. */}
 
       {/* ── PLAN INTAKE WIZARD: the coach asks before prescribing ── */}
-      {showIntake&&(
-        <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)setShowIntake(false);}}>
-          <div style={{...s.modal,maxHeight:"90vh",overflowY:"auto"}}>
-            <h3 style={{fontSize:16,fontWeight:600,marginBottom:4}}>Let's design your plan</h3>
-            <p style={{fontSize:12,color:C.t2,marginBottom:16}}>A few questions first — like a trainer would ask. Your goals, weekly targets and health notes are already included.</p>
+      {/* Plan-design intake removed with generation (Phase 8). */}
 
-            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>How experienced are you with training?</label>
-            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
-              {[["new","New to structured training","start with the basics, focus on form"],["returning","Coming back after a break","rebuild gradually from a former base"],["regular","Training regularly 6+ months","normal progressive programming"]].map(([v,l,d])=>(
-                <div key={v} onClick={()=>setIntake(p=>({...p,experience:v}))} style={{padding:"10px 12px",border:`1.5px solid ${intake.experience===v?C.pu:C.bd}`,background:intake.experience===v?C.pl:C.sf,borderRadius:10,cursor:"pointer"}}>
-                  <div style={{fontSize:13,fontWeight:500}}>{l}</div>
-                  <div style={{fontSize:11,color:C.t3}}>{d}</div>
-                </div>
-              ))}
-            </div>
-
-            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>How long is a session for you?</label>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
-              {[30,45,60,90].map(m=>(
-                <button key={m} onClick={()=>setIntake(p=>({...p,session_min:m}))} style={{...s.btn(intake.session_min===m?"p":"s"),padding:"10px 0",justifyContent:"center"}}>{m}m</button>
-              ))}
-            </div>
-
-            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>Where do you train?</label>
-            <select value={equip} onChange={e=>setEquip(e.target.value)} style={{...s.input,marginBottom:14}}>
-              <option value="gym">Full gym</option>
-              <option value="home">Home — dumbbells & bands</option>
-              <option value="bodyweight">Bodyweight only</option>
-            </select>
-
-            {equip==="gym"&&(<>
-              <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:6}}>Machines or free weights?</label>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-                {[["machines","Machines"],["mix","Mix"],["free","Free weights"]].map(([v,l])=>(
-                  <button key={v} onClick={()=>setIntake(p=>({...p,style:v}))} style={{...s.btn(intake.style===v?"p":"s"),padding:"9px 0",justifyContent:"center",fontSize:12}}>{l}</button>
-                ))}
-              </div>
-            </>)}
-
-            <label style={{fontSize:12,fontWeight:600,color:C.t2,display:"block",marginBottom:4}}>Tell your coach anything else <span style={{fontWeight:400,color:C.t3}}>(optional)</span></label>
-            <div style={{fontSize:10.5,color:C.t3,marginBottom:6,lineHeight:1.5}}>What you've been doing and how it felt · machines or exercises you like or dislike · anything that doesn't feel right · "I want to mix things up" · days that work best</div>
-            <textarea value={intake.notes||""} onChange={e=>setIntake(p=>({...p,notes:e.target.value}))} rows={3}
-              placeholder="e.g. I've been doing the leg press and it feels great, but the lat pulldown hurts my shoulder — and I'm bored of my current routine, surprise me"
-              style={{...s.input,resize:"vertical",marginBottom:14,fontFamily:"inherit"}}/>
-
-            {workoutPlan.trim()&&<p style={{fontSize:11,color:C.am,marginBottom:12}}>Your current plan is remembered and used for continuity — the new one progresses from it rather than starting over.</p>}
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-              <button onClick={()=>setShowIntake(false)} style={s.btn("s")}>Cancel</button>
-              <button onClick={runIntakeAndSuggest} style={s.btn("p")}><Icon name="dumbbell" size={14} color="#fff"/> Design my plan</button>
-            </div>
-          </div>
-        </div>
-      )}
       </>}
     </div>
   );
@@ -6505,6 +6388,47 @@ function MonthPanel({fitbitData, allFood, protTgt, profileData}){
           }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:10}}><Icon name="share" size={13}/> Share my month</button>
         </Card>
 
+
+        {/* WEEK BY WEEK */}
+        <Card>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Week by week</div>
+          {(()=>{
+              const now2=new Date();
+              const todayStr2=now2.toLocaleDateString("en-CA",{timeZone:getTz()});
+              const [y2,m2,d2]=todayStr2.split("-").map(Number);
+              const dow2=new Date(y2,m2-1,d2).getDay();
+              // Current week Sunday (Israeli week starts Sunday)
+              const currSun=new Date(y2,m2-1,d2-daysSinceWeekStart(dow2));
+              // First tracked week: Sunday 7 Jun 2026 (June 1–6 was a partial pre-start week)
+              const firstSun=new Date(2026,5,7);
+              const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+              const fmtRange=(sun)=>{const sat=new Date(sun);sat.setDate(sun.getDate()+6);return `${fmt(sun)} – ${fmt(sat)}`;};
+              const weeks=[];
+              const sun=new Date(firstSun);
+              while(sun<=currSun){
+                const sat=new Date(sun);sat.setDate(sun.getDate()+6);
+                const sunStr=sun.toLocaleDateString("en-CA",{timeZone:getTz()});
+                const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
+                const isCurr=sun.getTime()===currSun.getTime();
+                const wWorkouts=(fitbitData.workouts||[]).filter(wo=>wo.date>=sunStr&&wo.date<=satStr);
+                const wSteps=(fitbitData.steps||[]).filter(s=>s.date>=sunStr&&s.date<=satStr);
+                const totalSteps=wSteps.reduce((s,d)=>s+d.steps,0);
+                const woTypes=[...new Set(wWorkouts.map(wo=>wo.type))];
+                let detail="";
+                if(totalSteps>0||wWorkouts.length>0){
+                  detail=`${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length!==1?"s":""}${woTypes.length?" · "+woTypes.join(", "):""}`;
+                }
+                weeks.push({label:`Week${isCurr?" ← current":""}`,range:fmtRange(new Date(sun)),detail,current:isCurr});
+                sun.setDate(sun.getDate()+7);
+              }
+              return weeks;
+          })().map((w,i,arr)=>(
+            <div key={i} style={{...s.wi,borderBottom:i<arr.length-1?`.5px solid ${C.bd}`:"none",...(w.current?{background:C.tl,borderRadius:6,padding:"7px 8px"}:{})}}>
+              <div><strong style={{fontSize:12,color:w.current?C.teal:C.tx}}>{w.label}</strong><span style={{fontSize:12,color:w.current?C.teal:C.t2,marginLeft:8}}>{w.range}</span></div>
+              <div style={{fontSize:12,color:w.current?C.teal:C.t2}}>{w.detail}</div>
+            </div>
+          ))}
+        </Card>
     </>
   );
 }
