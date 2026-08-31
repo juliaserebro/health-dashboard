@@ -1978,12 +1978,29 @@ const METRIC_UNITS={protein_today:"g",carbs_today:"g",kcal_today:" kcal",steps_t
 // The trailing-unit group is deliberate: if the model writes "{protein_today}g"
 // the renderer would otherwise append its own unit and produce "121gg".
 // Caught at generation too - both, because one of them will eventually miss.
-const METRIC_RE=/\{([a-z_]+)\}(\s*(?:g|kcal|cal|grams|kilocalories|steps))?\b/g;
+// The \b MUST live INSIDE the optional group. Trailing it after an optional
+// group meant that when no unit followed, the boundary had to hold right after
+// "}" -- and "}" is a non-word char, so "{protein_today} so far" never matched
+// and the raw token survived to the screen. This regression silently disabled
+// substitution for almost every real sentence.
+const METRIC_RE=/\{([a-z_]+)\}(\s*(?:g|kcal|cal|grams|kilocalories|steps)\b)?/g;
 function hasPlaceholder(text){ METRIC_RE.lastIndex=0; return METRIC_RE.test(String(text||"")); }
 // "{protein_today}g" - the renderer appends the unit itself, so this would show
 // as "121gg". Measured once in 18 Sonnet replies, so it is rare, not absent.
 const DOUBLE_UNIT_RE=/\{[a-z_]+\}\s*(?:g|kcal|cal|grams|kilocalories|steps)\b/;
 function hasDoubleUnit(text){ return DOUBLE_UNIT_RE.test(String(text||"")); }
+// Bug 2 — LAST LINE OF DEFENCE. Any {token} that survived substitution means a
+// metric we could not resolve. A wrong number is confusing; a code token on
+// screen makes the app look broken. Suppressing is always safe, so anything
+// still carrying a brace is not displayed.
+const ANY_TOKEN_RE=/\{[a-z_]+\}/i;
+function stillHasToken(text){ return ANY_TOKEN_RE.test(String(text||"")); }
+// Same guard for the free-text coach fields, which are not insights and so
+// never passed through evaluateInsight at all -- the actual hole behind Bug 2.
+function safeCoachText(text, m){
+  const filled = fillPlaceholders(text, m||{});
+  return stillHasToken(filled) ? null : filled;
+}
 // Preferred path: the model emits {protein_today}; we substitute from live data.
 // No parsing, no ambiguity about which number is which.
 function fillPlaceholders(text, m){
@@ -1991,7 +2008,12 @@ function fillPlaceholders(text, m){
     if(!Object.prototype.hasOwnProperty.call(m,key)) return full;
     const u=METRIC_UNITS[key]!==undefined?METRIC_UNITS[key]:"";
     const v=m[key];
-    return (typeof v==="number"?Math.round(v).toLocaleString():v)+u;
+    const num=(typeof v==="number"?Math.round(v).toLocaleString():v);
+    // Only DROP the trailing word when it would duplicate the unit we add
+    // ourselves. Metrics with no unit of their own (steps, meals, sessions)
+    // must keep it, or "{steps_today} steps" would render as a bare "0".
+    const keep = (!u && trailingUnit) ? trailingUnit : "";
+    return num+u+keep;
   });
 }
 
@@ -2360,6 +2382,12 @@ EVENT-RESPONSE RULES:
         const violations=(content.domain_insights||[]).filter(ins=>
           (ins.depends_on&&ins.depends_on.metric&&!hasPlaceholder(ins.content))
           || hasDoubleUnit(ins.content));
+        // The validator only ever checked domain_insights. headline / why /
+        // micro_workout are free text and were never checked NOR substituted,
+        // which is how a raw {protein_today} reached the screen.
+        const freeTextTokens=["headline","why","micro_workout"]
+          .filter(k=>content[k]&&stillHasToken(fillPlaceholders(content[k], liveMetrics({allFood, fitbitData, profileData, cycleLog}))));
+        if(freeTextTokens.length) console.log("Coach: unresolvable placeholder in "+freeTextTokens.join(", ")+" — suppressed at render.");
         if(violations.length&&!_retriedPlaceholders.current){
           _retriedPlaceholders.current=true;
           console.log("Coach: "+violations.length+" insight(s) used literal numbers instead of placeholders — regenerating once.");
@@ -2781,10 +2809,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                   <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:C.pu,textTransform:"uppercase"}}>{coachContent.isWeekly?"📋 Weekly letter":"🧠 Your coach"}</div>
                   {coachContent._generatedAt&&<div style={{fontSize:10,color:C.t3}}>{"Updated "+new Date(coachContent._generatedAt).toLocaleTimeString("en-GB",{timeZone:getTz(),hour:"2-digit",minute:"2-digit"})}</div>}
                 </div>
-                <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{coachContent.headline}</div>
+                <div style={{fontSize:13,color:coachContent.isLearning?C.t2:C.tx,lineHeight:1.65}}>{safeCoachText(coachContent.headline, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
                 {coachContent.why&&(
                   <div style={{overflow:"hidden",maxHeight:showWhy?"600px":"0",transition:"max-height .4s ease",marginTop:showWhy?6:0}}>
-                    <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{coachContent.why}</div>
+                    <div style={{fontSize:12,color:C.t2,lineHeight:1.6,paddingTop:4,borderTop:`.5px solid ${C.bd}`}}>{safeCoachText(coachContent.why, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
                   </div>
                 )}
                 {coachContent.why&&!coachContent.isLearning&&(
@@ -3020,7 +3048,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             const _evaluated = (coachContent?.domain_insights||[]).map(ins=>evaluateInsight(ins,_m));
             // B.5 - anything she has explicitly dismissed today stays gone, and
             // does not reappear as a "resolved" chip: dismissing is not resolving.
-            const domainInsights = _evaluated.filter(x=>!x.invalid && !dismissedTypes.includes(x.type));
+            const domainInsights = _evaluated.filter(x=>!x.invalid && !dismissedTypes.includes(x.type) && !stillHasToken(x.content));
             const resolvedInsights = _evaluated.filter(x=>x.invalid && !dismissedTypes.includes(x.type));
             // B.3 watch: if resolved outnumber active, the card has drifted from
             // coach into checklist — cap what we show so it can't take over.
@@ -3060,7 +3088,7 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 {coachContent?.micro_workout&&(
                   <div>
                     <div style={{fontSize:11,fontWeight:700,letterSpacing:".08em",color:C.t2,marginBottom:3}}>⚡ 5-min move</div>
-                    <div style={{fontSize:13,color:C.tx,lineHeight:1.6}}>{coachContent.micro_workout}</div>
+                    <div style={{fontSize:13,color:C.tx,lineHeight:1.6}}>{safeCoachText(coachContent.micro_workout, liveMetrics({allFood, fitbitData, profileData, cycleLog}))}</div>
                   </div>
                 )}
                 {/* B.5 - manual refresh. Rate limited because each press costs a
@@ -6291,6 +6319,58 @@ Max 250 words total. No intro, no outro.`}]})});
   );
 }
 
+// ── ERROR SURFACE (Bug 1) ───────────────────────────────────────────────────
+// The design intent was that failures are visible and actionable. A bare
+// JavaScript type error in the console is neither: the user sees a dead button
+// and the app looks broken with no way to report what happened. This catches
+// what the try/catch blocks around individual writes cannot -- render-time and
+// handler-time exceptions -- and puts the real message on screen where it can
+// be read and sent on.
+class ErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state={err:null}; }
+  static getDerivedStateFromError(err){ return {err}; }
+  componentDidCatch(err, info){ console.error("Caught by boundary:", err, info); }
+  render(){
+    if(!this.state.err) return this.props.children;
+    const msg = String(this.state.err && (this.state.err.message||this.state.err));
+    return (
+      <div style={{background:C.rl,border:`1px solid ${C.red}33`,borderRadius:12,padding:"16px 18px",marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:600,color:C.red,marginBottom:6}}>Something went wrong on this screen</div>
+        <div style={{fontSize:12,color:C.t2,lineHeight:1.6,marginBottom:10}}>
+          Your data is safe. Here is the exact error &mdash; copy it if you need to report it:
+        </div>
+        <div style={{fontSize:11,fontFamily:"ui-monospace,Menlo,monospace",color:C.tx,background:C.s2,
+          padding:"9px 11px",borderRadius:8,wordBreak:"break-word",lineHeight:1.5,marginBottom:10}}>{msg}</div>
+        <button onClick={()=>this.setState({err:null})} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Try again</button>
+      </div>
+    );
+  }
+}
+
+// Handler-time errors never reach a boundary, so catch them globally too.
+function GlobalErrorBanner(){
+  const [err, setErr] = useState(null);
+  React.useEffect(()=>{
+    const onErr = (e)=>setErr(String((e && e.message) || e));
+    const onRej = (e)=>setErr(String((e && e.reason && (e.reason.message||e.reason)) || "Unhandled promise rejection"));
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return ()=>{ window.removeEventListener("error", onErr); window.removeEventListener("unhandledrejection", onRej); };
+  },[]);
+  if(!err) return null;
+  return (
+    <div style={{background:C.rl,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:600,color:C.red,marginBottom:4}}>An error occurred</div>
+          <div style={{fontSize:11,fontFamily:"ui-monospace,Menlo,monospace",color:C.t2,wordBreak:"break-word",lineHeight:1.5}}>{err}</div>
+        </div>
+        <button onClick={()=>setErr(null)} style={{background:"none",border:"none",color:C.t3,fontSize:16,cursor:"pointer",lineHeight:1}}>&times;</button>
+      </div>
+    </div>
+  );
+}
+
 // ── COLLAPSIBLE SECTION ─────────────────────────────────────────────────────
 // Progress absorbs roughly ten elements and will be the least-visited tab.
 // Without real hierarchy it becomes the new Profile: the place things go to be
@@ -7183,11 +7263,14 @@ export default function App() {
         {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={s.tb(tab===t.id)}>{t.label}</button>)}
       </div>
 
+      <GlobalErrorBanner/>
+      <ErrorBoundary key={tab}>
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData} setProfileData={setProfileData}/>}
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities} onSaveCalorieTarget={(n)=>setProfileData(p=>({...p,calorie_target:n}))}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData}/>}
       {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt}/>}
+      </ErrorBoundary>
 
       {/* COACH CHAT BUTTON */}
       <button className="coachFab" onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
