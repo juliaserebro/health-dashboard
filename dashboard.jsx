@@ -1534,6 +1534,34 @@ async function checkMilestones(profileData, last30Days) {
 // Shared 14-day log digest with relevance triage. The model does the routine-vs-
 // serious distinction: soreness/tiredness/mood expire after 2 days; injuries and
 // movement-limiting issues stay active until a newer entry says they resolved.
+// ── API RESPONSE READING ────────────────────────────────────────────────────
+// Every call site used to do `d.content[0].text.trim()`, which assumes the
+// first content block is always a text block. It is not: the reported crash
+// was "undefined is not an object (evaluating 'd.content[0].text.trim')" --
+// note it failed on .trim, so content[0] EXISTED and .text did not. A non-text
+// leading block (e.g. a thinking block) breaks positional access.
+//
+// This reads responses defensively for all of them:
+//   - error responses are rejected before any indexing
+//   - the first block of type "text" is found, never assumed at index 0
+//   - a missing/empty content array throws a described error, not a TypeError
+//   - truncation is reported rather than silently producing invalid JSON
+function extractText(d, what){
+  const label = what || "the response";
+  if(!d || typeof d !== "object") throw new Error(`Couldn't read ${label} — empty response from the server.`);
+  if(d.error) throw new Error(d.error.message || `API error while reading ${label}.`);
+  const blocks = Array.isArray(d.content) ? d.content : [];
+  if(!blocks.length) throw new Error(`Couldn't read ${label} — the server returned no content${d.stop_reason?` (stop_reason: ${d.stop_reason})`:""}.`);
+  const textBlock = blocks.find(b => b && b.type === "text" && typeof b.text === "string");
+  if(!textBlock){
+    const kinds = blocks.map(b => (b && b.type) || "?").join(", ");
+    throw new Error(`Couldn't read ${label} — no text in the response (blocks: ${kinds}).`);
+  }
+  if(d.stop_reason === "max_tokens")
+    console.log(`WARNING: ${label} hit max_tokens — output was truncated and may not parse.`);
+  return textBlock.text.trim();
+}
+
 // ── DURABLE CONDITIONS (Phase 5.3 / 5.4 / 5.5) ──────────────────────────────
 // A circumstance is not a point-in-time note. Surgery is not a note dated
 // 18 August; it is a condition still true in September.
@@ -2108,10 +2136,10 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       body:JSON.stringify({model, max_tokens:opts.maxTokens||600, system, messages:[{role:"user",content:userMessage}]})
     });
     const d = await res.json();
-    if(d.error) throw new Error(d.error.message);
+    const _txt = extractText(d, "the coach response");
     const u = d.usage||{};
     console.log("Coach call ["+model+"] in="+(u.input_tokens||0)+" cache_write="+(u.cache_creation_input_tokens||0)+" cache_read="+(u.cache_read_input_tokens||0)+" out="+(u.output_tokens||0));
-    return d.content[0].text.trim();
+    return _txt;
   }
 
   // B.5 - dismissals are per-day and local: a dismissal is a statement about
@@ -2584,8 +2612,7 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
       body:JSON.stringify({model:MODEL_MAIN,max_tokens:400,messages:[{role:"user",content:buildCtx()+"\n\n"+prompt}]})
     });
     const d = await res.json();
-    if (d.error) throw new Error(d.error.message);
-    return d.content[0].text.trim();
+    return extractText(d, "the weekly review");
   }
 
   function renderBold(text) {
@@ -3719,11 +3746,10 @@ Item: ${descriptor}${qty?` — ${qty}${unit||""}`:""}`;
     const res=await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:MODEL_MAIN,max_tokens:300,messages:[{role:"user",content:prompt}]})
+      body:JSON.stringify({model:MODEL_MAIN,max_tokens:700,messages:[{role:"user",content:prompt}]})
     });
     const d=await res.json();
-    if(d.error) throw new Error(d.error.message);
-    return JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
+    return JSON.parse(extractText(d, "the ingredient estimate").replace(/```json|```/g,"").trim());
   }
 
   async function reestimateRow(ii){
@@ -3792,11 +3818,10 @@ Input: ${txt}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,max_tokens:800,messages:[{role:"user",content:prompt}]})
+        body:JSON.stringify({model:MODEL_MAIN,max_tokens:2000,messages:[{role:"user",content:prompt}]})
       });
       const d = await res.json();
-      if(d.error) throw new Error(d.error.message);
-      const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const raw = extractText(d, "the meal estimate").replace(/```json|```/g,"").trim();
       const fresh = JSON.parse(raw);
       setEditEntry(p=>({...p, n:fresh.n||p.n, det:fresh.det||txt,
         parsed_items:fresh.parsed_items||null,
@@ -3879,11 +3904,10 @@ Input: ${txtInput}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: JSON.stringify({model:MODEL_MAIN,max_tokens:800,messages:[{role:"user",content:prompt}]})
+        body: JSON.stringify({model:MODEL_MAIN,max_tokens:2000,messages:[{role:"user",content:prompt}]})
       });
       const d = await res.json();
-      if(d.error) throw new Error(d.error.message);
-      const raw = d.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const raw = extractText(d, "the meal estimate").replace(/```json|```/g,"").trim();
       const entry = JSON.parse(raw);
       entry.eaten_time = eatenTimeVal;
       entry.time = eatenTimeVal; // keep for display compat
@@ -3929,7 +3953,15 @@ Input: ${txtInput}`;
         : foodAck(entry, _dayAfter, protTgt));
       setTxtInput(""); setShowTxt(false);
       if(onFoodLogged) onFoodLogged();
-    } catch(e) { setAiMsg("Error: " + e.message); }
+    } catch(e) {
+      // A raw type error is not a usable failure message. Say what happened and
+      // that nothing was lost, then keep the exact detail for reporting.
+      const m=String(e.message||e);
+      setAiMsg(/Couldn't read/.test(m)
+        ? m+" Your text is still here — try Analyse again."
+        : "Couldn't analyse that meal — "+m.slice(0,120)+". Your text is still here, try again.");
+      console.error("Meal analysis failed:", e);
+    }
     setAnalysing(false);
   }
 
