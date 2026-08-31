@@ -1541,6 +1541,46 @@ function buildLogContext(logEntries){
   if(!all.length) return "USER LOGS (last 14 days): none.";
 
   // SEVERITY-AWARE TRUNCATION. Recency-only truncation treated a Pain entry as
+
+// ── PAIN DETECTION FOR THE WORKOUT-SAFETY GATE ──────────────────────────────
+// This gate used to be `/pain/i.test(todayLog)` over concatenated prose, so it
+// fired only on the literal word. "My knee is killing me", "sore shoulder",
+// "L4 flaring up" and "can't put weight on it" all passed through and the app
+// would go on to recommend a workout. Same lesson as the allergen filter and
+// the placeholder contract: a constraint enforceable in code must never depend
+// on the user happening to choose a particular word.
+//
+// The TAG is the marker. Prose matching survives only as a fallback for legacy
+// rows and for anything typed into a general note.
+//
+// NO SEVERITY. The data model has no severity concept and this pass does not
+// invent one — every pain entry gates identically. The one distinction drawn
+// below is CONTEXT, not severity: ordinary training soreness is expected (the
+// coach is explicitly told fatigue and soreness are normal during rebuilding),
+// so the soft terms are ignored inside a post-workout note and honoured
+// everywhere else.
+const PAIN_TAGS = ["pain_discomfort", "pain", "spine"];
+// Strong signals: injury language wherever it appears, post-workout included.
+const PAIN_STRONG_RE = /\b(pain|painful|hurts?|hurting|injur\w*|flare|flaring|flared|spasm\w*|sciatic\w*|numb|numbness|tingl\w*|throb\w*|pinched|herniat\w*|strain(?:ed|ing)?|sprain(?:ed|ing)?|twinge)\b|killing me|can'?t put weight|can'?t bend|can'?t lift|gave out/i;
+// Soft signals: normal after training, meaningful outside it.
+const PAIN_SOFT_RE = /\b(sore|soreness|ache|aches|aching|achy|stiff|stiffness|tender)\b/i;
+
+function isPainEntry(entry){
+  if(!entry) return false;
+  const tag = entry.tag || "";
+  // 1. Structured — the entry was filed as pain. No text inspection at all.
+  if(PAIN_TAGS.indexOf(tag) !== -1) return true;
+  const txt = entry.txt || "";
+  // 2. Fallback — legacy rows and free prose.
+  if(PAIN_STRONG_RE.test(txt)) return true;
+  const isPostWorkout = tag==="post_workout" || tag==="feedback" || tag==="postworkout" || tag==="training";
+  return !isPostWorkout && PAIN_SOFT_RE.test(txt);
+}
+// Structured gate input. Returns the entries themselves so the caller can quote
+// them; an empty array is an unambiguous "nothing blocking".
+function painEntriesOn(logEntries, dayKey){
+  return (logEntries||[]).filter(e=>e && e.dt && tsToDayKey(e.dt)===dayKey && isPainEntry(e));
+}
   // equal to a General Note. Pain/discomfort and post-workout entries are never
   // dropped inside the window (they drive the rest-vs-train rules and
   // progression); overflow sheds general notes first, then life context, then
@@ -2437,6 +2477,8 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
     // Today pain/mood log
     const todayLog = logEntries.filter(e=>e.dt&&tsToDayKey(e.dt)===todayFoodKey).map(e=>`[${e.tag}] ${e.txt}`).join("; ");
+    // Structured, not keyword-matched — see isPainEntry.
+    const painToday = painEntriesOn(logEntries, todayFoodKey);
     // This week food per day + workouts
     const weekFoodLines=[];
     const weekWorkoutLines=[];
@@ -2456,7 +2498,7 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const p = type==="today"
       ? `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}, current time in Israel: ${hourIL}:00. Julia is on ${cyclePhase}.
 ${isEvening?"⚠️ It is evening — the day for exercise is DONE. Do NOT suggest going to gym or training today under any circumstances.":""}
-${todayLog&&/pain/i.test(todayLog)?"⚠️ PAIN LOGGED TODAY: "+todayLog+" — Do not recommend any workout. Show FLAG first.":""}
+${painToday.length?"⚠️ PAIN LOGGED TODAY: "+painToday.map(e=>e.txt).join("; ")+" — Do not recommend any workout. Show FLAG first.":""}
 DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc||"none"}. Today's workout so far: ${todayActivity}. This week's workouts: ${weekWorkoutSummary}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
 TASK: Write exactly 3 sections:
 1. One insight connecting her sleep/recovery to her data (cycle phase, yesterday's activity, or nutrition).
