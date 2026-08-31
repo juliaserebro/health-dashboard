@@ -659,6 +659,7 @@ const ICON_PATHS = {
   dumbbell:  <><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5"/><path d="M6.5 12h11"/></>,
   target:    <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".5"/></>,
   repeat:    <><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></>,
+  progress:  <><path d="M3 21h18"/><path d="M6 21v-6M11 21V9M16 21v-9M21 21V5"/></>,
 };
 function Icon({name,size=16,color="currentColor",strokeWidth=2,style={}}) {
   const p = ICON_PATHS[name];
@@ -1542,6 +1543,137 @@ function buildLogContext(logEntries){
 
   // SEVERITY-AWARE TRUNCATION. Recency-only truncation treated a Pain entry as
 
+// ── DURABLE CONDITIONS (Phase 5.3 / 5.4 / 5.5) ──────────────────────────────
+// A circumstance is not a point-in-time note. Surgery is not a note dated
+// 18 August; it is a condition still true in September.
+//
+// There is deliberately NO "state vs circumstance" category. Classifying an
+// entry that way is a judgment the user should not have to make, and the app
+// does not need the answer: the only question it ever asks of the record is
+// "does this still apply tomorrow?", which the duration estimate answers.
+//
+// HISTORY IS NEVER REWRITTEN. Resolving ends a condition GOING FORWARD; the
+// window it was active stays flagged for ever, so a pattern computed later
+// still sees that period as disrupted. This is enforced structurally rather
+// than by discipline: there is no boolean anywhere, the row is never deleted,
+// start_date is never mutated, and "was it active on day D" is derived from
+// dates alone. See activeOn / conditionsOn below.
+const DURATIONS = [
+  ["today",   "Just today",   1],
+  ["days",    "A few days",   4],
+  ["weeks",   "A few weeks",  21],
+  ["ongoing", "Ongoing",      null],
+];
+const DURATION_LABEL = (k)=>(DURATIONS.find(d=>d[0]===k)||[,"Just today"])[1];
+// How long the "recently ended" prompt lingers on Today before lapsing.
+const GRACE_DAYS = 2;
+
+function addDaysKey(dayKey, n){
+  const [y,m,d] = String(dayKey).split("-").map(Number);
+  const dt = new Date(y, m-1, d+n, 12);
+  return dt.toLocaleDateString("en-CA");
+}
+function expectedEndOf(cond){
+  if(!cond || !cond.start_date) return null;
+  if(cond.expected_end !== undefined && cond.expected_end !== null) return cond.expected_end;
+  const row = DURATIONS.find(d=>d[0]===(cond.duration_est||"today"));
+  const span = row ? row[2] : 1;
+  return span===null ? null : addDaysKey(cond.start_date, span); // null = ongoing, no expiry
+}
+// The ONE definition of the active window. resolved_at closes it; otherwise the
+// estimate does; "ongoing" never closes on its own.
+function effectiveEndOf(cond){
+  if(cond && cond.resolved_at) return cond.resolved_at;
+  return expectedEndOf(cond); // null means open-ended
+}
+// Note the signature: a day is REQUIRED and there is no "now" default. A
+// function that cannot be called without a date cannot silently mean "today",
+// which is the mistake that would quietly erase history from suppression.
+function activeOn(cond, dayKey){
+  if(!cond || !cond.start_date || !dayKey) return false;
+  if(dayKey < cond.start_date) return false;
+  const end = effectiveEndOf(cond);
+  return end===null ? true : dayKey < end;
+}
+function conditionsOn(conditions, dayKey){
+  return (conditions||[]).filter(c=>activeOn(c, dayKey));
+}
+// Estimate has run out but the user has not said so. Shown on Today for a
+// couple of days: the estimate is likeliest to be wrong exactly where being
+// wrong matters, which is recovery.
+function recentlyEnded(cond, todayKey){
+  if(!cond || cond.resolved_at) return false;
+  const end = expectedEndOf(cond);
+  if(end===null) return false;               // ongoing never expires
+  return todayKey >= end && todayKey < addDaysKey(end, GRACE_DAYS);
+}
+function daysElapsed(cond, todayKey){
+  if(!cond || !cond.start_date) return 0;
+  const [ay,am,ad]=cond.start_date.split("-").map(Number);
+  const [by,bm,bd]=String(todayKey).split("-").map(Number);
+  return Math.round((new Date(by,bm-1,bd,12)-new Date(ay,am-1,ad,12))/864e5);
+}
+// Extending pushes expected_end OUT. A window can grow; it can never shrink.
+function extendCondition(cond){
+  const from = expectedEndOf(cond) || todayKeyTz();
+  const row = DURATIONS.find(d=>d[0]===(cond.duration_est||"days"));
+  const span = row && row[2] ? row[2] : 4;
+  return {...cond, expected_end: addDaysKey(from, span),
+    extensions:[...(cond.extensions||[]), {at:new Date().toISOString(), to:addDaysKey(from, span)}]};
+}
+// Resolving writes resolved_at and NOTHING else. start_date untouched, row
+// kept, no flag flipped -- the active window survives verbatim.
+function resolveCondition(cond, dayKey){
+  return {...cond, resolved_at: dayKey};
+}
+// Letting a prompt lapse un-actioned is an honest record of an estimate that
+// simply ran out: it closes at the estimate, not at the day it was ignored.
+function lapseCondition(cond){
+  return {...cond, resolved_at: expectedEndOf(cond)};
+}
+
+// ── ACTIVE CONDITIONS LINE (Phase 2.4) ──────────────────────────────────────
+// "The coach knows: recovering from surgery, day 14". Renders nothing at all
+// when nothing is active, so an ordinary day is not decorated with an empty box.
+function ActiveConditionsLine({logEntries, onResolve, onExtend, onLapse}){
+  const todayKey = todayKeyTz();
+  const conds = (logEntries||[]).filter(e=>e && e.condition).map(e=>e.condition);
+  const active = conditionsOn(conds, todayKey);
+  const ended  = conds.filter(c=>recentlyEnded(c, todayKey));
+  if(!active.length && !ended.length) return null;
+  return (
+    <div style={{marginBottom:14}}>
+      {active.length>0&&(
+        <div style={{background:C.pl,border:`1px solid ${C.pu}22`,borderRadius:10,padding:"10px 13px",marginBottom:ended.length?8:0}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.pu,marginBottom:5}}>The coach knows</div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {active.map((c,i)=>{
+              const d = daysElapsed(c, todayKey);
+              return (
+                <div key={c.id||i} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.tx}}>
+                  <span style={{flex:1,minWidth:0}}>{c.text}{d>0?<span style={{color:C.t3}}>, day {d+1}</span>:null}</span>
+                  {onResolve&&<button onClick={()=>onResolve(c)} title="Mark resolved"
+                    style={{background:"none",border:`1px solid ${C.bd}`,borderRadius:14,padding:"2px 9px",
+                      fontFamily:"inherit",fontSize:10.5,color:C.t2,cursor:"pointer"}}>Resolve</button>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {ended.map((c,i)=>(
+        <div key={"e"+(c.id||i)} style={{background:C.s2,border:`1px solid ${C.bd}`,borderRadius:10,padding:"10px 13px",marginBottom:6}}>
+          <div style={{fontSize:13,color:C.tx,marginBottom:7}}>{c.text} &mdash; ended. Still going?</div>
+          <div style={{display:"flex",gap:7}}>
+            {onExtend&&<button onClick={()=>onExtend(c)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Still going</button>}
+            {onLapse&&<button onClick={()=>onLapse(c)} style={{...s.btn("s"),...s.btnSm,fontSize:11}}>Yes, it&rsquo;s done</button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── PAIN DETECTION FOR THE WORKOUT-SAFETY GATE ──────────────────────────────
 // This gate used to be `/pain/i.test(todayLog)` over concatenated prose, so it
 // fired only on the literal word. "My knee is killing me", "sore shoulder",
@@ -1968,6 +2100,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
     generateAllCoachContent(true, "User asked for a manual refresh.");
   }
 
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const _retriedPlaceholders = React.useRef(false);
   async function generateAllCoachContent(forceRefresh=false, triggeringEvent=null) {
     if(forceRefresh===false) _retriedPlaceholders.current=false;
@@ -2815,7 +2948,19 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                 </div>
               );
             })()}
-            <div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+            {/* Phase 2.2 — the seven-row breakdown is developer-facing detail.
+                Verdict, score and the main-cost line answer "how am I today";
+                the arithmetic behind them expands on demand. */}
+            <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8,marginBottom:showBreakdown?10:0}}>
+              {contextNote}
+            </div>
+            <button onClick={()=>setShowBreakdown(v=>!v)} aria-expanded={showBreakdown}
+              style={{background:"none",border:"none",padding:"8px 0 0",fontFamily:"inherit",fontSize:11,
+                color:C.t3,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+              {showBreakdown?"Hide":"How this was scored"}
+              <span style={{transform:showBreakdown?"rotate(90deg)":"none",transition:"transform .18s",display:"inline-block"}}>&#9656;</span>
+            </button>
+            {showBreakdown&&<div style={{display:"flex",flexDirection:"column",gap:0,border:`.5px solid ${C.bd}`,borderRadius:8,overflow:"hidden",marginTop:10}}>
               {rows.map(([label,pts,col],i)=>(
                 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 10px",background:C.s2,borderBottom:i<rows.length-1?`.5px solid ${C.bd}`:"none"}}>
                   <span style={{color:C.t2}}>{label}</span>
@@ -2828,70 +2973,10 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
                   <span style={{fontWeight:600,color:C.teal}}>{`+${bonus}`}</span>
                 </div>
               )}
-            </div>
-            <div style={{fontSize:11,color:C.t3,padding:"7px 10px",background:C.s2,borderRadius:8}}>
-              {contextNote}
-            </div>
+            </div>}
           </Card>
         );
       })()}
-
-      {/* ── YOUR BODY TODAY: last night / not changeable today ── */}
-      <SecLabel>Your body today</SecLabel>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        {/* SLEEP LAST NIGHT (detailed breakdown) */}
-        <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
-            Last night — {new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}
-          </div>
-          {(()=>{
-            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-            const r=(fitbitData.sleep||[]).find(s=>s.date===todayStr);
-            if(!r) return <div style={{color:C.t3,fontSize:13}}>Not tracked last night</div>;
-            const h=Math.floor(r.total/60),m=r.total%60;
-            const tot=r.deep+r.rem+r.light+r.awake;
-            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
-            return (<>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                <div>
-                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
-                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
-                </div>
-                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#1a4a8a",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.sl,fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7aa8d8",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
-                </div>
-              </div>
-              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
-                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#1a4a8a"}}/>
-                <div style={{width:Math.round(r.rem/tot*100)+"%",background:C.sl}}/>
-                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#7aa8d8"}}/>
-                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
-              </div>
-              {todayNap&&(
-                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{color:C.sl,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
-                  <span style={{color:C.sl}}>{todayNap.total}min · {todayNap.deep}m deep</span>
-                </div>
-              )}
-            </>);
-          })()}
-        </Card>
-
-        {/* RESTING HR + CYCLE PHASE alongside the sleep breakdown */}
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {(()=>{
-            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(x=>x.rhr!=null);
-            const cur=(fitbitData.sleep||[]).find(x=>x.date===todayStr)?.rhr ?? recs[0]?.rhr ?? null;
-            return <Metric label="Resting HR" value={cur!=null?<span style={{color:C.sl}}>{cur}<span style={{fontSize:12,fontWeight:400}}> bpm</span></span>:<span style={{color:C.t3}}>—</span>} sub={cur!=null?"last night":"no data"} subColor={C.sl}/>;
-          })()}
-          <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
-        </div>
-      </div>
 
       {/* TODAY'S INSIGHTS */}
       {(apiKey||coachContent)&&(
@@ -2977,6 +3062,11 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         </div>
       )}
 
+      {/* ── ACTIVE CONDITIONS (Phase 5.3) ────────────────────────
+          What the coach is currently carrying. Renders only when something is
+          active, so an ordinary day shows nothing at all. */}
+      <ActiveConditionsLine logEntries={logEntries}/>
+
       {/* ── WHAT YOU CAN STILL DO TODAY: changeable today ── */}
       <SecLabel>What you can still do today</SecLabel>
 
@@ -3004,93 +3094,62 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         </div>
       </Card>
 
-      <hr style={s.hr}/>
-      <SecLabel>{(()=>{
-        const sun=getWeekStartDate();
-        const sat=getWeekEndDate();
-        const fmt=(d)=>d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
-        return `This week — ${fmt(sun)} – ${fmt(sat)}`;
-      })()}</SecLabel>
+      {/* ── YOUR BODY TODAY: last night / not changeable today ── */}
+      <SecLabel>Your body today</SecLabel>
 
-      <div style={s.mg}>
-        <WeeklyStepsMetric fitbitData={fitbitData}/>
-        <WeeklyWorkoutsMetric fitbitData={fitbitData}/>
-        <WeeklySleepMetric fitbitData={fitbitData}/>
-        <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
-      </div>
-
-      {/* THIS WEEK SO FAR — data only, always visible */}
-      {(()=>{
-        const weekStart=getWeekStartDate();
-        const weekKeys=Array.from({length:7},(_,i)=>{
-          const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
-          return d.toLocaleDateString("en-CA",{timeZone:getTz()});
-        });
-        const at=profileData?.activity_targets||{};
-        const workoutsThisWeek=(fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date));
-        const strengthDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").length;
-        const mobilityDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="mobility").length;
-        const cardioDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio").length;
-        const totalDone=strengthDone+mobilityDone+cardioDone;
-        const totalTarget=(at.strength||2)+(at.mobility||2)+(at.cardio||2);
-        const rows=[
-          ["Strength",strengthDone,at.strength||2],
-          ["Mobility",mobilityDone,at.mobility||2],
-          ["Cardio",cardioDone,at.cardio||2],
-        ];
-        return (
-          <div style={s.aiCard}>
-            <div style={s.aiLbl}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
-              This week so far
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:6}}>
-              {rows.map(([label,done,target])=>(
-                <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
-                  <span style={{color:C.t2}}>{label}</span>
-                  <span style={{fontWeight:600,color:done>=target?C.teal:C.tx}}>{done}<span style={{fontWeight:400,color:C.t3}}>/{target}</span></span>
-                </div>
-              ))}
-              <div style={{borderTop:`1px solid ${C.bd}`,paddingTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
-                <span style={{color:C.t2,fontWeight:500}}>Total</span>
-                <span style={{fontWeight:600,color:totalDone>=totalTarget?C.teal:C.tx}}>{totalDone}<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span></span>
-              </div>
-            </div>
-            <button onClick={()=>{
-              const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-              const stepsTotal=weekKeys.reduce((s,dk)=>{const r=(fitbitData.steps||[]).find(x=>x.date===dk);return s+(r?r.steps:0);},0);
-              const weekSleepRecs=(fitbitData.sleep||[]).filter(x=>weekKeys.includes(x.date));
-              const avgSleepMin=weekSleepRecs.length?Math.round(weekSleepRecs.reduce((s,r)=>s+r.total,0)/weekSleepRecs.length):0;
-              const protDays=weekKeys.filter(dk=>dk<=todayStr&&(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
-              const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
-              const dayName=(d)=>d.toLocaleDateString("en-GB",{weekday:"short"});
-              const sat=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+6);
-              const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
-              // Covered period: week start through today (or the full week if it's over)
-              const [ty2,tm2,td2]=todayStr.split("-").map(Number);
-              const todayD=new Date(ty2,tm2-1,td2);
-              const covEnd=todayStr>=satStr?sat:todayD;
-              const isFullWeek=todayStr>=satStr;
-              const period=isFullWeek
-                ?`Full week · ${fmt(weekStart)} – ${fmt(sat)}`
-                :`${dayName(weekStart)}–${dayName(covEnd)} so far · ${fmt(weekStart)} – ${fmt(covEnd)}`;
-              const name=(profileData?.name||"My").split(" ")[0];
-              shareStatsCard({
-                heading:`${name==="My"?"My":name+"'s"} week`,
-                subheading:period,
-                rows:[
-                  {label:"Total steps",value:stepsTotal.toLocaleString(),color:"#0f7b5f"},
-                  {label:"Training sessions",value:`${totalDone} of ${totalTarget}`,color:"#4a42b0"},
-                  {label:"Strength · Mobility · Cardio",value:`${strengthDone} · ${mobilityDone} · ${cardioDone}`,color:"#b35a1f"},
-                  ...(avgSleepMin?[{label:"Avg sleep",value:`${Math.floor(avgSleepMin/60)}h ${avgSleepMin%60}m`,color:"#2d65a8"}]:[]),
-                  ...(protDays?[{label:"Protein goal hit",value:`${protDays} day${protDays!==1?"s":""}`,color:"#a05f0a"}]:[]),
-                ],
-                footer:`shared ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
-              });
-            }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}><Icon name="share" size={13}/> Share my week</button>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {/* SLEEP LAST NIGHT (detailed breakdown) */}
+        <Card style={{marginBottom:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>
+            Last night — {new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}
           </div>
-        );
-      })()}
+          {(()=>{
+            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            const r=(fitbitData.sleep||[]).find(s=>s.date===todayStr);
+            if(!r) return <div style={{color:C.t3,fontSize:13}}>Not tracked last night</div>;
+            const h=Math.floor(r.total/60),m=r.total%60;
+            const tot=r.deep+r.rem+r.light+r.awake;
+            const todayNap=(fitbitData.naps||[]).find(n=>n.date===new Date().toLocaleDateString("en-CA",{timeZone:getTz()}));
+            return (<>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.5px"}}>{h}h {m}m</div>
+                  <div style={{fontSize:11,color:C.t3}}>bedtime {r.bedtime}</div>
+                </div>
+                <div style={{fontSize:12,display:"flex",flexDirection:"column",gap:3,paddingTop:2}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#1a4a8a",fontWeight:500}}>Deep</span><span>{r.deep}m ({Math.round(r.deep/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.sl,fontWeight:500}}>REM</span><span>{r.rem}m ({Math.round(r.rem/tot*100)}%)</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#7aa8d8",fontWeight:500}}>Light</span><span>{r.light}m</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:C.t3}}>Awake</span><span>{r.awake}m</span></div>
+                </div>
+              </div>
+              <div style={{height:10,borderRadius:5,background:C.s2,overflow:"hidden",display:"flex"}}>
+                <div style={{width:Math.round(r.deep/tot*100)+"%",background:"#1a4a8a"}}/>
+                <div style={{width:Math.round(r.rem/tot*100)+"%",background:C.sl}}/>
+                <div style={{width:Math.round(r.light/tot*100)+"%",background:"#7aa8d8"}}/>
+                <div style={{width:Math.round(r.awake/tot*100)+"%",background:"#D3D1C7"}}/>
+              </div>
+              {todayNap&&(
+                <div style={{marginTop:8,padding:"6px 8px",background:C.tl,borderRadius:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:C.sl,fontWeight:500}}>&#128164; Nap at {todayNap.start}</span>
+                  <span style={{color:C.sl}}>{todayNap.total}min · {todayNap.deep}m deep</span>
+                </div>
+              )}
+            </>);
+          })()}
+        </Card>
+
+        {/* RESTING HR + CYCLE PHASE alongside the sleep breakdown */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {(()=>{
+            const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+            const recs=[...(fitbitData.sleep||[])].sort((a,b)=>b.date.localeCompare(a.date)).filter(x=>x.rhr!=null);
+            const cur=(fitbitData.sleep||[]).find(x=>x.date===todayStr)?.rhr ?? recs[0]?.rhr ?? null;
+            return <Metric label="Resting HR" value={cur!=null?<span style={{color:C.sl}}>{cur}<span style={{fontSize:12,fontWeight:400}}> bpm</span></span>:<span style={{color:C.t3}}>—</span>} sub={cur!=null?"last night":"no data"} subColor={C.sl}/>;
+          })()}
+          <CyclePhaseMetric cycleDates={cycleDates} cycleLog={cycleLog}/>
+        </div>
+      </div>
 
       {/* WEEKLY REVIEW — Saturday evening + persistent until dismissed */}
       {shouldShowWeeklyReview()&&(
@@ -5135,7 +5194,14 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
   );
 }
 
-function TabProfile({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}, apiKey}) {
+// Formerly TabProfile. The Profile tab is dismantled, but its four sections
+// keep all their editing state and handlers in one component rather than being
+// copy-split across three files' worth of new surfaces. Each mount point asks
+// for the slice it owns:
+//   personal -> the header profile icon      goals + plan -> Progress
+//   notes    -> Log (health notes)
+function ProfileSections({suppState, setSupp, profileData, setProfileData, fitbitData={workouts:[]}, apiKey, sections=["personal","goals","notes","plan"]}) {
+  const has = (k)=>sections.indexOf(k)!==-1;
   // Section A — editable personal info
   const [pa, setPa] = useState({
     name: profileData?.name||"",
@@ -5467,6 +5533,7 @@ Max 250 words total. No intro, no outro.`}]})});
 
   return (
     <div>
+      {has("personal")&&<>
       <SecLabel>Personal info</SecLabel>
       <Card style={{marginBottom:14}}>
         {editPersonal ? (
@@ -5546,6 +5613,9 @@ Max 250 words total. No intro, no outro.`}]})});
         );
       })():null}
 
+      </>}
+
+      {has("goals")&&<>
       {/* ── SECTION B — GOALS & TARGETS ───────────────────────────────── */}
       <SecLabel>Goals &amp; Targets</SecLabel>
 
@@ -5776,6 +5846,9 @@ Max 250 words total. No intro, no outro.`}]})});
         )}
       </Card>
 
+      </>}
+
+      {has("notes")&&<>
       <SecLabel>Health Notes</SecLabel>
       <Card style={{marginBottom:14}}>
         {editNotes ? (
@@ -5822,6 +5895,9 @@ Max 250 words total. No intro, no outro.`}]})});
         )}
       </Card>
 
+      </>}
+
+      {has("plan")&&<>
       <SecLabel>Workout plan</SecLabel>
       <Card style={{marginBottom:14}}>
         {editPlan ? (
@@ -6013,6 +6089,174 @@ Max 250 words total. No intro, no outro.`}]})});
           </div>
         </div>
       )}
+      </>}
+    </div>
+  );
+}
+
+// ── COLLAPSIBLE SECTION ─────────────────────────────────────────────────────
+// Progress absorbs roughly ten elements and will be the least-visited tab.
+// Without real hierarchy it becomes the new Profile: the place things go to be
+// forgotten. Everything set-and-forget collapses by default.
+function Collapsible({title, sub, children, open=false}){
+  const [isOpen, setIsOpen] = useState(open);
+  return (
+    <div style={{border:`1px solid ${C.bd}`,borderRadius:12,background:C.sf,marginBottom:14,overflow:"hidden"}}>
+      <button onClick={()=>setIsOpen(o=>!o)} aria-expanded={isOpen}
+        style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"13px 15px",
+          background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",textAlign:"left"}}>
+        <span style={{flex:1,minWidth:0}}>
+          <span style={{display:"block",fontSize:13.5,fontWeight:600,color:C.tx}}>{title}</span>
+          {sub&&<span style={{display:"block",fontSize:11.5,color:C.t3,marginTop:2}}>{sub}</span>}
+        </span>
+        <span style={{fontSize:12,color:C.t3,transform:isOpen?"rotate(90deg)":"none",transition:"transform .18s"}}>&#9656;</span>
+      </button>
+      {isOpen&&<div style={{padding:"0 15px 15px"}}>{children}</div>}
+    </div>
+  );
+}
+
+// ── WEEK PANEL (Phase 2.2 / 6.1) ────────────────────────────────────────────
+// Moved off Today wholesale: weekly stats, the training tally, and the share
+// control that hangs off it all answer a different question than "today".
+// Unchanged in substance -- Phase 6.3 says move sharing as-is; what is actually
+// worth sharing is a separate decision.
+function WeekPanel({fitbitData, allFood, protTgt, profileData}){
+  return (
+    <>
+        <SecLabel>{(()=>{
+          const sun=getWeekStartDate();
+          const sat=getWeekEndDate();
+          const fmt=(d)=>d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+          return `This week — ${fmt(sun)} – ${fmt(sat)}`;
+        })()}</SecLabel>
+
+        <div style={s.mg}>
+          <WeeklyStepsMetric fitbitData={fitbitData}/>
+          <WeeklyWorkoutsMetric fitbitData={fitbitData}/>
+          <WeeklySleepMetric fitbitData={fitbitData}/>
+          <ProteinAvgMetric allFood={allFood} protTgt={protTgt}/>
+        </div>
+
+        {/* THIS WEEK SO FAR — data only, always visible */}
+        {(()=>{
+          const weekStart=getWeekStartDate();
+          const weekKeys=Array.from({length:7},(_,i)=>{
+            const d=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+i);
+            return d.toLocaleDateString("en-CA",{timeZone:getTz()});
+          });
+          const at=profileData?.activity_targets||{};
+          const workoutsThisWeek=(fitbitData.workouts||[]).filter(w=>weekKeys.includes(w.date));
+          const strengthDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="strength").length;
+          const mobilityDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="mobility").length;
+          const cardioDone=workoutsThisWeek.filter(w=>getActivityCategory(w.type,profileData?.activity_mapping)==="cardio").length;
+          const totalDone=strengthDone+mobilityDone+cardioDone;
+          const totalTarget=(at.strength||2)+(at.mobility||2)+(at.cardio||2);
+          const rows=[
+            ["Strength",strengthDone,at.strength||2],
+            ["Mobility",mobilityDone,at.mobility||2],
+            ["Cardio",cardioDone,at.cardio||2],
+          ];
+          return (
+            <div style={s.aiCard}>
+              <div style={s.aiLbl}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
+                This week so far
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:6}}>
+                {rows.map(([label,done,target])=>(
+                  <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                    <span style={{color:C.t2}}>{label}</span>
+                    <span style={{fontWeight:600,color:done>=target?C.teal:C.tx}}>{done}<span style={{fontWeight:400,color:C.t3}}>/{target}</span></span>
+                  </div>
+                ))}
+                <div style={{borderTop:`1px solid ${C.bd}`,paddingTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
+                  <span style={{color:C.t2,fontWeight:500}}>Total</span>
+                  <span style={{fontWeight:600,color:totalDone>=totalTarget?C.teal:C.tx}}>{totalDone}<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span></span>
+                </div>
+              </div>
+              <button onClick={()=>{
+                const todayStr=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+                const stepsTotal=weekKeys.reduce((s,dk)=>{const r=(fitbitData.steps||[]).find(x=>x.date===dk);return s+(r?r.steps:0);},0);
+                const weekSleepRecs=(fitbitData.sleep||[]).filter(x=>weekKeys.includes(x.date));
+                const avgSleepMin=weekSleepRecs.length?Math.round(weekSleepRecs.reduce((s,r)=>s+r.total,0)/weekSleepRecs.length):0;
+                const protDays=weekKeys.filter(dk=>dk<=todayStr&&(allFood[dk]||[]).reduce((s,e)=>s+(e.p||0),0)>=protTgt).length;
+                const fmt=(d)=>d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+                const dayName=(d)=>d.toLocaleDateString("en-GB",{weekday:"short"});
+                const sat=new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+6);
+                const satStr=sat.toLocaleDateString("en-CA",{timeZone:getTz()});
+                // Covered period: week start through today (or the full week if it's over)
+                const [ty2,tm2,td2]=todayStr.split("-").map(Number);
+                const todayD=new Date(ty2,tm2-1,td2);
+                const covEnd=todayStr>=satStr?sat:todayD;
+                const isFullWeek=todayStr>=satStr;
+                const period=isFullWeek
+                  ?`Full week · ${fmt(weekStart)} – ${fmt(sat)}`
+                  :`${dayName(weekStart)}–${dayName(covEnd)} so far · ${fmt(weekStart)} – ${fmt(covEnd)}`;
+                const name=(profileData?.name||"My").split(" ")[0];
+                shareStatsCard({
+                  heading:`${name==="My"?"My":name+"'s"} week`,
+                  subheading:period,
+                  rows:[
+                    {label:"Total steps",value:stepsTotal.toLocaleString(),color:"#0f7b5f"},
+                    {label:"Training sessions",value:`${totalDone} of ${totalTarget}`,color:"#4a42b0"},
+                    {label:"Strength · Mobility · Cardio",value:`${strengthDone} · ${mobilityDone} · ${cardioDone}`,color:"#b35a1f"},
+                    ...(avgSleepMin?[{label:"Avg sleep",value:`${Math.floor(avgSleepMin/60)}h ${avgSleepMin%60}m`,color:"#2d65a8"}]:[]),
+                    ...(protDays?[{label:"Protein goal hit",value:`${protDays} day${protDays!==1?"s":""}`,color:"#a05f0a"}]:[]),
+                  ],
+                  footer:`shared ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:getTz()})}`
+                });
+              }} style={{...s.btn("s"),...s.btnSm,fontSize:11,marginTop:4}}><Icon name="share" size={13}/> Share my week</button>
+            </div>
+          );
+        })()}
+    </>
+  );
+}
+
+// ── PROGRESS TAB (Phase 6) ──────────────────────────────────────────────────
+// "How am I doing against what I said I wanted?"
+// Upper section is what is MOVING; lower section is what is SET, collapsed,
+// because goals are prominent during onboarding and then demoted below the
+// tracking they inform.
+function TabProgress({suppState, setSupp, profileData, setProfileData, fitbitData, apiKey, allFood, protTgt}){
+  return (
+    <div>
+      <WeekPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+
+      <SecLabel>Over time</SecLabel>
+      <MonthlyMetrics fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+
+      {/* What is SET — below the tracking it informs, collapsed by default */}
+      <SecLabel>What you&rsquo;ve set</SecLabel>
+      <Collapsible title="Goals and targets" sub="Goals, activity targets, step and protein foundations">
+        <ProfileSections sections={["goals"]} profileData={profileData} setProfileData={setProfileData}
+          fitbitData={fitbitData} apiKey={apiKey} suppState={suppState} setSupp={setSupp}/>
+      </Collapsible>
+      <Collapsible title="Workout plan" sub="Your saved plan and completed-session history">
+        <ProfileSections sections={["plan"]} profileData={profileData} setProfileData={setProfileData}
+          fitbitData={fitbitData} apiKey={apiKey} suppState={suppState} setSupp={setSupp}/>
+      </Collapsible>
+    </div>
+  );
+}
+
+// ── PROFILE MODAL (Phase 1.2) ───────────────────────────────────────────────
+// Identity and body composition ONLY. Deliberately not a settings menu: app
+// preferences live in Settings, connections in Sync, nutrition config in Food.
+function ProfileModal({profileData, setProfileData, onClose}){
+  return (
+    <div style={s.mo} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{...s.modal,width:460,maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+          <h3 style={{fontSize:16,fontWeight:600}}>Your profile</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.t3,fontSize:20,cursor:"pointer",lineHeight:1}}>&times;</button>
+        </div>
+        <ProfileSections sections={["personal"]} profileData={profileData} setProfileData={setProfileData}/>
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+          <button onClick={onClose} style={s.btn("s")}>Done</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -6173,6 +6417,7 @@ export default function App() {
     try{const b=localStorage.getItem("jlog_backup");return b?JSON.parse(b):[]}catch{return [];}
   });
   const [showSett, setShowSett] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [ghConnected, setGhConnected] = useState(()=>isGTokenValid(getGToken()));
   const [ghSyncing, setGhSyncing] = useState(false);
@@ -6650,7 +6895,10 @@ export default function App() {
     setChatLoading(false);
   }
 
-  const TABS=[{id:"dash",label:"Dashboard"},{id:"food",label:"Food"},{id:"log",label:"Log"},{id:"profile",label:"Profile"},{id:"cycle",label:"Cycle"}];
+  // Ordered by visit frequency, most-visited first. Profile is gone from the
+  // tab bar entirely — identity and body composition live behind the header
+  // icon; everything else it used to hold moved to the tab that owns it.
+  const TABS=[{id:"dash",label:"Today"},{id:"food",label:"Food"},{id:"cycle",label:"Cycle"},{id:"log",label:"Log"},{id:"progress",label:"Progress"}];
 
   const isViewOnly = new URLSearchParams(window.location.search).get("view")==="1";
 
@@ -6721,6 +6969,9 @@ export default function App() {
             : <button title={syncStatus} onClick={()=>setShowSync(true)} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
                 <Icon name="sync" size={17} style={ghSyncing?{animation:"spin 1s linear infinite"}:{}}/>
               </button>}
+          <button title="Profile" onClick={()=>setShowProfile(true)} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
+            <Icon name="profile" size={17}/>
+          </button>
           <button title="Settings" onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setShowSett(true);}} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
             <Icon name="settings" size={17}/>
           </button>
@@ -6738,8 +6989,8 @@ export default function App() {
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData}/>}
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
-      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries}/>}
-      {tab==="profile" && <TabProfile suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey}/>}
+      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData}/>}
+      {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt}/>}
 
       {/* COACH CHAT BUTTON */}
       <button className="coachFab" onClick={()=>setShowChat(true)} style={{position:"fixed",bottom:24,right:20,zIndex:50,background:C.pu,color:"#fff",border:"none",borderRadius:30,padding:"12px 18px",fontFamily:"inherit",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(74,66,176,.35)"}}>
@@ -6748,7 +6999,7 @@ export default function App() {
 
       {/* BOTTOM NAV — native-style tab bar, mobile only (CSS media query) */}
       <nav className="bottomNav">
-        {[["dash","home","Home"],["food","food","Food"],["log","log","Log"],["profile","profile","Profile"],["cycle","moon","Cycle"]].map(([id,icon,label])=>(
+        {[["dash","home","Today"],["food","food","Food"],["cycle","moon","Cycle"],["log","log","Log"],["progress","progress","Progress"]].map(([id,icon,label])=>(
           <button key={id} onClick={()=>setTab(id)}>
             {tab===id&&<span className="navPill"/>}
             <span style={{position:"relative",zIndex:1,display:"flex"}}><Icon name={icon} size={21} color={tab===id?C.pu:C.t3} strokeWidth={tab===id?2.2:1.8}/></span>
@@ -6810,6 +7061,10 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* PROFILE MODAL — identity and body composition ONLY. Not a settings
+          menu: app preferences live in Settings, connections in Sync. */}
+      {showProfile&&<ProfileModal profileData={profileData} setProfileData={setProfileData} onClose={()=>setShowProfile(false)}/>}
 
       {/* SETTINGS MODAL */}
       {showSett&&!isViewOnly&&(
