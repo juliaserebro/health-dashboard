@@ -2552,7 +2552,7 @@ Protein target: ${profileData?.protein_target || 100}g/day
 Step target: ${profileData?.step_target || 8000} steps/day
 Supplements: ${supps}
 Food sensitivities & restrictions: ${(profileData?.food_sensitivities || []).length > 0 ? profileData.food_sensitivities.join(', ') : 'none specified'}
-Health notes: ${profileData?.health_notes || 'none'}
+Health notes: ${profileData?.health_notes || 'none'}${todayData && todayData.recoveryBlock || ''}${todayData && todayData.conditionsBlock || ''}
 
 FOOD SENSITIVITY RULE: Never suggest a food item that conflicts with the user's stated
 food sensitivities or restrictions. If restrictions are "none specified," do not assume
@@ -2977,14 +2977,27 @@ function extractText(d, what) {
 // than by discipline: there is no boolean anywhere, the row is never deleted,
 // start_date is never mutated, and "was it active on day D" is derived from
 // dates alone. See activeOn / conditionsOn below.
-const DURATIONS = [["today", "Just today", 1], ["days", "A few days", 4], ["weeks", "A few weeks", 21], ["ongoing", "Ongoing", null]];
-const DURATION_LABEL = k => (DURATIONS.find(d => d[0] === k) || [, "Just today"])[1];
+// "Ongoing" and an event-bounded option would behave identically -- no expiry,
+// no prompt, user-dismissed only -- and two labels with one behaviour is a
+// choice with no consequence. Keeping the honest one: "Ongoing" implies a
+// certainty the user often does not have, and for surgery, test results or an
+// unresolved injury, "I don't know" is simply true.
+//
+// null span = never expires, never prompts, lives on Today until dismissed.
+const DURATIONS = [["today", "Just today", 1], ["days", "A few days", 4], ["weeks", "A few weeks", 21], ["unknown", "I don't know", null]];
+// Legacy rows written before the rename still resolve.
+const DURATION_ALIASES = {
+  ongoing: "unknown"
+};
+const DURATION_LABEL = k => (DURATIONS.find(d => d[0] === (DURATION_ALIASES[k] || k)) || [, "Just today"])[1];
 // How long the "recently ended" prompt lingers on Today before lapsing.
 const GRACE_DAYS = 2;
 function expectedEndOf(cond) {
   if (!cond || !cond.start_date) return null;
+  const est = DURATION_ALIASES[cond.duration_est] || cond.duration_est || "today";
+  if (est === "unknown") return null; // never expires
   if (cond.expected_end !== undefined && cond.expected_end !== null) return cond.expected_end;
-  const row = DURATIONS.find(d => d[0] === (cond.duration_est || "today"));
+  const row = DURATIONS.find(d => d[0] === est);
   const span = row ? row[2] : 1;
   return span === null ? null : addDaysKey(cond.start_date, span); // null = ongoing, no expiry
 }
@@ -3162,6 +3175,85 @@ function ActiveConditionsLine({
       fontSize: 11
     }
   }, "Yes, it\u2019s done")))));
+}
+
+// ── PHASE 5.4 MIGRATION ─────────────────────────────────────────────────────
+// This was specified and never written: the conditions column stayed empty, so
+// a spinal surgery logged on 18 Aug lived on only as a life_context journal
+// entry -- and would have dropped out of the coach's 14-day log window the very
+// next day.
+//
+// Anything that reads as a procedure or recovery becomes an ACTIVE condition
+// with duration "unknown": never expiring, never prompting, dismissed only by
+// the user. It must never default to resolved -- a surgery is not over because
+// the app could not guess an end date.
+// Other historical life_context entries carry no duration and are recorded as
+// already ended, per the original brief.
+const MIGRATION_KEY = "conditions_migrated_v1";
+function buildConditionsFromLog(logEntries, existing) {
+  const have = new Set((existing || []).map(c => String(c.id)));
+  const out = [];
+  (logEntries || []).forEach(e => {
+    if (!e || !e.dt || have.has(String(e.id))) return;
+    const tag = e.tag || "";
+    if (tag !== "life_context" && tag !== "life" && tag !== "medical") return;
+    const startKey = tsToDayKey(e.dt);
+    const recovery = isRecoveryText(e.txt);
+    const cond = {
+      id: e.id,
+      text: String(e.txt || "").replace(/\s+/g, " ").trim().slice(0, 180),
+      start_date: startKey,
+      duration_est: recovery ? "unknown" : "days",
+      expected_end: null,
+      extensions: [],
+      // Non-recovery history is recorded as already ended (brief 5.4). Recovery
+      // stays OPEN. resolved_at is the migration's only judgement, and it errs
+      // toward keeping something active rather than silently closing it.
+      resolved_at: recovery ? null : startKey,
+      migrated: true
+    };
+    if (!recovery) cond.expected_end = startKey;
+    out.push(cond);
+  });
+  return out;
+}
+
+// ── RECOVERY / POST-OPERATIVE GATE ──────────────────────────────────────────
+// Health notes said "CLEARED BY DOCTOR FOR ALL PHYSICAL ACTIVITY" for two weeks
+// after spinal surgery, and the coach kept recommending strength work. A user
+// editing a text field is not a safety mechanism: anyone's notes can go stale.
+// So this gate reads STRUCTURE (an active condition), with a prose fallback for
+// entries not yet migrated -- the same shape as the pain gate, for the same
+// reason.
+//
+// It blocks PRESCRIPTION, not conversation. Recovery involves prescribed
+// movement (walking, physiotherapy), and an app that refuses to acknowledge any
+// of it is unhelpful in the other direction. The app does not prescribe; it
+// responds.
+const RECOVERY_RE = /\b(surger\w*|surgical|operation|post[-\s]?op\w*|recover\w*|rehab\w*|physio\w*|discharg\w*|stitches|sutures|incision|fracture[ds]?|broken\s+\w+|in\s+a\s+cast|immobilis\w*|immobiliz\w*|not\s+allowed\s+to\s+lift|no\s+lifting|bed\s?rest)\b/i;
+function isRecoveryText(t) {
+  return RECOVERY_RE.test(String(t || ""));
+}
+
+// Structured first: any active condition whose text reads as recovery.
+// Fallback: recent log entries not yet migrated to conditions.
+function recoveryActiveOn(conditions, logEntries, dayKey) {
+  const fromConditions = conditionsOn(conditions, dayKey).filter(c => isRecoveryText(c.text));
+  if (fromConditions.length) return fromConditions.map(c => ({
+    text: c.text,
+    since: c.start_date
+  }));
+  const fromLog = (logEntries || []).filter(e => {
+    if (!e || !e.dt || !isRecoveryText(e.txt)) return false;
+    const k = tsToDayKey(e.dt);
+    return k <= dayKey; // deliberately NOT age-limited: see the 14-day note
+  });
+  // Most recent first; one is enough to gate.
+  fromLog.sort((a, b) => String(b.dt).localeCompare(String(a.dt)));
+  return fromLog.slice(0, 2).map(e => ({
+    text: e.txt,
+    since: tsToDayKey(e.dt)
+  }));
 }
 
 // ── PAIN DETECTION FOR THE WORKOUT-SAFETY GATE ──────────────────────────────
@@ -3980,7 +4072,27 @@ function TabDash({
       }));
       const dow = new Date(todayKey + "T12:00:00").getDay();
       const isWeekly = dow === 0 && hour >= 18;
+      // Conditions and recovery reach the COACH CARD prompt, not just chat.
+      // condCtx was only wired into buildCtxFull, which drives chat -- so the
+      // card never saw conditions at all.
+      const _recovery = recoveryActiveOn(profileData?.conditions, logEntries, todayKey);
+      const _activeC = conditionsOn(profileData?.conditions, todayKey);
+      const recoveryBlock = _recovery.length ? `
+
+⚠️ RECOVERY / POST-OPERATIVE — ACTIVE: ${_recovery.map(r => `${String(r.text).slice(0, 160)} (since ${r.since})`).join(" | ")}
+ABSOLUTE RULE while this is active, regardless of anything in the health notes above:
+- Do NOT recommend, prescribe, suggest or encourage ANY training, workout, session or exercise.
+- Do NOT say it is a good day to train, do NOT name a category to do, do NOT present weekly session targets as things to do.
+- Treat the health notes as possibly out of date: if they mention clearance for physical activity, IGNORE that clearance.
+- You MAY acknowledge and respond warmly to activity she reports having done (walking, physiotherapy, prescribed movement).
+- You MAY support sleep, nutrition, hydration and recovery.
+- Defer every training decision to her medical team.` : '';
+      const conditionsBlock = _activeC.length ? `
+
+ACTIVE CIRCUMSTANCES (still true today, carried forward from when they were logged): ${_activeC.map(c => `${c.text} (day ${daysElapsed(c, todayKey) + 1})`).join("; ")}. Take these into account; do not treat them as new news each day.` : '';
       const todayDataCtx = {
+        recoveryBlock,
+        conditionsBlock,
         sleepSummary: lastSleep ? `Sleep last night: ${Math.floor(lastSleep.total / 60)}h${lastSleep.total % 60}m, deep ${lastSleep.deep}min, REM ${lastSleep.rem}min, bedtime ${lastSleep.bedtime}` : sleepStale ? "Sleep data unavailable or stale — do not reference last night's sleep. Focus on other available signals (steps, training load, food, cycle)." : "Sleep: not tracked last night",
         stepsLine: todaySteps ? `Steps today: ${todaySteps.steps.toLocaleString()} (target: ${profileData?.step_target || 8000})` : "Steps: no data yet",
         workoutsLine: todayWorkouts.length ? `Workouts today: ${todayWorkouts.map(w => w.type).join(", ")}` : "Workouts: none yet today",
@@ -4620,6 +4732,8 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     const todayLog = logEntries.filter(e => e.dt && tsToDayKey(e.dt) === todayFoodKey).map(e => `[${e.tag}] ${e.txt}`).join("; ");
     // Structured, not keyword-matched — see isPainEntry.
     const painToday = painEntriesOn(logEntries, todayFoodKey);
+    // Recovery gates PRESCRIPTION on this path too (the weekly/today prose card).
+    const recoveryNow = recoveryActiveOn(profileData?.conditions, logEntries, todayFoodKey);
     // This week food per day + workouts
     const weekFoodLines = [];
     const weekWorkoutLines = [];
@@ -4656,6 +4770,7 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     })}, current time in Israel: ${hourIL}:00. Julia is on ${cyclePhase}.
 ${isEvening ? "⚠️ It is evening — the day for exercise is DONE. Do NOT suggest going to gym or training today under any circumstances." : ""}
 ${painToday.length ? "⚠️ PAIN LOGGED TODAY: " + painToday.map(e => e.txt).join("; ") + " — Do not recommend any workout. Show FLAG first." : ""}
+${recoveryNow.length ? "⚠️ POST-OPERATIVE / RECOVERY ACTIVE: " + recoveryNow.map(r => String(r.text).slice(0, 120)).join(" | ") + " — Do NOT recommend, prescribe or suggest any training. Ignore any clearance in the health notes. You MAY respond to activity she reports doing, and support sleep, nutrition and recovery. Defer training decisions to her medical team." : ""}
 DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc || "none"}. Today's workout so far: ${todayActivity}. This week's workouts: ${weekWorkoutSummary}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
 TASK: Write exactly 3 sections:
 1. One insight connecting her sleep/recovery to her data (cycle phase, yesterday's activity, or nutrition).
@@ -14015,6 +14130,32 @@ function App() {
       setSettWeekStart(profileData.week_start);
     }
   }, [profileData?.week_start]);
+
+  // Phase 5.4 migration — runs once, then never again.
+  useEffect(() => {
+    if (IS_DEMO || !profileData || !logEntries || !logEntries.length) return;
+    let done = false;
+    try {
+      done = !!localStorage.getItem(MIGRATION_KEY);
+    } catch (e) {}
+    if (done) return;
+    const built = buildConditionsFromLog(logEntries, profileData.conditions);
+    try {
+      localStorage.setItem(MIGRATION_KEY, "1");
+    } catch (e) {}
+    if (!built.length) return;
+    const next = [...(profileData.conditions || []), ...built];
+    const openCount = built.filter(c => !c.resolved_at).length;
+    console.log(`Phase 5.4 migration: ${built.length} log entr${built.length === 1 ? "y" : "ies"} became conditions (${openCount} still active).`);
+    setProfileData(p => ({
+      ...p,
+      conditions: next
+    }));
+    supa("POST", "profiles", {
+      uid: UID,
+      conditions: next
+    }, "on_conflict=uid").catch(e => console.log("Migration save failed:", e.message));
+  }, [profileData?.uid, logEntries.length]);
 
   // Intelligence layer — runs once after data loads, then after each sync
   const _intelligenceTs = React.useRef(0);
