@@ -3332,20 +3332,6 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           active, so an ordinary day shows nothing at all. */}
       <ActiveConditionsLine conditions={profileData?.conditions} onResolve={onResolveCondition} onExtend={onExtendCondition} onLapse={onLapseCondition}/>
 
-      {/* ── WHAT THE COACH KNOWS ──────────────────────────────────
-          Grouped with the conditions line because both answer the same
-          question: what does the coach currently know about me? It is also
-          what makes logging feel worthwhile -- you can see your input used.
-          (It was buried inside the Workout plan section, where Phase 8 would
-          have deleted it along with plan generation.) */}
-      {(()=>{
-        const firstSleep=(fitbitData.sleep||[]).map(x=>x.date).sort()[0];
-        if(!firstSleep) return null;
-        const daysInApp=Math.round((new Date()-new Date(firstSleep+"T12:00:00"))/864e5);
-        if(daysInApp<28) return null;
-        return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
-      })()}
-
       {/* ── WHAT YOU CAN STILL DO TODAY: changeable today ── */}
       <SecLabel>What you can still do today</SecLabel>
 
@@ -3430,6 +3416,20 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
         </div>
       </div>
 
+      {/* ── WHAT THE COACH KNOWS ──────────────────────────────────
+          Grouped with the conditions line because both answer the same
+          question: what does the coach currently know about me? It is also
+          what makes logging feel worthwhile -- you can see your input used.
+          (It was buried inside the Workout plan section, where Phase 8 would
+          have deleted it along with plan generation.) */}
+      {(()=>{
+        const firstSleep=(fitbitData.sleep||[]).map(x=>x.date).sort()[0];
+        if(!firstSleep) return null;
+        const daysInApp=Math.round((new Date()-new Date(firstSleep+"T12:00:00"))/864e5);
+        if(daysInApp<28) return null;
+        return <CoachMemoryCard profileData={profileData} fitbitData={fitbitData} apiKey={apiKey}/>;
+      })()}
+
       {/* WEEKLY REVIEW — Saturday evening + persistent until dismissed */}
       {shouldShowWeeklyReview()&&(
         <div style={s.aiCard}>
@@ -3449,98 +3449,6 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
           )}
         </div>
       )}
-
-      {/* STEP BARS */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
-            {(()=>{
-              const now=new Date();
-              const sundayBar=getWeekStartDate();
-              const dayLabels=["S","M","T","W","T","F","S"];
-              const weekSteps=dayLabels.map((_,i)=>{
-                const d=new Date(sundayBar.getFullYear(),sundayBar.getMonth(),sundayBar.getDate()+i);
-                const dateStr=d.toLocaleDateString("en-CA",{timeZone:getTz()});
-                const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
-                const isFuture=d>now;
-                const todayStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
-                const isToday=dateStr===todayStr;
-                return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
-              });
-              const maxStep=Math.max(...weekSteps.map(d=>d.s),1);
-              return weekSteps.map((d,i)=>{
-                const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
-                const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
-                const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
-                return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                  <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
-                  <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
-                  <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
-                </div>;
-              });
-            })()}
-          </div>
-        </Card>
-        <Card style={{marginBottom:0}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep — last 7 days</div>
-          {(()=>{
-            const todayILs=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
-            // Build array of last 7 calendar dates (oldest→newest)
-            const dates=Array.from({length:7},(_,i)=>{
-              const d=new Date(todayILs+"T12:00:00");
-              d.setDate(d.getDate()-(6-i));
-              return d.toISOString().slice(0,10);
-            });
-            const sleepByDate={};
-            (fitbitData.sleep||[]).forEach(s=>{sleepByDate[s.date]=s;});
-            return dates.map((date,i)=>{
-              const d=sleepByDate[date];
-              const dateObj=new Date(date+"T12:00:00");
-              const lbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
-              if(!d) return (
-                <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
-                  <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
-                  <div style={{flex:1,height:7,borderRadius:4,background:C.s2}}/>
-                  <span style={{width:36,textAlign:"right",color:C.t3,fontSize:10}}>N/A</span>
-                </div>
-              );
-              const tot=d.deep+d.rem+d.light+d.awake||1;
-              const h=Math.floor(d.total/60),m=d.total%60;
-              return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
-                <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
-                <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
-                  <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#1a4a8a"}}/>
-                  <div style={{width:Math.round(d.rem/tot*100)+"%",background:C.sl}}/>
-                  <div style={{width:Math.round(d.light/tot*100)+"%",background:"#7aa8d8"}}/>
-                </div>
-                <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
-              </div>;
-            });
-          })()}
-        </Card>
-      </div>
-
-      {/* WORKOUTS LIST */}
-      <Card>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
-        {(()=>{
-          const catStyle={strength:[C.pl,C.pu],mobility:[C.orl,C.or],cardio:[C.tl,C.teal]};
-          const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
-          if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
-          return recent.map((w,i)=>{
-            const cat=getActivityCategory(w.type, profileData?.activity_mapping);
-            const [bg,col]=catStyle[cat]||[C.s2,C.t2];
-            const dateObj=new Date(w.date);
-            const dayLbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
-            const detail=[w.duration_min?w.duration_min+" min":null,w.avg_hr?w.avg_hr+"bpm":null].filter(Boolean).join(" · ")||"";
-            return <div key={i} style={{...s.wi,borderBottom:i<recent.length-1?`.5px solid ${C.bd}`:"none"}}>
-              <div><span style={{...s.badge(bg,col)}}>{w.type}</span><span style={{fontWeight:500}}>{dayLbl}</span></div>
-              <div style={{fontSize:12,color:C.t2}}>{detail}</div>
-            </div>;
-          });
-        })()}
-      </Card>
 
     </div>
   );
@@ -6469,6 +6377,109 @@ function WeekPanel({fitbitData, allFood, protTgt, profileData}){
   );
 }
 
+// ── WEEK DETAIL (moved off Today) ───────────────────────────────────────────
+// Daily steps this week, sleep over the last 7 days, and recent workouts. These
+// are a week-shaped view, not a "today" question, so they belong in Progress
+// above the monthly block. Moved as the real markup, grid wrappers intact.
+function WeekDetail({fitbitData, profileData}){
+  return (
+    <>
+        {/* STEP BARS */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <Card style={{marginBottom:0}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Daily steps this week</div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:86}}>
+              {(()=>{
+                const now=new Date();
+                const sundayBar=getWeekStartDate();
+                const dayLabels=["S","M","T","W","T","F","S"];
+                const weekSteps=dayLabels.map((_,i)=>{
+                  const d=new Date(sundayBar.getFullYear(),sundayBar.getMonth(),sundayBar.getDate()+i);
+                  const dateStr=d.toLocaleDateString("en-CA",{timeZone:getTz()});
+                  const rec=(fitbitData.steps||[]).find(s=>s.date===dateStr);
+                  const isFuture=d>now;
+                  const todayStr=now.toLocaleDateString("en-CA",{timeZone:getTz()});
+                  const isToday=dateStr===todayStr;
+                  return {d:dayLabels[i],s:rec?rec.steps:0,today:isToday,future:isFuture&&!isToday};
+                });
+                const maxStep=Math.max(...weekSteps.map(d=>d.s),1);
+                return weekSteps.map((d,i)=>{
+                  const h=d.future?0:Math.max(Math.round((d.s/maxStep)*60),d.s>0?4:0);
+                  const col=d.future?C.s2:d.today?"#9FE1CB":d.s>=10000?"#0F6E56":C.tm;
+                  const lbl=d.future?"":d.s>=1000?(d.s/1000).toFixed(1)+"k":d.s>0?String(d.s):"";
+                  return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                    <div style={{fontSize:8,color:C.t2,textAlign:"center",lineHeight:1.2}}>{lbl}</div>
+                    <div style={{width:"100%",borderRadius:"3px 3px 0 0",height:h,background:col,minHeight:d.s>0?3:0}}/>
+                    <div style={{fontSize:9,color:C.t3}}>{d.d}</div>
+                  </div>;
+                });
+              })()}
+            </div>
+          </Card>
+          <Card style={{marginBottom:0}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:8}}>Sleep — last 7 days</div>
+            {(()=>{
+              const todayILs=new Date().toLocaleDateString("en-CA",{timeZone:getTz()});
+              // Build array of last 7 calendar dates (oldest→newest)
+              const dates=Array.from({length:7},(_,i)=>{
+                const d=new Date(todayILs+"T12:00:00");
+                d.setDate(d.getDate()-(6-i));
+                return d.toISOString().slice(0,10);
+              });
+              const sleepByDate={};
+              (fitbitData.sleep||[]).forEach(s=>{sleepByDate[s.date]=s;});
+              return dates.map((date,i)=>{
+                const d=sleepByDate[date];
+                const dateObj=new Date(date+"T12:00:00");
+                const lbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+                if(!d) return (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+                    <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
+                    <div style={{flex:1,height:7,borderRadius:4,background:C.s2}}/>
+                    <span style={{width:36,textAlign:"right",color:C.t3,fontSize:10}}>N/A</span>
+                  </div>
+                );
+                const tot=d.deep+d.rem+d.light+d.awake||1;
+                const h=Math.floor(d.total/60),m=d.total%60;
+                return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,fontSize:11}}>
+                  <span style={{width:42,color:C.t3,fontSize:10,flexShrink:0}}>{lbl}</span>
+                  <div style={{flex:1,height:7,borderRadius:4,background:C.s2,overflow:"hidden",display:"flex"}}>
+                    <div style={{width:Math.round(d.deep/tot*100)+"%",background:"#1a4a8a"}}/>
+                    <div style={{width:Math.round(d.rem/tot*100)+"%",background:C.sl}}/>
+                    <div style={{width:Math.round(d.light/tot*100)+"%",background:"#7aa8d8"}}/>
+                  </div>
+                  <span style={{width:36,textAlign:"right",color:C.t2,fontSize:11}}>{h}h{m}m</span>
+                </div>;
+              });
+            })()}
+          </Card>
+        </div>
+
+        {/* WORKOUTS LIST */}
+        <Card>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase",color:C.t3,marginBottom:12}}>Workouts — last 7 days</div>
+          {(()=>{
+            const catStyle={strength:[C.pl,C.pu],mobility:[C.orl,C.or],cardio:[C.tl,C.teal]};
+            const recent=[...(fitbitData.workouts||[])].sort((a,b)=>b.date.localeCompare(a.date)||b.type.localeCompare(a.type)).slice(0,10);
+            if(!recent.length) return <div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"12px 0"}}>No workouts logged yet</div>;
+            return recent.map((w,i)=>{
+              const cat=getActivityCategory(w.type, profileData?.activity_mapping);
+              const [bg,col]=catStyle[cat]||[C.s2,C.t2];
+              const dateObj=new Date(w.date);
+              const dayLbl=dateObj.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+              const detail=[w.duration_min?w.duration_min+" min":null,w.avg_hr?w.avg_hr+"bpm":null].filter(Boolean).join(" · ")||"";
+              return <div key={i} style={{...s.wi,borderBottom:i<recent.length-1?`.5px solid ${C.bd}`:"none"}}>
+                <div><span style={{...s.badge(bg,col)}}>{w.type}</span><span style={{fontWeight:500}}>{dayLbl}</span></div>
+                <div style={{fontSize:12,color:C.t2}}>{detail}</div>
+              </div>;
+            });
+          })()}
+        </Card>
+
+    </>
+  );
+}
+
 // ── MONTH PANEL (Bug 3/4) ───────────────────────────────────────────────────
 // Moved off Today as ONE UNIT: the section label, the s.mg grid wrapper, the
 // monthly stat tiles, the consistency heatmap and the share control. The
@@ -6582,6 +6593,8 @@ function TabProgress({suppState, setSupp, profileData, setProfileData, fitbitDat
   return (
     <div>
       <WeekPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+
+      <WeekDetail fitbitData={fitbitData} profileData={profileData}/>
 
       <MonthPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
 
