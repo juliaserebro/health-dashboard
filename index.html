@@ -3552,14 +3552,20 @@ function violatesSensitivities(text, list) {
 function dataFingerprint({
   fitbitData,
   cycleLog,
-  todayKey
+  todayKey,
+  profileData
 }) {
   const fd = fitbitData || {};
   const sleep = (fd.sleep || []).map(s => s.date).sort().slice(-1)[0] || "";
   const wk = (fd.workouts || []).filter(w => w.date === todayKey).map(w => w.type + "|" + (w.dur || w.duration || "")).sort().join(",");
   const cyc = (cycleLog && cycleLog.period_start_dates || [])[0] || "";
   const ovul = ((cycleLog && cycleLog.ovulation_reports || []).slice(-1)[0] || {}).date || "";
-  return [todayKey, sleep, wk, cyc, ovul].join("~");
+  // What she TELLS the coach must invalidate it too. Without these, a health
+  // notes edit or a newly logged condition left yesterday's card standing.
+  const pd = profileData || {};
+  const notes = String(pd.health_notes || "").length + ":" + String(pd.health_notes || "").slice(-40);
+  const conds = conditionsOn(pd.conditions, todayKey).map(c => c.id + "|" + (c.resolved_at || "")).sort().join(",");
+  return [todayKey, sleep, wk, cyc, ovul, notes, conds].join("~");
 }
 
 // B.4 - every food log gets an immediate, templated acknowledgment. No model
@@ -4025,7 +4031,8 @@ function TabDash({
           const fpNow = dataFingerprint({
             fitbitData,
             cycleLog,
-            todayKey
+            todayKey,
+            profileData
           });
           const fpOk = !parsed._fp || parsed._fp === fpNow;
           if (!fpOk) console.log("Coach: cache bypassed - underlying data changed since generation.");
@@ -4370,7 +4377,8 @@ EVENT-RESPONSE RULES:
         content._fp = dataFingerprint({
           fitbitData,
           cycleLog,
-          todayKey
+          todayKey,
+          profileData
         });
         content._foodHash = (allFood[todayKey] || []).map(f => f.dbid || f.eaten_time || f.n).join("|");
         setCoachContent(content);
@@ -4506,7 +4514,8 @@ Suggest at most one concrete, easy thing she could still eat today.`;
           _fp: dataFingerprint({
             fitbitData,
             cycleLog,
-            todayKey
+            todayKey,
+            profileData
           })
         };
         try {
@@ -5499,7 +5508,15 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
     // Only chips that resolved recently. An acknowledgement that never
     // goes away stops reading as "done" and starts reading as clutter.
     const _todayK = todayKeyTz();
-    const resolvedInsights = _evaluated.filter(x => x.invalid && !dismissedTypes.includes(x.type) && resolvedChipStillFresh(x.type, _todayK));
+    // The 90-minute stamp is keyed by day, so crossing midnight
+    // re-stamped an old chip as "just resolved" and it reappeared for
+    // another 90 minutes -- which is why cottage cheese survived closing
+    // and reopening the app. An acknowledgement of yesterday's advice is
+    // not news today: content generated before today shows no chips at
+    // all, whatever its state.
+    const _genDay = coachContent?._generatedAt ? tsToDayKey(coachContent._generatedAt) : _todayK;
+    const _contentIsFromToday = _genDay === _todayK;
+    const resolvedInsights = _contentIsFromToday ? _evaluated.filter(x => x.invalid && !dismissedTypes.includes(x.type) && resolvedChipStillFresh(x.type, _todayK)) : [];
     // B.3 watch: if resolved outnumber active, the card has drifted from
     // coach into checklist — cap what we show so it can't take over.
     const shownResolved = resolvedInsights.slice(0, Math.max(1, domainInsights.length));
@@ -9940,7 +9957,8 @@ function TabLog({
   logEntries,
   setLogEntries,
   profileData,
-  setProfileData
+  setProfileData,
+  apiKey
 }) {
   // No category picker. The user writes or taps; the app derives the tag, and
   // the only question asked back is how long it applies (Phase 5.1/5.3).
@@ -10241,7 +10259,8 @@ function TabLog({
   }, confirmMsg)), /*#__PURE__*/React.createElement(ProfileSections, {
     sections: ["notes"],
     profileData: profileData,
-    setProfileData: setProfileData
+    setProfileData: setProfileData,
+    apiKey: apiKey
   }), /*#__PURE__*/React.createElement(SecLabel, null, "All entries"), logEntries.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
@@ -14995,7 +15014,8 @@ function App() {
     logEntries: logEntries,
     setLogEntries: setLogEntries,
     profileData: profileData,
-    setProfileData: setProfileData
+    setProfileData: setProfileData,
+    apiKey: apiKey
   }), tab === "progress" && /*#__PURE__*/React.createElement(TabProgress, {
     suppState: suppState,
     setSupp: setSupp,

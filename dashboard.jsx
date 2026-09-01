@@ -2060,14 +2060,19 @@ function violatesSensitivities(text, list){
 // old cache could serve morning content over a night of new sleep data.
 // Food is deliberately ABSENT: logging food retires advice at render time and
 // must never trigger a regeneration.
-function dataFingerprint({fitbitData, cycleLog, todayKey}){
+function dataFingerprint({fitbitData, cycleLog, todayKey, profileData}){
   const fd = fitbitData||{};
   const sleep = (fd.sleep||[]).map(s=>s.date).sort().slice(-1)[0] || "";
   const wk = (fd.workouts||[]).filter(w=>w.date===todayKey)
     .map(w=>(w.type+"|"+(w.dur||w.duration||""))).sort().join(",");
   const cyc = ((cycleLog&&cycleLog.period_start_dates)||[])[0] || "";
   const ovul = (((cycleLog&&cycleLog.ovulation_reports)||[]).slice(-1)[0]||{}).date || "";
-  return [todayKey, sleep, wk, cyc, ovul].join("~");
+  // What she TELLS the coach must invalidate it too. Without these, a health
+  // notes edit or a newly logged condition left yesterday's card standing.
+  const pd = profileData||{};
+  const notes = String(pd.health_notes||"").length + ":" + String(pd.health_notes||"").slice(-40);
+  const conds = conditionsOn(pd.conditions, todayKey).map(c=>c.id+"|"+(c.resolved_at||"")).sort().join(",");
+  return [todayKey, sleep, wk, cyc, ovul, notes, conds].join("~");
 }
 
 // B.4 - every food log gets an immediate, templated acknowledgment. No model
@@ -2387,7 +2392,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
           const schemaOk = (parsed._schema||1) >= COACH_SCHEMA || parsed.isLearning || parsed.isWeekly;
           // B.8 - data-state override: a cache entry generated before new sleep,
           // a workout, or a cycle event describes a day that no longer exists.
-          const fpNow = dataFingerprint({fitbitData, cycleLog, todayKey});
+          const fpNow = dataFingerprint({fitbitData, cycleLog, todayKey, profileData});
           const fpOk = !parsed._fp || parsed._fp === fpNow;
           if(!fpOk) console.log("Coach: cache bypassed - underlying data changed since generation.");
           if(isNewFormat && schemaOk && fpOk && hoursSince < 8){ setCoachContent(parsed); return; }
@@ -2650,7 +2655,7 @@ EVENT-RESPONSE RULES:
         }
         content._generatedAt = new Date().toISOString();
         content._schema = COACH_SCHEMA;
-        content._fp = dataFingerprint({fitbitData, cycleLog, todayKey});
+        content._fp = dataFingerprint({fitbitData, cycleLog, todayKey, profileData});
         content._foodHash = (allFood[todayKey]||[]).map(f=>f.dbid||f.eaten_time||f.n).join("|");
         setCoachContent(content);
         localStorage.setItem("coach_content_"+todayKey, JSON.stringify(content));
@@ -2732,7 +2737,7 @@ Suggest at most one concrete, easy thing she could still eat today.`;
         const next = {...base,
           domain_insights:[...(base.domain_insights||[]).filter(i=>i.type!=="food_pattern"), ins],
           _generatedAt:new Date().toISOString(), _schema:COACH_SCHEMA,
-          _fp:dataFingerprint({fitbitData, cycleLog, todayKey})};
+          _fp:dataFingerprint({fitbitData, cycleLog, todayKey, profileData})};
         try{ localStorage.setItem("coach_content_"+todayKey, JSON.stringify(next)); }catch(e){}
         supa("POST","profiles",{uid:UID,coach_content:next},"on_conflict=uid").catch(()=>{});
         return next;
@@ -3314,8 +3319,17 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
             // Only chips that resolved recently. An acknowledgement that never
             // goes away stops reading as "done" and starts reading as clutter.
             const _todayK = todayKeyTz();
-            const resolvedInsights = _evaluated.filter(x=>
-              x.invalid && !dismissedTypes.includes(x.type) && resolvedChipStillFresh(x.type, _todayK));
+            // The 90-minute stamp is keyed by day, so crossing midnight
+            // re-stamped an old chip as "just resolved" and it reappeared for
+            // another 90 minutes -- which is why cottage cheese survived closing
+            // and reopening the app. An acknowledgement of yesterday's advice is
+            // not news today: content generated before today shows no chips at
+            // all, whatever its state.
+            const _genDay = coachContent?._generatedAt ? tsToDayKey(coachContent._generatedAt) : _todayK;
+            const _contentIsFromToday = _genDay === _todayK;
+            const resolvedInsights = _contentIsFromToday
+              ? _evaluated.filter(x=>x.invalid && !dismissedTypes.includes(x.type) && resolvedChipStillFresh(x.type, _todayK))
+              : [];
             // B.3 watch: if resolved outnumber active, the card has drifted from
             // coach into checklist — cap what we show so it can't take over.
             const shownResolved = resolvedInsights.slice(0, Math.max(1, domainInsights.length));
@@ -5129,7 +5143,7 @@ const LOG_CONFIRMATION_MESSAGES = {
   general_note: "Saved — noted for your coach.",
 };
 
-function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
+function TabLog({logEntries, setLogEntries, profileData, setProfileData, apiKey}) {
   // No category picker. The user writes or taps; the app derives the tag, and
   // the only question asked back is how long it applies (Phase 5.1/5.3).
   const [txt, setTxt] = useState("");
@@ -5295,7 +5309,7 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
           gate is unaffected), and the free-text box in the same card covers
           anything that does not fit a chip. One box, not three. */}
       {/* Health notes: permanent history, no duration asked. Moved from Profile. */}
-      <ProfileSections sections={["notes"]} profileData={profileData} setProfileData={setProfileData}/>
+      <ProfileSections sections={["notes"]} profileData={profileData} setProfileData={setProfileData} apiKey={apiKey}/>
 
       <SecLabel>All entries</SecLabel>
       {logEntries.length===0
@@ -7419,7 +7433,7 @@ export default function App() {
       {tab==="dash" && <TabDash allFood={allFood} logEntries={logEntries} cycleDates={cycleDates} cycleLog={cycleLog} apiKey={apiKey} protTgt={protTgt} aiRefreshTick={aiRefreshTick} fitbitData={fitbitData} profileData={profileData} setProfileData={setProfileData}/>}
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities} onSaveCalorieTarget={(n)=>setProfileData(p=>({...p,calorie_target:n}))}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
-      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData}/>}
+      {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData} apiKey={apiKey}/>}
       {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt}/>}
       </ErrorBoundary>
 
