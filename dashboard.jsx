@@ -1826,7 +1826,15 @@ function isPainEntry(entry){
   const tag = entry.tag || "";
   // 1. Structured — the entry was filed as pain. No text inspection at all.
   if(PAIN_TAGS.indexOf(tag) !== -1) return true;
-  const txt = entry.txt || "";
+  // Structured chips carry their own meaning. Strip the labels of body chips we
+  // deliberately do not gate on, so a chip cannot trip the prose fallback with
+  // its own name ("Muscle soreness" gated training purely by being called that).
+  let txt = entry.txt || "";
+  try{
+    (SYMPTOMS_BODY||[]).forEach(c=>{
+      if((BODY_PAIN_CHIPS||[]).indexOf(c)===-1) txt = txt.split(c).join(" ");
+    });
+  }catch(e){}
   // 2. Fallback — legacy rows and free prose.
   if(PAIN_STRONG_RE.test(txt)) return true;
   const isPostWorkout = tag==="post_workout" || tag==="feedback" || tag==="postworkout" || tag==="training";
@@ -2305,6 +2313,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   }
 
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [coachErr, setCoachErr] = useState("");
   const _retriedPlaceholders = React.useRef(false);
   async function generateAllCoachContent(forceRefresh=false, triggeringEvent=null) {
     if(forceRefresh===false) _retriedPlaceholders.current=false;
@@ -2615,7 +2624,7 @@ EVENT-RESPONSE RULES:
           localStorage.setItem("coach_insight_history",JSON.stringify(existing));
         }catch(e){}
       }
-    }catch(e){ console.log("Coach content error:",e.message); }
+    }catch(e){ console.error("Coach content error:",e); setCoachErr(String(e.message||e).slice(0,160)); }
     setCoachLoading(false);
   }
 
@@ -2984,6 +2993,12 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
 
   return (
     <div>
+      {coachErr&&(
+        <div style={{background:C.rl,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:11.5,color:C.red,lineHeight:1.55}}>
+          Your coach couldn&rsquo;t update just now — {coachErr} Showing the last version.
+        </div>
+      )}
+
       {/* ── COACH CARD ─────────────────────────────────────── */}
       {!coachDismissed&&(()=>{
         if(!apiKey&&!coachContent) return null; // stored content renders even without a key
@@ -4471,6 +4486,20 @@ const SYMPTOMS_PHYSICAL=["🤕 Cramps","🎗️ Tender breasts","🤯 Headache",
 // Gut changes are commonly reported across the cycle — collected, but NO
 // coaching content until the GI evidence review lands. Bloating is shared with
 // Physical and deliberately not duplicated as a chip here.
+// Physical states for Log. Deliberately general and NOT cycle-specific: cramps,
+// tender breasts and the rest stay in Cycle, because logging them there is a
+// statement about the cycle. These are "how my body feels" on any day.
+const SYMPTOMS_BODY=["\u{1F915} Headache","\u{1F922} Nausea","\u{1F9B4} Back pain","\u{1F4A2} Neck or shoulder pain",
+  "\u{1F9B5} Joint pain","\u{1F4AA} Muscle soreness","\u{1F525} Pain somewhere else","\u{1F32B}\uFE0F Dizzy or lightheaded"];
+// Which of those are musculoskeletal/injury pain and must reach the
+// workout-safety gate. Soreness is excluded on purpose: the coach is already
+// told that fatigue and soreness are normal while rebuilding.
+// Derived from SYMPTOMS_BODY, never a second hand-written list: the two drifted
+// the moment one label's emoji changed, and the gate silently stopped matching.
+// Every gating chip is named "... pain"; soreness, headache, nausea and
+// dizziness are logged but do not block training.
+const BODY_PAIN_CHIPS=SYMPTOMS_BODY.filter(c=>/pain/i.test(c));
+
 const SYMPTOMS_DIGESTION=["🤢 Nausea","🧱 Constipation","💧 Loose stools"];
 // Discharge is an ovulation SIGNAL, not a symptom — its control lives in the
 // ovulation flow. Infection-indicator options (unusual/clumpy/grey/white) are
@@ -5150,9 +5179,8 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
   // the only question asked back is how long it applies (Phase 5.1/5.3).
   const [txt, setTxt] = useState("");
   const [moods, setMoods] = useState([]);
+  const [body, setBody] = useState([]);
   const [ctxTags, setCtxTags] = useState([]);
-  const [painTxt, setPainTxt] = useState("");
-  const [noteTxt, setNoteTxt] = useState("");
   const [duration, setDuration] = useState(null);   // null until they've entered something
   const [confirmMsg, setConfirmMsg] = useState("");
   const [saveErr, setSaveErr] = useState("");
@@ -5164,7 +5192,7 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
   // Overriding should be rare, so the default is pre-selected rather than blank.
   const suggestedDuration = ctxTags.length ? "days" : "today";
   const effDuration = duration || suggestedDuration;
-  const hasEntry = !!(txt.trim() || moods.length || ctxTags.length);
+  const hasEntry = !!(txt.trim() || moods.length || body.length || ctxTags.length);
 
   async function persistConditions(next){
     setProfileData(p=>({...p, conditions:next}));
@@ -5206,12 +5234,17 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
 
   async function addMain(){
     if(!hasEntry) return;
-    const parts=[...moods, ...ctxTags];
-    const body = parts.length ? parts.join(", ") + (txt.trim()?CONTEXT_SEP+txt.trim():"") : txt.trim();
+    const parts=[...moods, ...body, ...ctxTags];
+    const text = parts.length ? parts.join(", ") + (txt.trim()?CONTEXT_SEP+txt.trim():"") : txt.trim();
     // Derived, not chosen: the app classifies so the user doesn't have to.
-    const tag = ctxTags.length ? "life_context" : moods.length ? "energy_mood" : "general_note";
-    await saveEntry({body, tag, withDuration:effDuration});
-    setTxt(""); setMoods([]); setCtxTags([]); setDuration(null);
+    // Pain wins, because that tag is what the workout-safety gate reads.
+    const isPain = body.some(x=>BODY_PAIN_CHIPS.includes(x));
+    const tag = isPain ? "pain_discomfort"
+      : ctxTags.length ? "life_context"
+      : (moods.length||body.length) ? "energy_mood"
+      : "general_note";
+    await saveEntry({body:text, tag, withDuration:isPain?null:effDuration});
+    setTxt(""); setMoods([]); setBody([]); setCtxTags([]); setDuration(null);
   }
 
   async function delEntry(id){
@@ -5256,11 +5289,23 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
       <SecLabel>What&rsquo;s going on</SecLabel>
       <Card style={{marginBottom:14}}>
         <div style={{...head,marginTop:0}}>How I&rsquo;m feeling</div>
+        <div style={{fontSize:11,color:C.t3,marginTop:-5,marginBottom:8}}>Mood and energy</div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           {SYMPTOMS_MOOD.map(x=>(
             <button key={x} onClick={()=>setMoods(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x])} style={chip(moods.includes(x))}>{x}</button>
           ))}
         </div>
+
+        <div style={head}>How my body feels</div>
+        <div style={{fontSize:11,color:C.t3,marginTop:-5,marginBottom:8}}>Aches, pain and physical symptoms</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {SYMPTOMS_BODY.map(x=>(
+            <button key={x} onClick={()=>setBody(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x])} style={chip(body.includes(x))}>{x}</button>
+          ))}
+        </div>
+        {body.some(x=>BODY_PAIN_CHIPS.includes(x))&&(
+          <div style={{fontSize:11,color:C.t2,marginTop:8,lineHeight:1.5}}>Your coach won&rsquo;t suggest training while this is logged.</div>
+        )}
 
         <div style={head}>What&rsquo;s happening</div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
@@ -5290,31 +5335,10 @@ function TabLog({logEntries, setLogEntries, profileData, setProfileData}) {
         {confirmMsg&&<div style={{fontSize:12,color:C.teal,padding:"8px 12px",background:C.tl,borderRadius:8,marginTop:10}}>{confirmMsg}</div>}
       </Card>
 
-      {/* Pain gets its own section (Gate 2): it is neither a transient feeling
-          nor a circumstance, it is safety-relevant, and being filed here is
-          what makes the workout-safety gate structural rather than keyword-based. */}
-      <SecLabel>Pain or discomfort</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <div style={{fontSize:11.5,color:C.t3,marginBottom:9,lineHeight:1.5}}>Anything logged here stops your coach recommending training today.</div>
-        <textarea value={painTxt} onChange={e=>setPainTxt(e.target.value)} rows={2}
-          placeholder="Where, and what it feels like"
-          style={{...s.input,resize:"vertical",fontFamily:"inherit",marginBottom:10}}/>
-        <button onClick={async()=>{await saveEntry({body:painTxt,tag:"pain_discomfort",withDuration:null});setPainTxt("");}}
-          disabled={!painTxt.trim()} style={{...s.btn("p"),opacity:painTxt.trim()?1:.5}}>Log it</button>
-      </Card>
-
-      {/* 5.2 — some entries are neither state nor circumstance. Without a home
-          they get filed wrongly; the demo data already has "skipped workout —
-          long workday" under Post-Workout because nothing held "didn't happen". */}
-      <SecLabel>Just a note</SecLabel>
-      <Card style={{marginBottom:14}}>
-        <textarea value={noteTxt} onChange={e=>setNoteTxt(e.target.value)} rows={2}
-          placeholder="Anything that doesn&rsquo;t fit anywhere else"
-          style={{...s.input,resize:"vertical",fontFamily:"inherit",marginBottom:10}}/>
-        <button onClick={async()=>{await saveEntry({body:noteTxt,tag:"general_note",withDuration:null});setNoteTxt("");}}
-          disabled={!noteTxt.trim()} style={{...s.btn("s"),opacity:noteTxt.trim()?1:.5}}>Save note</button>
-      </Card>
-
+      {/* "Pain or discomfort" and "Just a note" removed: pain is now a chip in
+          "How my body feels" (still tagged pain_discomfort so the workout-safety
+          gate is unaffected), and the free-text box in the same card covers
+          anything that does not fit a chip. One box, not three. */}
       {/* Health notes: permanent history, no duration asked. Moved from Profile. */}
       <ProfileSections sections={["notes"]} profileData={profileData} setProfileData={setProfileData}/>
 
@@ -5491,7 +5515,7 @@ function WorkoutView({text, healthNotes, apiKey, onUpdatePlan, onClearFlag}) {
         }]})
       });
       const d=await res.json();
-      setSuggesting(s=>({...s,[ex.name]:{loading:false,suggestion:d.content?.[0]?.text?.trim()||""}}));
+      setSuggesting(s=>({...s,[ex.name]:{loading:false,suggestion:extractText(d, "the exercise suggestion")}}));
     }catch(e){setSuggesting(s=>({...s,[ex.name]:{loading:false,error:true}}));}
   }
 
@@ -5615,6 +5639,7 @@ function ProfileSections({suppState, setSupp, profileData, setProfileData, fitbi
   const [savedSupps, setSavedSupps] = useState("");
   const [healthNotes, setHealthNotes] = useState(profileData?.health_notes||"");
   const [editNotes, setEditNotes] = useState(!profileData?.health_notes);
+  const [notesErr, setNotesErr] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
   const [processingNotes, setProcessingNotes] = useState(false);
   const [savedNotes, setSavedNotes] = useState("");
@@ -5635,42 +5660,6 @@ function ProfileSections({suppState, setSupp, profileData, setProfileData, fitbi
 
   // Occasional plan updates in plain words ("swapped leg press for hack squat",
   // "tried 40kg, felt fine") — applied surgically, no per-session logging ritual.
-  async function tweakPlan(){
-    const txt=tweakText.trim();
-    if(!txt||!apiKey||tweaking) return;
-    setTweaking(true); setTweakErr("");
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:2500,messages:[{role:"user",content:
-`You are the client's personal trainer. The client tells you, in passing, an update about their workout plan. Apply it to the plan SURGICALLY.
-
-CLIENT SAYS: "${txt}"
-
-RULES:
-- Change ONLY the lines the comment requires (a swapped exercise, an updated weight, a removed/added movement). Every other line must remain byte-identical — same headers, same format, same order.
-- If they say something worked or they moved up in weight, update that exercise's numbers accordingly.
-- If they swapped a machine/exercise, replace that line with the new one in the same format (Exercise name — weight · sets×reps · rest), estimating sensible numbers from the old line.
-- If the comment conflicts with the health restrictions below, still apply it but append: ⚠️ FLAGGED: [exercise] — [reason]. Honour clearances — never flag anything a physician cleared.
-- If the comment is unclear or doesn't relate to the plan, return the plan unchanged.
-Return ONLY the full updated plan text, nothing else.
-
-HEALTH NOTES: ${healthNotes||"none"}
-
-CURRENT PLAN:
-${workoutPlan}`}]})});
-      const d=await res.json();
-      if(d.error) throw new Error(d.error.message);
-      const updated=d.content?.[0]?.text?.trim()||"";
-      if(updated){
-        setWorkoutPlan(updated);
-        await persist({workout_plan:updated}); // evolution of the same plan — no history entry
-        setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
-        setTweakText(""); setShowTweak(false);
-        setSavedPlan("Plan updated ✓");setTimeout(()=>setSavedPlan(""),2500);
-      }
-    }catch(e){ setTweakErr("Couldn't apply that — "+e.message.slice(0,80)); }
-    setTweaking(false);
-  }
   const [intake, setIntake] = useState(()=>({experience:"returning",session_min:60,style:"mix",notes:"",...(profileData?.activity_targets?.training_prefs||{})}));
   const [assessing, setAssessing] = useState(false);
   const [assessment, setAssessment] = useState(()=>{try{return localStorage.getItem("plan_assessment")||"";}catch{return "";}});
@@ -5746,91 +5735,7 @@ ${recent}`;
     await suggestPlan();
   }
 
-  async function suggestPlan(){
-    if(!apiKey||processingPlan) return;
-    setProcessingPlan(true); setPlanErr("");
-    const prevPlanBlock=workoutPlan.trim()?`
 
-CURRENT PLAN (the client has been running this — design the NEW plan as a progression of it, not a reset):
-${workoutPlan}
-
-CONTINUITY RULES:
-- Carry working weights FORWARD and progress them; never drop back to beginner weights on exercises the client already does.
-- Keep exercises that are working unless the client's comments ask for change; if they asked to mix things up, vary the movements but preserve the progression level.
-- If the client's comments mention an exercise that hurts or feels wrong, replace it and briefly note the swap inline (e.g. "replacing lat pulldown per your note").`:"";
-    const prompt=`You are an experienced, evidence-based personal trainer. Design a complete weekly workout plan for this client.
-
-${trainerContext()}${prevPlanBlock}
-
-REQUIREMENTS:
-- The week must contain EXACTLY the scheduled sessions: each strength session fully written out (if 2-3 strength days, use an appropriate split), plus the mobility and cardio sessions.
-- Each strength session must genuinely FIT the stated session length including a 5-min warm-up and realistic rest between sets — count the minutes; a 30-min session is 4-5 exercises max, a 60-min session 6-8.
-- Match the stated experience level: volume, exercise complexity, and coaching cues appropriate to it.
-- Respect the equipment-style preference (machines vs free weights vs mix) and only use equipment available in the training setting. Name SPECIFIC machines/equipment (e.g. "leg press machine", "seated cable row") so the client can find them in the gym.
-- Calibrate starting weights and difficulty to the client's actual recent training, not an idealised athlete.
-- Every exercise must respect the health restrictions — never include a conflicting movement; choose a safe alternative that serves the same goal instead. Honour clearances per the CLEARANCE RULE.
-- Serve the stated goals directly (e.g. push-up progression work if that is a goal).
-
-FORMAT (exactly):
-- ALL CAPS section headers, one per session, including the time budget (e.g. STRENGTH DAY 1 — FULL BODY (~60 MIN), MOBILITY (~30 MIN)).
-- Each exercise on its own line: Exercise name — weight · sets×reps · rest.
-- End with a PROGRESSION section: 2-3 lines on when and how to increase weight/reps.
-- If anything still conflicts with restrictions add: ⚠️ FLAGGED: Exercise — reason.
-- PLAIN TEXT ONLY: no markdown at all — no #, no **bold**, no ---, no bullet dashes. Headers are bare ALL-CAPS lines.
-Return ONLY the plan, nothing else.`;
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:4000,messages:[{role:"user",content:prompt}]})});
-      const d=await res.json();
-      if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-      const plan=d.content?.[0]?.text?.trim()||"";
-      if(!plan) throw new Error("The coach returned an empty plan. Try again.");
-      await persistPlan(plan);
-      setEditPlan(false);
-      setAssessment("");try{localStorage.removeItem("plan_assessment");}catch{}
-      setPlanErr("");
-      setSavedPlan(d.stop_reason==="max_tokens"?"Plan created ✓ (long plan — check the end is complete)":"Plan created ✓");
-      setTimeout(()=>setSavedPlan(""),4000);
-    }catch(e){
-      console.log("Build plan error:",e.message);
-      setPlanErr("Couldn't design the plan — "+(e.message||"unknown error").slice(0,160));
-    }
-    setProcessingPlan(false);
-  }
-
-  async function assessPlan(){
-    if(!apiKey||!workoutPlan.trim()||assessing) return;
-    setAssessing(true);
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:MODEL_MAIN,thinking:{type:"disabled"}, max_tokens:1200,messages:[{role:"user",content:
-`You are an experienced, evidence-based personal trainer reviewing a client's current workout plan. Be honest and specific — this is a professional assessment, not encouragement.
-
-${trainerContext()}
-
-THE PLAN AS WRITTEN:
-${workoutPlan}
-${(profileData?.plan_history||[]).length?`
-PREVIOUS PLAN (saved ${new Date(profileData.plan_history[0].saved_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}) — compare for PROGRESSION (are weights/reps moving forward, stalling, or regressing?):
-${profileData.plan_history[0].plan}
-`:""}
-Assess it and answer in EXACTLY this structure (plain text, these ALL-CAPS labels):
-VERDICT: One or two sentences — done at the weekly schedule above, will this plan realistically achieve the stated goals? Yes / mostly / no, and why.
-SAFETY: Any exercise conflicting with the health restrictions, each on its own line as "⚠️ Exercise — reason". If none: "No safety conflicts found."
-WHAT'S WORKING: 2-3 short bullets on what to keep.
-GAPS & FIXES: 3-5 short bullets — missing movement patterns, volume or intensity gaps vs the goals, and CONCRETE progression targets (specific weights, reps or timelines, e.g. "leg press: work from 35kg to 50kg over ~8 weeks, add 2.5kg when 3x12 feels easy").${(profileData?.plan_history||[]).length?`
-PROGRESSION: 1-2 sentences comparing this plan to the previous one — which exercises moved forward, which stalled, and whether the pace is right.`:""}
-ALIGNMENT: One sentence — do the weekly activity targets themselves match the goals, or should they change?
-Max 250 words total. No intro, no outro.`}]})});
-      const d=await res.json();
-      if(d.error) throw new Error(d.error.message);
-      const raw=d.content?.[0]?.text?.trim()||"";
-      const stamp=new Date().toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:getTz()});
-      const txt=`Assessed ${stamp} — based on your current health notes, goals and targets.\n\n${raw}`;
-      setAssessment(txt);
-      try{localStorage.setItem("plan_assessment",txt);}catch{}
-    }catch(e){ setAssessment("Assessment error: "+e.message); }
-    setAssessing(false);
-  }
 
   // Persist a partial update to Supabase + local state
   async function persist(patch, setFlag){
@@ -5854,18 +5759,35 @@ Max 250 words total. No intro, no outro.`}]})});
       body:JSON.stringify({model:MODEL_FAST,thinking:{type:"disabled"}, max_tokens:2000,messages:[{role:"user",content:prompt}]})
     });
     const d=await res.json();
-    return d.content?.[0]?.text||"";
+    return extractText(d, "the health notes analysis");
   }
 
   async function analyseNotes(raw) {
-    if(!apiKey||!raw.trim()) return raw;
+    if(!raw.trim()) return raw;
+    // These two failures need different actions from the user, and returning
+    // the input for both made them indistinguishable from success: the text
+    // saved, nothing was analysed, and nothing said so.
+    if(!apiKey){
+      setNotesErr("Saved — but not analysed: there's no Anthropic API key on this device. Add it in ⚙ Settings, then press Analyse & Save again.");
+      return raw;
+    }
+    setNotesErr("");
     setProcessingNotes(true);
     try{
       const result = await aiCall(
         `Read the following health notes and extract ONLY the medically relevant information. Rewrite it as a clean, very concise structured summary using ALL CAPS section headers and bullet points starting with •. Fix spelling and grammar. Be very brief — max 3 bullets per section. Use only sections that apply: CONDITIONS, RESTRICTIONS, CLEARANCES, SYMPTOMS, FOLLOW-UP. If something looks like an exercise restriction or contraindication, include it under RESTRICTIONS.\n\nCRITICAL: if the notes say a doctor/physician CLEARED the person for any activity (fully or specific exercises), you MUST preserve that verbatim under a CLEARANCES section — clearances are as medically relevant as restrictions and must never be dropped or softened. A clearance overrides earlier restrictions it refers to.\n\nReturn ONLY the formatted text, nothing else.\n\nHealth notes:\n${raw}`
       );
-      return result.trim();
-    }catch(e){return raw;}
+      const out=(result||"").trim();
+      if(!out){
+        setNotesErr("Saved — but the analysis came back empty, so your original text was kept. Try Analyse & Save again.");
+        return raw;
+      }
+      return out;
+    }catch(e){
+      setNotesErr("Saved — but the analysis failed: "+String(e.message||e).slice(0,130)+" Your text is kept exactly as you wrote it.");
+      console.error("Health notes analysis failed:", e);
+      return raw;
+    }
     finally{setProcessingNotes(false);}
   }
 
@@ -6244,6 +6166,7 @@ Max 250 words total. No intro, no outro.`}]})});
               {savedNotes&&<span style={{fontSize:12,color:C.teal}}>{savedNotes}</span>}
             </div>
             {!apiKey&&<div style={{fontSize:11,color:C.am,marginTop:6}}>Add your API key in Settings to enable AI analysis.</div>}
+            {notesErr&&<div style={{fontSize:11.5,color:C.red,background:C.rl,borderRadius:8,padding:"9px 11px",marginTop:8,lineHeight:1.55}}>{notesErr}</div>}
           </>
         ) : (
           <>
