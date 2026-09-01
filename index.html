@@ -3177,6 +3177,38 @@ function ActiveConditionsLine({
   }, "Yes, it\u2019s done")))));
 }
 
+// ── SCHEDULED-ARTIFACT VISIBILITY ───────────────────────────────────────────
+// The weekly review stopped firing and nobody noticed for five weeks. It was
+// found by chance, reading a timestamp during an unrelated check. Several
+// things here are supposed to happen on a schedule and there was no way to tell
+// whether any of them were working short of querying the database by hand.
+//
+// This prints one table on load. Not user-facing; it exists so "silently
+// stopped" is visible the next time it happens, to whichever of us looks first.
+function reportScheduledArtifacts(profileData) {
+  if (!profileData) return;
+  const now = Date.now();
+  const ageOf = ts => {
+    if (!ts) return null;
+    const t = new Date(ts).getTime();
+    return isNaN(t) ? null : Math.floor((now - t) / 864e5);
+  };
+  const cc = profileData.coach_content || {};
+  const rows = [["coach card", cc._generatedAt || null, 1], ["weekly review", profileData.weekly_review_generated_at || null, 8], ["coach memory", profileData.coach_memory_generated_at || null, 31], ["detected patterns", profileData.detected_patterns_at || null, 8]];
+  const out = rows.map(([name, ts, staleAfter]) => {
+    const age = ageOf(ts);
+    const status = ts === null ? "NEVER RECORDED" : age === null ? "unparseable" : age > staleAfter ? `STALE (${age}d, expected <=${staleAfter}d)` : `ok (${age}d)`;
+    return {
+      artifact: name,
+      generated: ts ? String(ts).slice(0, 16).replace("T", " ") : "-",
+      status
+    };
+  });
+  const bad = out.filter(r => /STALE|NEVER/.test(r.status));
+  console.log("Health Coach - scheduled artifacts" + (bad.length ? `  (${bad.length} need attention)` : "  (all current)"));
+  if (console.table) console.table(out);else out.forEach(r => console.log("  ", r.artifact, r.generated, r.status));
+}
+
 // ── PHASE 5.4 MIGRATION ─────────────────────────────────────────────────────
 // This was specified and never written: the conditions column stayed empty, so
 // a spinal surgery logged on 18 Aug lived on only as a life_context journal
@@ -4080,7 +4112,12 @@ function TabDash({
         hour12: false
       }));
       const dow = new Date(todayKey + "T12:00:00").getDay();
-      const isWeekly = dow === 0 && hour >= 18;
+      // Saturday, not Sunday. The Israeli week runs Sunday-Saturday, so a
+      // retrospective belongs at the END of it -- and the weekly review already
+      // used Saturday, so the two disagreed about what "weekly" meant.
+      // Verified nothing else depends on the Sunday assumption: isWeekly only
+      // sets a display mode and a cache-validity flag on the coach card.
+      const isWeekly = dow === 6 && hour >= 18;
       // Conditions and recovery reach the COACH CARD prompt, not just chat.
       // condCtx was only wired into buildCtxFull, which drives chat -- so the
       // card never saw conditions at all.
@@ -4499,16 +4536,22 @@ Suggest at most one concrete, easy thing she could still eat today.`;
       hour: "numeric",
       hour12: false
     }));
-    const isSaturdayEvening = dow === 6 && hour >= 18;
-    // Also show if already generated this week and not dismissed
+    // CATCH-UP, not a window. This used to require the app to be open during
+    // Saturday 18:00-23:59 -- about 3.5% of the week -- and a missed Saturday
+    // was lost for ever, because the next check was already a new week. It went
+    // five weeks without firing and nothing said so.
+    //
+    // The question is now "is there an unreviewed completed week", which is
+    // answerable at any moment, on any day.
     const stored = weeklyReview;
     if (stored?.dismissed) return false;
-    if (stored?.generatedAt) {
-      const weekStart = getWeekStartDate();
-      const genDate = new Date(stored.generatedAt);
-      if (genDate >= weekStart) return true;
-    }
-    return isSaturdayEvening;
+    const weekStart = getWeekStartDate();
+    if (stored?.generatedAt && new Date(stored.generatedAt) >= weekStart) return true;
+    // The current week counts as reviewable once it has ended (Saturday
+    // evening); any EARLIER week that was never reviewed is overdue right now.
+    const isEndOfWeek = dow === 6 && hour >= 18;
+    const missedAnEarlierWeek = !stored?.generatedAt || new Date(stored.generatedAt) < weekStart;
+    return isEndOfWeek || missedAnEarlierWeek;
   }
   async function generateWeeklyReview(forceRefresh = false) {
     if (IS_DEMO || !apiKey) return;
@@ -13354,92 +13397,7 @@ function MonthPanel({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "share",
     size: 13
-  }), " Share my month")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      fontWeight: 600,
-      letterSpacing: ".08em",
-      textTransform: "uppercase",
-      color: C.t3,
-      marginBottom: 12
-    }
-  }, "Week by week"), (() => {
-    const now2 = new Date();
-    const todayStr2 = now2.toLocaleDateString("en-CA", {
-      timeZone: getTz()
-    });
-    const [y2, m2, d2] = todayStr2.split("-").map(Number);
-    const dow2 = new Date(y2, m2 - 1, d2).getDay();
-    // Current week Sunday (Israeli week starts Sunday)
-    const currSun = new Date(y2, m2 - 1, d2 - daysSinceWeekStart(dow2));
-    // First tracked week: Sunday 7 Jun 2026 (June 1–6 was a partial pre-start week)
-    const firstSun = new Date(2026, 5, 7);
-    const fmt = d => d.toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short"
-    });
-    const fmtRange = sun => {
-      const sat = new Date(sun);
-      sat.setDate(sun.getDate() + 6);
-      return `${fmt(sun)} – ${fmt(sat)}`;
-    };
-    const weeks = [];
-    const sun = new Date(firstSun);
-    while (sun <= currSun) {
-      const sat = new Date(sun);
-      sat.setDate(sun.getDate() + 6);
-      const sunStr = sun.toLocaleDateString("en-CA", {
-        timeZone: getTz()
-      });
-      const satStr = sat.toLocaleDateString("en-CA", {
-        timeZone: getTz()
-      });
-      const isCurr = sun.getTime() === currSun.getTime();
-      const wWorkouts = (fitbitData.workouts || []).filter(wo => wo.date >= sunStr && wo.date <= satStr);
-      const wSteps = (fitbitData.steps || []).filter(s => s.date >= sunStr && s.date <= satStr);
-      const totalSteps = wSteps.reduce((s, d) => s + d.steps, 0);
-      const woTypes = [...new Set(wWorkouts.map(wo => wo.type))];
-      let detail = "";
-      if (totalSteps > 0 || wWorkouts.length > 0) {
-        detail = `${totalSteps.toLocaleString()} steps · ${wWorkouts.length} session${wWorkouts.length !== 1 ? "s" : ""}${woTypes.length ? " · " + woTypes.join(", ") : ""}`;
-      }
-      weeks.push({
-        label: `Week${isCurr ? " ← current" : ""}`,
-        range: fmtRange(new Date(sun)),
-        detail,
-        current: isCurr
-      });
-      sun.setDate(sun.getDate() + 7);
-    }
-    return weeks;
-  })().map((w, i, arr) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      ...s.wi,
-      borderBottom: i < arr.length - 1 ? `.5px solid ${C.bd}` : "none",
-      ...(w.current ? {
-        background: C.tl,
-        borderRadius: 6,
-        padding: "7px 8px"
-      } : {})
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("strong", {
-    style: {
-      fontSize: 12,
-      color: w.current ? C.teal : C.tx
-    }
-  }, w.label), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: w.current ? C.teal : C.t2,
-      marginLeft: 8
-    }
-  }, w.range)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: w.current ? C.teal : C.t2
-    }
-  }, w.detail)))));
+  }), " Share my month")));
 }
 
 // ── PROGRESS TAB (Phase 6) ──────────────────────────────────────────────────
@@ -13805,9 +13763,12 @@ function CoachMemoryCard({
         try {
           localStorage.setItem(CACHE_KEY, txt);
         } catch {}
+        // Stamped so staleness is measurable -- it had no timestamp at all,
+        // which is why "generated once in July and never again" was invisible.
         supa("POST", "profiles", {
           uid: UID,
-          coach_memory: txt
+          coach_memory: txt,
+          coach_memory_generated_at: new Date().toISOString()
         }, "on_conflict=uid").catch(() => {});
       }
     } catch (e) {
@@ -13817,9 +13778,16 @@ function CoachMemoryCard({
   }
 
   // Generate once on first load if there's no summary yet.
+  // Refresh when STALE, not only when absent. It was generated once and never
+  // again, so "what your coach knows about you" was a July snapshot -- actively
+  // misleading now that it sits on Today.
+  const MEMORY_MAX_AGE_DAYS = 14;
   React.useEffect(() => {
-    if (!memory && apiKey && !IS_DEMO) generate();
-  }, [apiKey]);
+    if (!apiKey || IS_DEMO) return;
+    const ts = profileData?.coach_memory_generated_at;
+    const ageDays = ts ? (Date.now() - new Date(ts).getTime()) / 864e5 : Infinity;
+    if (!memory || ageDays > MEMORY_MAX_AGE_DAYS) generate();
+  }, [apiKey, profileData?.coach_memory_generated_at]);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SecLabel, null, "What your coach knows about you"), /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 14,
@@ -13973,6 +13941,14 @@ function App() {
       setSettWeekStart(profileData.week_start);
     }
   }, [profileData?.week_start]);
+
+  // One table on load, so a schedule that stops is visible rather than silent.
+  const _reportedSched = React.useRef(false);
+  useEffect(() => {
+    if (!profileData || _reportedSched.current) return;
+    _reportedSched.current = true;
+    reportScheduledArtifacts(profileData);
+  }, [profileData?.uid]);
 
   // Phase 5.4 migration — runs once, then never again.
   useEffect(() => {
@@ -14728,11 +14704,11 @@ function App() {
     id: "food",
     label: "Food"
   }, {
-    id: "cycle",
-    label: "Cycle"
-  }, {
     id: "log",
     label: "Log"
+  }, {
+    id: "cycle",
+    label: "Cycle"
   }, {
     id: "progress",
     label: "Progress"
@@ -15057,7 +15033,7 @@ function App() {
     color: "#fff"
   }), " Ask your coach"), /*#__PURE__*/React.createElement("nav", {
     className: "bottomNav"
-  }, [["dash", "home", "Today"], ["food", "food", "Food"], ["cycle", "moon", "Cycle"], ["log", "log", "Log"], ["progress", "progress", "Progress"]].map(([id, icon, label]) => /*#__PURE__*/React.createElement("button", {
+  }, [["dash", "home", "Today"], ["food", "food", "Food"], ["log", "log", "Log"], ["cycle", "moon", "Cycle"], ["progress", "progress", "Progress"]].map(([id, icon, label]) => /*#__PURE__*/React.createElement("button", {
     key: id,
     onClick: () => setTab(id)
   }, tab === id && /*#__PURE__*/React.createElement("span", {
