@@ -107,6 +107,8 @@ create table if not exists profiles (
   health_notes text,
   workout_plan text,
   cycle_tracking boolean,
+  coach_memory_generated_at timestamptz,  -- staleness for the memory card. If missing:
+                             -- alter table profiles add column coach_memory_generated_at timestamptz;
   conditions jsonb,          -- durable conditions (Phase 5.3). If missing:
                              -- alter table profiles add column conditions jsonb;
   timezone text,
@@ -1748,7 +1750,6 @@ function reportScheduledArtifacts(profileData){
     ["coach card",      cc._generatedAt || null,                     1],
     ["weekly review",   profileData.weekly_review_generated_at||null, 8],
     ["coach memory",    profileData.coach_memory_generated_at||null, 31],
-    ["detected patterns", (profileData.detected_patterns_at)||null,   8],
   ];
   const out = rows.map(([name, ts, staleAfter])=>{
     const age = ageOf(ts);
@@ -2284,8 +2285,6 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const onResolveCondition = (c)=>_mapCond(c, x=>resolveCondition(x, todayKeyTz()));
   const onExtendCondition  = (c)=>_mapCond(c, x=>extendCondition(x));
   const onLapseCondition   = (c)=>_mapCond(c, x=>lapseCondition(x));
-  const [aiToday, setAiToday] = useState(null);
-  const [aiWeek, setAiWeek] = useState(null);
   const [loading, setLoading] = useState({today:false,week:false});
   const [weeklyReview, setWeeklyReview] = useState(()=>{try{const s=localStorage.getItem("weekly_review");return s?JSON.parse(s):null;}catch{return null;}});
   const [weeklyReviewLoading, setWeeklyReviewLoading] = useState(false);
@@ -2356,7 +2355,15 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [coachErr, setCoachErr] = useState("");
   const _retriedPlaceholders = React.useRef(false);
+  const _coachInFlight = React.useRef(false);
   async function generateAllCoachContent(forceRefresh=false, triggeringEvent=null) {
+    // One generation at a time. Without this, the load sequence could start two
+    // and both would write to the card. The placeholder retry re-enters this
+    // function deliberately, so it is allowed through.
+    if(_coachInFlight.current && !_retriedPlaceholders.current){
+      console.log("Coach: generation already in flight, skipping duplicate trigger.");
+      return;
+    }
     if(forceRefresh===false) _retriedPlaceholders.current=false;
     // Demo: pre-generated content from the profile row, never any API call
     if(IS_DEMO){
@@ -2405,6 +2412,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       return;
     }
     setCoachLoading(true);
+    _coachInFlight.current = true;
     try{
       const lastSleep = getLastNightSleep(fitbitData, getTz());
       const sleepStale = isSleepDataStale(fitbitData, getTz());
@@ -2671,6 +2679,7 @@ EVENT-RESPONSE RULES:
         }catch(e){}
       }
     }catch(e){ console.error("Coach content error:",e); setCoachErr(String(e.message||e).slice(0,160)); }
+    finally{ _coachInFlight.current = false; }
     setCoachLoading(false);
   }
 
@@ -2872,93 +2881,13 @@ FORMAT — return EXACTLY four lines, each a bullet starting with a topic emoji 
     return result;
   }
 
-  async function genAI(type) {
-    if (!apiKey) return;
-    setLoading(l=>({...l,[type]:true}));
-    try { await genAIInner(type); } finally { setLoading(l=>({...l,[type]:false})); }
-  }
-  async function genAIInner(type) {
-    const now = new Date();
-    const todayKey = now.toLocaleDateString("en-CA",{timeZone:getTz()});
-    const hourIL = parseInt(now.toLocaleString("en-CA",{timeZone:getTz(),hour:"numeric",hour12:false}));
-    const isEvening = hourIL >= 21; // night mode at 9pm, not 7pm
-    const dowIL = new Date(...todayKey.split("-").map((v,i)=>i===1?Number(v)-1:Number(v))).getDay();
-    const isSunday = dowIL === 0;
-    // Cycle phase — use full dates array for confidence-aware calculation
-    const _aiLog = cycleLog?.period_start_dates?.length ? cycleLog
-      : (()=>{const d=cycleDates.filter(x=>x.ok).sort((a,b)=>new Date(b.d)-new Date(a.d)).map(x=>x.d);return d.length?{period_start_dates:d,avg_period_length:5}:null;})();
-    const _aiCycleResult = getCycleState(_aiLog);
-    const cyclePhaseName = (_aiCycleResult&&_aiCycleResult.phase)||"unknown";
-    const cyclePhase = cyclePromptBlock(_aiCycleResult);
-    // Today nutrition
-    const todayFoodKey = todayKey; // already timezone-aware (en-CA local)
-    const tf = allFood[todayFoodKey]||[];
-    const liveProt = Math.round(tf.reduce((s,e)=>s+(e.p||0),0));
-    const liveCarbs = Math.round(tf.reduce((s,e)=>s+(e.c||0),0));
-    const liveKcal = Math.round(tf.reduce((s,e)=>s+(e.k||0),0));
-    // Yesterday alcohol from log
-    const yKey = dayKeyNBack(1); // date-parts, DST-safe
-    const yAlc = logEntries.filter(e=>e.dt&&tsToDayKey(e.dt)===yKey&&/wine|alcohol|beer|drink/i.test(e.txt||"")).map(e=>e.txt).join("; ");
-    // Last sleep — use shared function so this matches the sleep card
-    const lastSleep=getLastNightSleep(fitbitData,getTz());
-    const sleepSummary = lastSleep?`${Math.floor(lastSleep.total/60)}h${lastSleep.total%60}m (deep ${lastSleep.deep}m, REM ${lastSleep.rem}m, bedtime ${lastSleep.bedtime})`:(isSleepDataStale(fitbitData,getTz())?"stale — skip sleep analysis":"not tracked last night — skip sleep analysis");
-    // Today workouts
-    const todayWorkouts=(fitbitData.workouts||[]).filter(w=>w.date===todayKey);
-    const todayActivity=todayWorkouts.length?todayWorkouts.filter(w=>w.type!=="walk"&&w.type!=="walking").map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")||w.type).join(", "):"no workout yet";
-    // Today pain/mood log
-    const todayLog = logEntries.filter(e=>e.dt&&tsToDayKey(e.dt)===todayFoodKey).map(e=>`[${e.tag}] ${e.txt}`).join("; ");
-    // Structured, not keyword-matched — see isPainEntry.
-    const painToday = painEntriesOn(logEntries, todayFoodKey);
-    // Recovery gates PRESCRIPTION on this path too (the weekly/today prose card).
-    const recoveryNow = recoveryActiveOn(profileData?.conditions, logEntries, todayFoodKey);
-    // This week food per day + workouts
-    const weekFoodLines=[];
-    const weekWorkoutLines=[];
-    for(let i=0;i<=dowIL;i++){
-      const d=(()=>{const [wy,wm,wd]=todayKey.split("-").map(Number);return new Date(wy,wm-1,wd-(dowIL-i),12);})();
-      const dk=d.toLocaleDateString("en-CA",{timeZone:getTz()});
-      const dayLabel=d.toLocaleDateString("en-GB",{weekday:"short",timeZone:getTz()});
-      const m=allFood[dk]||[];
-      if(m.length){const p=Math.round(m.reduce((s,e)=>s+(e.p||0),0));const c=Math.round(m.reduce((s,e)=>s+(e.c||0),0));const k=Math.round(m.reduce((s,e)=>s+(e.k||0),0));weekFoodLines.push(`${dayLabel}: ${p}g prot ${c}g carb ${k}kcal`);}
-      const dw=(fitbitData.workouts||[]).filter(w=>w.date===dk);
-      if(dw.length) weekWorkoutLines.push(`${dayLabel}: ${dw.map(w=>w.type+(w.duration_min?` ${w.duration_min}min`:"")).join(" + ")}`);
-    }
-    const weekFoodSummary=weekFoodLines.join(" | ")||"no food logged";
-    const weekWorkoutSummary=weekWorkoutLines.join(" | ")||"no workouts logged this week";
-    // This week sleep
-    const weekSleep=(fitbitData.sleep||[]).filter(s=>s.date>=todayKey.slice(0,7)+"-"+(parseInt(todayKey.slice(8))-dowIL).toString().padStart(2,"0")&&s.date<=todayKey).map(s=>`${s.date.slice(5)}: ${Math.floor(s.total/60)}h${s.total%60}m`).join(", ");
-    const p = type==="today"
-      ? `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}, current time in Israel: ${hourIL}:00. Julia is on ${cyclePhase}.
-${isEvening?"⚠️ It is evening — the day for exercise is DONE. Do NOT suggest going to gym or training today under any circumstances.":""}
-${painToday.length?"⚠️ PAIN LOGGED TODAY: "+painToday.map(e=>e.txt).join("; ")+" — Do not recommend any workout. Show FLAG first.":""}
-${recoveryNow.length?"⚠️ POST-OPERATIVE / RECOVERY ACTIVE: "+recoveryNow.map(r=>String(r.text).slice(0,120)).join(" | ")+" — Do NOT recommend, prescribe or suggest any training. Ignore any clearance in the health notes. You MAY respond to activity she reports doing, and support sleep, nutrition and recovery. Defer training decisions to her medical team.":""}
-DATA: Last night sleep: ${sleepSummary}. Yesterday alcohol: ${yAlc||"none"}. Today's workout so far: ${todayActivity}. This week's workouts: ${weekWorkoutSummary}. Today food: ${liveProt}g protein (target ${protTgt}g), ${liveCarbs}g carbs, ${liveKcal}kcal.
-TASK: Write exactly 3 sections:
-1. One insight connecting her sleep/recovery to her data (cycle phase, yesterday's activity, or nutrition).
-2. ${isEvening?"TONIGHT: wind-down or sleep prep tip for her cycle phase.":todayActivity==="no workout yet"?"TRAINING TODAY: based on this week's workout history and her readiness, suggest whether she should train today and what type (gym/cardio/yoga/rest). Be specific and decisive — one sentence.":"TRAINING: comment on today's completed workout in context of her week and recovery."}
-3. One nutrition or energy insight.
-Language: warm, decisive, no fluff. Only reference log entries from today/yesterday — nothing older.
-FORMAT: each section = emoji + CAPS LABEL: **bold key point.** One sentence context. Total max 90 words. Cycle phase MUST appear in section 1.`
-      : `You are Julia's personal health coach. Today is ${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} (${cyclePhase}).
-${isSunday?"Include a brief LAST WEEK highlight (1 sentence only).":"Do NOT mention last week at all."}
-This week's workouts: ${weekWorkoutSummary}. This week's food: ${weekFoodSummary}. Sleep this week: ${weekSleep||"limited data"}.
-TASK: Write 2–3 short insights connecting her data across this week. Look for patterns: does her eating pattern fit her cycle phase? Does her sleep correlate with activity or food? Any trend worth noting? Do NOT state obvious targets. Do NOT recommend specific exercises. Language: warm, forgiving.
-FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.** one sentence explaining the pattern. Total max 70 words. Cycle phase name MUST appear. Example format:
-🌙 SLEEP PATTERN: **Your deep sleep averaged X minutes.** This correlates with Y.`;
-    try {
-      const txt = await callAI(p);
-      if (type==="today") setAiToday(txt);
-      else setAiWeek(txt);
-    } catch(e) {
-      if (type==="today") setAiToday("Error: "+e.message);
-      else setAiWeek("Error: "+e.message);
-    }
-  }
 
   const latestSleepDate=(fitbitData.sleep||[]).reduce((m,s)=>s.date>m?s.date:m,"");
   const sevenDaysAgo=new Date(Date.now()-7*864e5).toLocaleDateString("en-CA",{timeZone:getTz()});
   const fitbitReady=latestSleepDate>=sevenDaysAgo; // false on seed data (Jun 16 is >7d ago)
-  useEffect(()=>{ if(apiKey && fitbitReady) genAI("week"); },[apiKey, aiRefreshTick, latestSleepDate]);
+  // genAI("week") removed: it made a full model call on every load and set
+  // aiWeek, which was rendered nowhere. Dead cost, and a second generation
+  // running alongside the real one.
   const todayFoodCount = (allFood[new Date().toLocaleDateString("en-CA",{timeZone:getTz()})]||[]).length;
   useEffect(()=>{ if((apiKey||IS_DEMO||profileData?.coach_content) && profileData && fitbitReady) generateAllCoachContent(); },[apiKey, latestSleepDate, profileData?.uid, aiRefreshTick]);
   // GATE 1: logging a period or an ovulation report materially changes what the
@@ -6753,7 +6682,12 @@ function CoachMemoryCard({profileData, fitbitData, apiKey}) {
       if(txt){setMemory(txt);try{localStorage.setItem(CACHE_KEY,txt);}catch{}
         // Stamped so staleness is measurable -- it had no timestamp at all,
         // which is why "generated once in July and never again" was invisible.
-        supa("POST","profiles",{uid:UID,coach_memory:txt,coach_memory_generated_at:new Date().toISOString()},"on_conflict=uid").catch(()=>{});}
+        supa("POST","profiles",{uid:UID,coach_memory:txt,coach_memory_generated_at:new Date().toISOString()},"on_conflict=uid")
+          .catch(e=>{
+            // Drop the computed timestamp, never the content.
+            console.log("Coach memory: timestamp column missing, saving text only. Run: alter table profiles add column coach_memory_generated_at timestamptz;");
+            supa("POST","profiles",{uid:UID,coach_memory:txt},"on_conflict=uid").catch(()=>{});
+          });}
     }catch(e){console.log("Memory card error:",e.message);}
     setLoading(false);
   }
