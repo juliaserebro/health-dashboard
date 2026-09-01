@@ -2049,6 +2049,26 @@ function hasDoubleUnit(text){ return DOUBLE_UNIT_RE.test(String(text||"")); }
 // metric we could not resolve. A wrong number is confusing; a code token on
 // screen makes the app look broken. Suppressing is always safe, so anything
 // still carrying a brace is not displayed.
+// A resolved chip is a MOMENT of acknowledgement, not a standing status. It was
+// recomputed as "resolved" on every render for as long as today's food still
+// contained the item, so "You had the cottage cheese ✓" sat there from noon
+// onwards and became furniture. We stamp when each one first resolved and show
+// it only briefly afterwards.
+const RESOLVED_CHIP_MINUTES = 90;
+function resolvedChipAge(type, dayKey){
+  const k="coach_resolved_"+dayKey;
+  let map={}; try{ map=JSON.parse(localStorage.getItem(k)||"{}"); }catch(e){}
+  if(!map[type]){
+    map[type]=Date.now();
+    try{ localStorage.setItem(k, JSON.stringify(map)); }catch(e){}
+    return 0;
+  }
+  return (Date.now()-map[type])/60000;
+}
+function resolvedChipStillFresh(type, dayKey){
+  return resolvedChipAge(type, dayKey) < RESOLVED_CHIP_MINUTES;
+}
+
 const ANY_TOKEN_RE=/\{[a-z_]+\}/i;
 function stillHasToken(text){ return ANY_TOKEN_RE.test(String(text||"")); }
 // Same guard for the free-text coach fields, which are not insights and so
@@ -3124,7 +3144,11 @@ FORMAT: each insight on its own line as: emoji + CAPS LABEL: **bold key point.**
               }
               return true;
             });
-            const resolvedInsights = _evaluated.filter(x=>x.invalid && !dismissedTypes.includes(x.type));
+            // Only chips that resolved recently. An acknowledgement that never
+            // goes away stops reading as "done" and starts reading as clutter.
+            const _todayK = todayKeyTz();
+            const resolvedInsights = _evaluated.filter(x=>
+              x.invalid && !dismissedTypes.includes(x.type) && resolvedChipStillFresh(x.type, _todayK));
             // B.3 watch: if resolved outnumber active, the card has drifted from
             // coach into checklist — cap what we show so it can't take over.
             const shownResolved = resolvedInsights.slice(0, Math.max(1, domainInsights.length));
