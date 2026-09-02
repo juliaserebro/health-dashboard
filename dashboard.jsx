@@ -1822,7 +1822,25 @@ function isRecoveryText(t){ return RECOVERY_RE.test(String(t||"")); }
 
 // Structured first: any active condition whose text reads as recovery.
 // Fallback: recent log entries not yet migrated to conditions.
-function recoveryActiveOn(conditions, logEntries, dayKey){
+// A standing restriction in the health notes outranks everything else: it is
+// the medical record, it has no expiry, and it is what a clinician actually
+// wrote down. Matched separately from RECOVERY_RE because the phrasing is about
+// PERMISSION ("until clearance", "no activities beyond"), not about an event.
+const RESTRICTION_RE = /\b(until\s+(?:physician|doctor|medical|surgeon)?\s*clearance|await\s+(?:physician|doctor|medical)\s+clearance|no\s+activities\s+beyond|not\s+cleared|no\s+clearance|activity\s+restrictions?|restricted\s+(?:from|to)|no\s+lifting|avoid\s+lifting)\b/i;
+function restrictionInNotes(healthNotes){
+  const t=String(healthNotes||"");
+  if(!t.trim()) return null;
+  if(RESTRICTION_RE.test(t)) return t.replace(/\s+/g," ").trim().slice(0,220);
+  // A recorded procedure with no clearance statement also restricts.
+  if(/\b(surgery performed|post[-\s]?op|surgery on|underwent)\b/i.test(t) && !/cleared (by|for)/i.test(t))
+    return t.replace(/\s+/g," ").trim().slice(0,220);
+  return null;
+}
+
+function recoveryActiveOn(conditions, logEntries, dayKey, healthNotes){
+  // 0. The medical record first. Highest authority, no expiry.
+  const fromNotes = restrictionInNotes(healthNotes);
+  if(fromNotes) return [{text:"Health notes: "+fromNotes, since:"health notes"}];
   const fromConditions = conditionsOn(conditions, dayKey).filter(c=>isRecoveryText(c.text));
   if(fromConditions.length) return fromConditions.map(c=>({text:c.text, since:c.start_date}));
   const fromLog = (logEntries||[]).filter(e=>{
@@ -1986,7 +2004,10 @@ function buildCtxFull({allFood, logEntries, cycleDates, cycleLog, protTgt, fitbi
       + _activeConds.map(c=>`${c.text} (day ${daysElapsed(c, todayKeyTz())+1})`).join("; ")
       + `. Take these into account; do not treat them as new news each day.`
     : '';
-  return goalsCtx + actTargCtx + suppsCtx + sensCtx + condCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a recent pain/discomfort log entry (per the LOG RELEVANCE RULES below) or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}.
+  return goalsCtx + actTargCtx + suppsCtx + sensCtx + condCtx + `\nJulia Serebro 41F 166cm 57.6kg. Post T9-T10 surgery Mar2026, L4-L5 disc herniation, left-side pain (physio pending). Goals: (1)build strength and muscle (2)push-up baseline progression (3)lower back/spinal stability (4)cardiovascular fitness. TRAINING PHILOSOPHY: She is building fitness after deconditioning. Muscle fatigue and general tiredness are NORMAL and expected during this phase. Do NOT recommend rest for general fatigue or soreness unless there is a recent pain/discomfort log entry (per the LOG RELEVANCE RULES below) or injury concern. Rest is only warranted for acute injury or illness, not routine tiredness. STRENGTH SESSION RULE: Never mention specific muscle groups or body parts in coaching. Frame strength sessions around readiness, energy, and goals only. TODAY: ${todayStr}. Fitbit data: ${stepsLine}. ${sleepLine}. ${napLine} Recent workouts: ${recentWorkouts||"none"}. Yesterday (${yKey}): ${yActivity}, ${yStepsNote}. ${(()=>{const h=parseInt(new Date().toLocaleString("en-US",{timeZone:getTz(),hour:"numeric",hour12:false}),10);
+  if(h<5) return "TIME OF DAY: it is the middle of the night. The day has barely started. Do NOT comment on today's food, protein or step totals at all — there has been no day yet. ";
+  if(h<11) return "TIME OF DAY: it is early morning. Today's running totals are near zero because the day has barely begun, which is NORMAL. Do NOT frame today's protein or steps as being behind, low, or needing to catch up. ";
+  return "";})()}LIVE NUTRITION: ${liveProt}g protein(target ${protTgt}g, ${Math.max(0,protTgt-liveProt)}g to go), ${liveKcal}kcal, ${liveCarbs}g carbs, ${liveFat}g fat. Meals today: ${mealNames}. Yesterday alcohol: ${yAlcohol||"none"}. ${cycleCtx}.
 
 ${logCtx}`;
 }
@@ -2201,13 +2222,18 @@ function resolvedChipStillFresh(type, dayKey){
   return resolvedChipAge(type, dayKey) < RESOLVED_CHIP_MINUTES;
 }
 
+// "[2026-09-02 | Wednesday | today]" is an internal recency annotation. It is
+// for the model to read, never to repeat.
+const DATE_LABEL_RE=/\s*\[\d{4}-\d{2}-\d{2}\s*\|[^\]]*\]/g;
+function stripDateLabels(text){ return String(text||"").replace(DATE_LABEL_RE,""); }
+
 const ANY_TOKEN_RE=/\{[a-z_]+\}/i;
 function stillHasToken(text){ return ANY_TOKEN_RE.test(String(text||"")); }
 // Same guard for the free-text coach fields, which are not insights and so
 // never passed through evaluateInsight at all -- the actual hole behind Bug 2.
 function safeCoachText(text, m, field){
   if(text==null||text==="") return text;
-  const filled = fillPlaceholders(text, m||{});
+  const filled = stripDateLabels(fillPlaceholders(text, m||{}));
   if(!stillHasToken(filled)) return filled;
   // A field that vanishes with no explanation is the same class of invisible
   // failure as the broken regex was. Name the field and the token.
@@ -2251,6 +2277,7 @@ function evaluateInsight(ins, m){
   let content=ins?ins.content:"";
   let invalid=false, resolvedText=null;
   // Preferred: placeholders. Applies to any metric the text references.
+  content = stripDateLabels(content);
   const hadPlaceholder=hasPlaceholder(content);
   if(hadPlaceholder) content=fillPlaceholders(content, {...m, protein_target:m.protein_target});
   if(d&&d.metric&&Object.prototype.hasOwnProperty.call(m,d.metric)){
@@ -2458,7 +2485,7 @@ function TabDash({allFood, logEntries, cycleDates, cycleLog, apiKey, protTgt, ai
       // Conditions and recovery reach the COACH CARD prompt, not just chat.
       // condCtx was only wired into buildCtxFull, which drives chat -- so the
       // card never saw conditions at all.
-      const _recovery = recoveryActiveOn(profileData?.conditions, logEntries, todayKey);
+      const _recovery = recoveryActiveOn(profileData?.conditions, logEntries, todayKey, profileData?.health_notes);
       const _activeC  = conditionsOn(profileData?.conditions, todayKey);
       const recoveryBlock = _recovery.length ? `
 
@@ -2584,6 +2611,8 @@ Return ONLY valid JSON:
 }
 
 Rules: no section repeats another; all language warm and non-guilt; never mention specific muscle groups or body parts.
+
+NEVER reproduce the bracketed date annotations from the log, e.g. "[2026-09-02 | Wednesday | today]". They exist so you can judge recency. Write "today", "yesterday" or "on Tuesday" in your own words instead.
 
 DEPENDENCY RULES (these make the card self-correcting — follow exactly):
 - PLACEHOLDERS, NOT NUMBERS. Never write a running total as a literal. Write the placeholder token instead, and the app substitutes the live value at display time:
