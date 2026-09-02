@@ -6303,7 +6303,11 @@ function Collapsible({title, sub, children, open=false}){
 // control that hangs off it all answer a different question than "today".
 // Unchanged in substance -- Phase 6.3 says move sharing as-is; what is actually
 // worth sharing is a separate decision.
-function WeekPanel({fitbitData, allFood, protTgt, profileData}){
+function WeekPanel({fitbitData, allFood, protTgt, profileData, logEntries}){
+  // When training is not being prescribed, targets must not read as
+  // instructions. The numbers stay -- they are a record of what happened --
+  // but the "/2" that turns a count into a shortfall goes away.
+  const _recovering = recoveryActiveOn(profileData?.conditions, logEntries, todayKeyTz(), profileData?.health_notes).length>0;
   return (
     <>
         <SecLabel>{(()=>{
@@ -6343,18 +6347,23 @@ function WeekPanel({fitbitData, allFood, protTgt, profileData}){
             <div style={s.aiCard}>
               <div style={s.aiLbl}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:C.pu}}/>
-                This week so far
+                {_recovering ? "This week" : "This week so far"}
               </div>
+              {_recovering&&(
+                <div style={{fontSize:11,color:C.t2,lineHeight:1.5,marginBottom:8}}>
+                  Weekly targets are paused while you&rsquo;re recovering. This is a record of what you&rsquo;ve done, not something to hit.
+                </div>
+              )}
               <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:6}}>
                 {rows.map(([label,done,target])=>(
                   <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
                     <span style={{color:C.t2}}>{label}</span>
-                    <span style={{fontWeight:600,color:done>=target?C.teal:C.tx}}>{done}<span style={{fontWeight:400,color:C.t3}}>/{target}</span></span>
+                    <span style={{fontWeight:600,color:_recovering?C.t2:(done>=target?C.teal:C.tx)}}>{done}{!_recovering&&<span style={{fontWeight:400,color:C.t3}}>/{target}</span>}</span>
                   </div>
                 ))}
                 <div style={{borderTop:`1px solid ${C.bd}`,paddingTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12}}>
                   <span style={{color:C.t2,fontWeight:500}}>Total</span>
-                  <span style={{fontWeight:600,color:totalDone>=totalTarget?C.teal:C.tx}}>{totalDone}<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span></span>
+                  <span style={{fontWeight:600,color:_recovering?C.t2:(totalDone>=totalTarget?C.teal:C.tx)}}>{totalDone}{!_recovering&&<span style={{fontWeight:400,color:C.t3}}>/{totalTarget}</span>}</span>
                 </div>
               </div>
               <button onClick={()=>{
@@ -6568,10 +6577,10 @@ function MonthPanel({fitbitData, allFood, protTgt, profileData}){
 // Upper section is what is MOVING; lower section is what is SET, collapsed,
 // because goals are prominent during onboarding and then demoted below the
 // tracking they inform.
-function TabProgress({suppState, setSupp, profileData, setProfileData, fitbitData, apiKey, allFood, protTgt}){
+function TabProgress({suppState, setSupp, profileData, setProfileData, fitbitData, apiKey, allFood, protTgt, logEntries}){
   return (
     <div>
-      <WeekPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData}/>
+      <WeekPanel fitbitData={fitbitData} allFood={allFood} protTgt={protTgt} profileData={profileData} logEntries={logEntries}/>
 
       <WeekDetail fitbitData={fitbitData} profileData={profileData}/>
 
@@ -7397,7 +7406,7 @@ export default function App() {
       {tab==="food" && <TabFood allFood={allFood} setAllFood={setAllFood} protTgt={protTgt} apiKey={apiKey} onFoodLogged={()=>{setAiRefreshTick(t=>t+1);}} suppState={suppState} setSupp={setSupp} profileData={profileData} onSaveSupps={saveSupplementsFromFood} onSaveSensitivities={saveFoodSensitivities} onSaveCalorieTarget={(n)=>setProfileData(p=>({...p,calorie_target:n}))}/>}
       {tab==="cycle" && <TabCycle cycleDates={cycleDates} setCycleDates={setCycleDates} cycleLog={cycleLog} setCycleLog={setCycleLog}/>}
       {tab==="log" && <TabLog logEntries={logEntries} setLogEntries={setLogEntries} profileData={profileData} setProfileData={setProfileData} apiKey={apiKey}/>}
-      {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt}/>}
+      {tab==="progress" && <TabProgress suppState={suppState} setSupp={setSupp} profileData={profileData} setProfileData={setProfileData} fitbitData={fitbitData} apiKey={apiKey} allFood={allFood} protTgt={protTgt} logEntries={logEntries}/>}
       </ErrorBoundary>
 
       {/* COACH CHAT BUTTON */}

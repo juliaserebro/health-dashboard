@@ -12722,8 +12722,13 @@ function WeekPanel({
   fitbitData,
   allFood,
   protTgt,
-  profileData
+  profileData,
+  logEntries
 }) {
+  // When training is not being prescribed, targets must not read as
+  // instructions. The numbers stay -- they are a record of what happened --
+  // but the "/2" that turns a count into a shortfall goes away.
+  const _recovering = recoveryActiveOn(profileData?.conditions, logEntries, todayKeyTz(), profileData?.health_notes).length > 0;
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(SecLabel, null, (() => {
     const sun = getWeekStartDate();
     const sat = getWeekEndDate();
@@ -12773,7 +12778,14 @@ function WeekPanel({
         borderRadius: "50%",
         background: C.pu
       }
-    }), "This week so far"), /*#__PURE__*/React.createElement("div", {
+    }), _recovering ? "This week" : "This week so far"), _recovering && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.t2,
+        lineHeight: 1.5,
+        marginBottom: 8
+      }
+    }, "Weekly targets are paused while you\u2019re recovering. This is a record of what you\u2019ve done, not something to hit."), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         flexDirection: "column",
@@ -12795,9 +12807,9 @@ function WeekPanel({
     }, label), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 600,
-        color: done >= target ? C.teal : C.tx
+        color: _recovering ? C.t2 : done >= target ? C.teal : C.tx
       }
-    }, done, /*#__PURE__*/React.createElement("span", {
+    }, done, !_recovering && /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 400,
         color: C.t3
@@ -12819,9 +12831,9 @@ function WeekPanel({
     }, "Total"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 600,
-        color: totalDone >= totalTarget ? C.teal : C.tx
+        color: _recovering ? C.t2 : totalDone >= totalTarget ? C.teal : C.tx
       }
-    }, totalDone, /*#__PURE__*/React.createElement("span", {
+    }, totalDone, !_recovering && /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 400,
         color: C.t3
@@ -13361,13 +13373,15 @@ function TabProgress({
   fitbitData,
   apiKey,
   allFood,
-  protTgt
+  protTgt,
+  logEntries
 }) {
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(WeekPanel, {
     fitbitData: fitbitData,
     allFood: allFood,
     protTgt: protTgt,
-    profileData: profileData
+    profileData: profileData,
+    logEntries: logEntries
   }), /*#__PURE__*/React.createElement(WeekDetail, {
     fitbitData: fitbitData,
     profileData: profileData
@@ -14960,7 +14974,8 @@ function App() {
     fitbitData: fitbitData,
     apiKey: apiKey,
     allFood: allFood,
-    protTgt: protTgt
+    protTgt: protTgt,
+    logEntries: logEntries
   })), /*#__PURE__*/React.createElement("button", {
     className: "coachFab",
     onClick: () => setShowChat(true),
