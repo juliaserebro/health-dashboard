@@ -6813,6 +6813,7 @@ export default function App() {
   const [settProt, setSettProt] = useState(100);
   const [settTimezone, setSettTimezone] = useState(getTz());
   const [settCycle, setSettCycle] = useState(true);
+  const [settRegular, setSettRegular] = useState(null);
   const [settWeekStart, setSettWeekStart] = useState("sunday");
   const [unlockKey, setUnlockKey] = useState("");
   const [unlockMsg, setUnlockMsg] = useState("");
@@ -7230,6 +7231,15 @@ export default function App() {
     }
     try{
       await supa("POST","profiles",{uid:UID,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart},"on_conflict=uid");
+      // Regularity lives on the cycle row, not the profile, so it saves separately.
+      if(settRegular !== (cycleLog?.cycle_meta?.self_regular ?? null)){
+        const meta={...(cycleLog?.cycle_meta||{})};
+        if(settRegular===null) delete meta.self_regular; else meta.self_regular=settRegular;
+        const nextLog={...(cycleLog||{}), cycle_meta:meta};
+        setCycleLog(nextLog);
+        try{ await supa("POST","cycle_logs",{uid:UID,cycle_meta:meta},"on_conflict=uid"); }
+        catch(e){ console.log("Regularity save failed:", e.message); }
+      }
       setProfileData(p=>({...p,timezone:settTimezone,cycle_tracking:settCycle,week_start:settWeekStart}));
       setActiveTz(settTimezone);
       setActiveWeekStart(settWeekStart);
@@ -7386,7 +7396,7 @@ export default function App() {
           <button title="Profile" onClick={()=>setShowProfile(true)} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
             <Icon name="profile" size={17}/>
           </button>
-          <button title="Settings" onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setShowSett(true);}} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
+          <button title="Settings" onClick={()=>{setSettTimezone(profileData?.timezone||getTz());setSettCycle(profileData?.cycle_tracking!==false);setSettWeekStart(profileData?.week_start||"sunday");setSettRegular(cycleLog?.cycle_meta?.self_regular??null);setShowSett(true);}} style={{width:38,height:38,borderRadius:"50%",background:C.sf,border:`1px solid rgba(0,0,0,.06)`,boxShadow:"0 1px 3px rgba(26,25,23,.06)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.t2}}>
             <Icon name="settings" size={17}/>
           </button>
         </div>
@@ -7523,6 +7533,21 @@ export default function App() {
                   <div style={{fontSize:11,color:C.t3,lineHeight:1.5,maxWidth:240}}>When off, no phase is calculated anywhere — nothing cycle-related reaches your coach, readiness, or patterns. Your logged dates are kept.</div>
                 </div>
                 <button onClick={()=>setSettCycle(v=>!v)} style={{...s.btn(settCycle?"p":"s"),...s.btnSm}}>{settCycle?"On":"Off"}</button>
+              </div>
+            )}
+            {profileData?.gender==="female"&&settCycle&&(
+              <div style={{marginBottom:16,paddingTop:14,borderTop:`1px solid ${C.bd}`}}>
+                <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>Are your cycles fairly regular?</div>
+                <div style={{fontSize:11,color:C.t3,lineHeight:1.5,marginBottom:9}}>
+                  This only changes how confidently the app talks about timing. Either answer is completely normal, and you can change it whenever it stops being true.
+                </div>
+                <div style={{display:"flex",gap:7}}>
+                  <button onClick={()=>setSettRegular(true)} style={{...s.btn(settRegular===true?"p":"s"),...s.btnSm}}>Fairly regular</button>
+                  <button onClick={()=>setSettRegular(false)} style={{...s.btn(settRegular===false?"p":"s"),...s.btnSm}}>They vary a lot</button>
+                  {settRegular!==undefined&&settRegular!==null&&(
+                    <button onClick={()=>setSettRegular(null)} style={{background:"none",border:"none",color:C.t3,fontSize:11,cursor:"pointer",textDecoration:"underline"}}>clear</button>
+                  )}
+                </div>
               </div>
             )}
             <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
